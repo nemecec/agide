@@ -1,0 +1,153 @@
+{
+ "name": "emdash",
+ "license": "Apache-2.0 (LICENSE.md, \"Copyright 2026 General Action, Inc.\", unmodified text). No other license files, no ee or enterprise folder, no CLA text found. README claim matches the file. Private fork allowed. Trade names are excluded by section 6.",
+ "summary": "Emdash is an Electron app (main process, React and MobX renderer, many Wire-protocol worker processes) with SQLite state through drizzle and a separate mementos.db for UI state. The default Claude path is the interactive claude CLI in a node-pty terminal. It passes no -p, stream-json, --bare, --mcp-config or --settings flags, so it does not depend on claude -p. Status tracking uses lifecycle hooks that the app writes into the real ~/.claude/settings.json (or CLAUDE_CONFIG_DIR) before each session, and the file is rewritten wholesale. An optional chat transport goes through an ACP adapter built on the Claude Agent SDK. The usage-limit probe also calls the Agent SDK directly, which conflicts with decision 0001 and is removable. The sidebar is a flat, virtualized repository, task, session list with dnd-kit reordering inside one level and a versioned memento for persistence. Folders need a new layer on that store. The app hosts no MCP server; it only manages MCP config for agents. A typed command catalog, an openFile entry point and wire contracts make an app-hosted MCP bridge feasible. Jira intake is REST with an API token or OAuth token, with no path to the claude.ai connector, so the practical route is a prompt that tells Claude to read the ticket. GitHub PR checkout planning, including forks, is solid; PR URL paste is missing. Monaco with host LSP covers TypeScript and Python. Markdown has preview and source only, with no document model. Image annotation is absent. Telemetry is PostHog with a build-time key from CI secrets, so a local fork build sends nothing. A packaged fork with unchanged publish config checks the vendor's update feed at releases.emdash.sh, which must be changed. Upstream is very active, one author writes most commits, and no commits appeared after 2026-11-10. Nothing was run; the ACP adapter source and connector availability in PTY sessions are unverified.",
+ "findings": [
+  {
+   "topic": "Launch path",
+   "finding": "Default conversation type is pty: interactive claude in node-pty with --session-id, --resume, --model, optional --dangerously-skip-permissions and a positional initial prompt. Repo contains no -p, --print, stream-json, --bare, --mcp-config, --settings or --setting-sources.",
+   "evidence": "packages/plugins/src/agents/impl/claude/index.ts; packages/core/src/runtimes/tui-agents/node/runtime/runtime.ts spawnInto; apps/emdash-desktop/src/core/features/conversations/contributions/settings.ts (defaults 'pty'); grep over apps, packages, agents, docs",
+   "confidence": "high"
+  },
+  {
+   "topic": "Agent SDK use",
+   "finding": "Optional ACP transport runs @agentclientprotocol/claude-agent-acp (Agent SDK based) with CLAUDE_CODE_EXECUTABLE set to the host claude. The usage probe calls Agent SDK query() directly with settingSources ['user'], disableAllHooks, strictMcpConfig. Both conflict with decision 0001 and are removable.",
+   "evidence": "impl/claude/index.ts acp.buildSpawn; impl/claude/usage.ts; packages/plugins/package.json (claude-agent-sdk 0.3.280)",
+   "confidence": "high"
+  },
+  {
+   "topic": "Hooks and real ~/.claude",
+   "finding": "Before every PTY spawn the app writes SessionStart, UserPromptSubmit, Notification and Stop hook entries into $CLAUDE_CONFIG_DIR/settings.json or ~/.claude/settings.json, rewriting the whole JSON. Entries are inert outside Emdash sessions. With auto-approve or autoTrustWorktrees it also writes trust flags into ~/.claude.json. Setting CLAUDE_CONFIG_DIR in provider env redirects the hook write (untested).",
+   "evidence": "impl/claude/hooks.ts; packages/core/src/services/agent-plugins/node/hook-installer.ts; helpers/hook-config.ts buildNestedJsonHookConfig; impl/claude/trust.ts; tui-conversation-provider.ts",
+   "confidence": "high"
+  },
+  {
+   "topic": "Sidebar and persistence",
+   "finding": "Sidebar rows are a flat union of project and task rows in a virtualized dnd-kit list. Reordering works for projects and for tasks inside one project. State persists in the workbench.sidebar memento (mementos.db, versioned zod schema). Tasks require a projectId, so folders must be a virtual layer across projects.",
+   "evidence": "apps/emdash-desktop/src/core/features/workbench/browser/sidebar/sidebar-store.ts and sidebar-virtual-list.tsx; workbench/contributions/mementos.ts; core/services/app-db/node/schema.ts",
+   "confidence": "high"
+  },
+  {
+   "topic": "MCP",
+   "finding": "No MCP server is hosted by the app and no MCP server SDK is a dependency. The app manages MCP entries in agent config files (Claude: ~/.claude.json global) and catalogs from the public registry. Extension points for a bridge: defineCommand catalog with zod inputs, openFile, wire contracts, ACP mcpServers injection. No per-session MCP delivery exists for PTY sessions.",
+   "evidence": "apps/emdash-desktop/src/core/features/mcp/; core/features/catalog/node/catalog-service.ts; core/primitives/commands/api/; core/features/workbench/api/browser/open-file.ts; packages/core/src/runtimes/acp/node/runtime/mcp-servers.ts",
+   "confidence": "high"
+  },
+  {
+   "topic": "Jira, Linear, GitHub intake",
+   "finding": "Jira uses the jira.js REST client with email plus API token or OAuth bearer token. Linear uses @linear/sdk. GitHub uses Octokit with OAuth, device flow using the vendor's OAuth client id, or import of the gh login. The issues plugin interface has no path to a CLI or connector. Task start from a Jira key through the Atlassian connector would be a prompt instruction.",
+   "evidence": "packages/plugins/src/integrations/impl/jira/index.ts and client.ts; packages/plugins/src/issues/impl/jira/index.ts; packages/plugins/src/integrations/impl/github/index.ts; issues/capabilities/issues.ts",
+   "confidence": "high"
+  },
+  {
+   "topic": "Telemetry",
+   "finding": "PostHog telemetry is enabled only when a key and host are present; both come from CI secrets at release build time. A local fork build sends nothing. Opt-out in Settings or TELEMETRY_ENABLED=false.",
+   "evidence": "apps/emdash-desktop/src/main/lib/telemetry.ts isEnabled; .github/actions/setup-build/action.yml lines 78-79; README Privacy section",
+   "confidence": "high"
+  },
+  {
+   "topic": "Auto-update",
+   "finding": "electron-updater, autoDownload false, check 30 s after start then hourly, skipped in dev builds. Publish targets are GitHub generalaction/emdash and https://releases.emdash.sh. A packaged fork with unchanged config would look at the vendor feed.",
+   "evidence": "apps/emdash-desktop/src/main/host/updates/update-service.ts; electron-builder.config.ts; core/primitives/app-identity/api/app-identity.ts",
+   "confidence": "high"
+  },
+  {
+   "topic": "Cloud dependency",
+   "finding": "Optional Emdash account at auth.emdash.sh acts as an OAuth broker; token forms and gh import exist for GitHub and Jira. Update feed and SSH workspace-server artifacts come from releases.emdash.sh. Local projects, worktrees, sessions, MCP and skill catalogs (public registries), LSP and diff work without the vendor.",
+   "evidence": "core/features/account/node/config.ts; core/services/hosts/node/settings.ts; core/features/catalog/node/catalog-service.ts",
+   "confidence": "medium"
+  },
+  {
+   "topic": "Code browsing and documents",
+   "finding": "Monaco editor with host LSP worker: hover, definition, type definition, references, diagnostics; TypeScript and Python bundled; completion, formatting and workspace edits via LSP not implemented. Markdown has preview plus source toggle and a Monaco diff view; no editable document model. No image annotation code.",
+   "evidence": "packages/core/src/runtimes/lsp/README.md; apps/emdash-desktop/src/core/features/editor/browser/renderers/markdown-renderer.tsx; grep for excalidraw, tldraw, annotat",
+   "confidence": "medium"
+  },
+  {
+   "topic": "Upstream health",
+   "finding": "Very active with one author producing most commits in the window, no commits on main after 2026-11-10, stable releases about weekly to biweekly, fast PR merges by members, maintainer replies on issues not evident in a small sample. Numbers are in the notes table.",
+   "evidence": "gh api read-only calls dated 2026-11-17, notes/triage-emdash.md measurements table",
+   "confidence": "medium"
+  }
+ ],
+ "requirement_scores": [
+  {
+   "req": "R1",
+   "score": 3,
+   "effort_days": 0,
+   "rationale": "Electron desktop app with macOS builds; not run here."
+  },
+  {
+   "req": "R2",
+   "score": 2,
+   "effort_days": 6,
+   "rationale": "Images and file mentions in the ACP composer, file drops in the terminal, diff line comments exist. Selection and agent-message attach are absent and the default PTY transport has no composer."
+  },
+  {
+   "req": "R3",
+   "score": 1,
+   "effort_days": 8,
+   "rationale": "No annotation code. A contributed tab kind can host a drawing tool and PNG export, then attach through the R2 path."
+  },
+  {
+   "req": "R4",
+   "score": 2,
+   "effort_days": 2,
+   "rationale": "Unmodified interactive claude under the user's login works through the PTY default. Codex and Kimi are supported. Needs removal of the Agent SDK usage probe and SDK-based ACP use for Claude, plus a Gemini provider plugin."
+  },
+  {
+   "req": "R5",
+   "score": 3,
+   "effort_days": 0,
+   "rationale": "PR list, fork-aware checkout plans, diff with PR comments, checks, create and merge are present in code; not run."
+  },
+  {
+   "req": "R6",
+   "score": 2,
+   "effort_days": 11,
+   "rationale": "Flat repository, task, session tree with reorder inside a level. Folders and nesting need about 7 days; PR URL and Jira key start need about 4 days. Plain prompt start works."
+  },
+  {
+   "req": "R7",
+   "score": 3,
+   "effort_days": 0,
+   "rationale": "PTY transport runs the real claude with the user's ~/.claude, so skills, plugins and connectors are the CLI's. Not tested; ACP mode and connector availability in PTY sessions are unverified."
+  },
+  {
+   "req": "R8",
+   "score": 2,
+   "effort_days": 12,
+   "rationale": "No MCP server exists. A typed command catalog, openFile entry and wire contracts make an app-hosted MCP bridge feasible; PTY sessions lack per-session MCP delivery."
+  },
+  {
+   "req": "R9",
+   "score": 2,
+   "effort_days": 8,
+   "rationale": "Monaco with host LSP for navigation and diagnostics, TypeScript and Python bundled. LSP completion, rename and workspace edits missing; Kotlin not listed. Serena and ast-grep would be added as MCP servers."
+  },
+  {
+   "req": "R10",
+   "score": 3,
+   "effort_days": 0,
+   "rationale": "Terminals runtime, scripts runtime and PTY panes run command-line build tools."
+  },
+  {
+   "req": "R11",
+   "score": 2,
+   "effort_days": 10,
+   "rationale": "Markdown preview and source toggle, Monaco editor and diff, HTML through browser pane and preview servers. No editable document model; mdast is used only for chat transcripts."
+  }
+ ],
+ "unverified": [
+  "Nothing was installed, built or run: build time, start time, memory and all runtime behavior are unmeasured.",
+  "Claude ACP adapter source (setting sources, connector loading, --bare exposure, how it starts the CLI) was not read; its raw source URL returned 404 and only the GitHub page text and lock file versions were seen.",
+  "Whether claude.ai connectors and plugins load inside PTY sessions started by the app is expected from running the real CLI but not tested.",
+  "Whether CLAUDE_CONFIG_DIR in provider env cleanly isolates the hook write from the real ~/.claude was not tested.",
+  "emdash.sh docs (providers, telemetry) were not read; claims come from README and code.",
+  "Merge-conflict count against current upstream was not measured.",
+  "Issue response time is a small sample; maintainer replies may exist outside it.",
+  "Token-form availability for every issue provider other than Jira and GitHub was not checked, so the account being optional is shown only for those.",
+  "Callers of deleteHooks (user-initiated hook removal) were not searched."
+ ],
+ "notes_file": "notes/triage-emdash.md"
+}

@@ -1,0 +1,164 @@
+{
+ "name": "VS Code extension",
+ "summary": "A VS Code extension hosts code browsing, diff, Markdown preview, terminals, tasks and the GitHub Pull Requests UI with stock parts, and reuse of connectors, skills and plugins comes with an unmodified claude CLI started in an integrated terminal. The task tree fits a TreeDataProvider with TreeDragAndDropController (nested folders, reparenting, persistence all extension-owned), but handleDrop carries no insertion index, sessions live in terminals or editor tabs outside the tree, and the API offers no layout or window-chrome control, so a task-first layout is a convention. The Anthropic extension is closed source and documents no API for other extensions; it launches its bundled CLI (reports indicate stream-json via the SDK query function) and exposes the ide MCP server with getDiagnostics and executeCode as model-visible tools, so a task-tree extension starts its own claude in a terminal that auto-connects to that ide server. The vscode.lm MCP provider feeds VS Code's own chat and Copilot sessions, not the claude CLI; agent-drives-UI needs an extension-hosted localhost HTTP MCP server registered through --mcp-config or claude mcp add, with tool handlers calling commands.executeCommand and TreeView.reveal (prior art: tjx666/vscode-mcp execute_command). VS Code's own 2026 Agents window and Agent Host run Claude through the Agent SDK billed via Copilot or an API key, expose no extension API for views or agent types, and are a neighbouring product; no restriction on extensions starting claude was found. Gaps are image annotation (Excalidraw webview to build), a Markdown document model and HTML preview (webview work), and reading terminal output (proposed API only; use hooks or transcripts). All estimates come from reading docs and samples; nothing was run.",
+ "findings": [
+  {
+   "topic": "Tree view drag and drop",
+   "finding": "TreeDataProvider with TreeDragAndDropController supports nested nodes, multi-select, reparenting and drag out as text/uri-list. The sample tree is in-memory only. handleDrop receives target and DataTransfer but no insertion index, so sibling ordering needs a convention. Persistence and folder model belong to the extension (globalState, workspaceState or a JSON file). TreeItem.id keeps selection and expansion state. TreeView.reveal needs getParent.",
+   "evidence": "candidates/vscode-extension-samples/tree-view-sample/src/testViewDragAndDrop.ts; unpkg @types/vscode 1.100 TreeDragAndDropController, TreeItem.id, TreeView.reveal; https://code.visualstudio.com/api/extension-guides/tree-view",
+   "confidence": "high"
+  },
+  {
+   "topic": "Tree placement and layout",
+   "finding": "Official contribution-points reference lists activitybar and panel for viewsContainers; UX guidelines say extensions cannot contribute to the Secondary Side Bar by default (users can drag views there). The Anthropic extension manifest 2.1.326 declares a secondarySidebar view container behind a when clause, so current builds accept it. Minimum version and official docs for it not found. No API for layout or window chrome was found in the pages read.",
+   "evidence": "https://code.visualstudio.com/api/references/contribution-points; https://code.visualstudio.com/api/ux-guidelines/sidebars; https://openvsx.eclipsecontent.org/Anthropic/claude-code/darwin-arm64/2.1.326/package.json",
+   "confidence": "medium"
+  },
+  {
+   "topic": "How the Claude Code extension launches claude",
+   "finding": "Docs say the extension bundles its own CLI for the chat panel, with settings useTerminal, claudeProcessWrapper and environmentVariables. Transport is not documented. Issue logs show 'Spawning Claude with SDK query function' and reports quote --output-format stream-json --input-format stream-json against resources/native-binary/claude. Source is closed (All rights reserved), so argv is unverified.",
+   "evidence": "https://code.claude.com/docs/en/vs-code; https://github.com/anthropics/claude-code/issues/30417; https://open-vsx.org/api/Anthropic/claude-code/latest",
+   "confidence": "medium"
+  },
+  {
+   "topic": "ide MCP server and context attach",
+   "finding": "Extension runs a local ws MCP server named ide on 127.0.0.1 (random port, lock file ~/.claude/ide/<port>.lock, token header). Model-visible tools are mcp__ide__getDiagnostics and mcp__ide__executeCode; the chat panel adds mcp__claude-vscode__getDiagnostics from v2.1.285. Context attach: automatic selection and open file, Alt+K @file#lines, @-mentions including @terminal:name, pasted images, Shift-drag files. A claude process in VS Code's integrated terminal connects to the ide server automatically.",
+   "evidence": "https://code.claude.com/docs/en/ide-integrations; https://code.claude.com/docs/en/vs-code; https://raw.githubusercontent.com/coder/claudecode.nvim/main/PROTOCOL.md (reverse-engineered notifications selection_changed, at_mentioned)",
+   "confidence": "high"
+  },
+  {
+   "topic": "Hooking a second extension into the Anthropic extension",
+   "finding": "No documented API. Manifest has no languageModelTools, chatParticipants or extensionDependencies. Commands such as claude-vscode.editor.open (prompt pre-fill only), sidebar.open, insertAtMention, terminal.open can be executed but issue reports show failures (openLast and primaryEditor.open not found, insertAtMention steals focus). A task-tree extension must start its own claude in a terminal it creates; the Activity Bar sessions list is not extensible.",
+   "evidence": "Open VSX package.json 2.1.326; claudeissues search results for claude-vscode.* commands; https://code.claude.com/docs/en/vs-code (URI handler vscode://anthropic.claude-code/open pre-fills only)",
+   "confidence": "medium"
+  },
+  {
+   "topic": "MCP registration and UI driving",
+   "finding": "vscode.lm.registerMcpServerDefinitionProvider serves VS Code's own chat and Copilot sessions and the extension is not available in a standalone runtime; nothing says the claude CLI reads it. For claude, host a localhost HTTP MCP server in the extension host and register via claude mcp add --transport http or --mcp-config with type http and an Authorization header (per-session token under a custom env var name, since ANTHROPIC_* names expand to empty). Tool handlers can call vscode.commands.executeCommand and the extension's own TreeView.reveal. Prior art: tjx666/vscode-mcp has execute_command, open_files, rename_symbol, get_references (Anti 996 License).",
+   "evidence": "https://code.visualstudio.com/api/extension-guides/ai/mcp; candidates/vscode-extension-samples/mcp-extension-sample/src/extension.ts; https://code.claude.com/docs/en/mcp; https://github.com/tjx666/vscode-mcp; vscode-api commands.executeCommand doc",
+   "confidence": "medium"
+  },
+  {
+   "topic": "Webviews, custom editors, Markdown, HTML",
+   "finding": "Webviews need enableScripts and CSP, load local files via asWebviewUri, message via postMessage, workers only from data/blob URIs, retainContextWhenHidden is memory heavy. CustomTextEditorProvider uses TextDocument with VS Code handling save, backup and hot exit; CustomEditorProvider owns its document model. No Markdown AST API exists; markdown-it plugin hook only for the preview. Built-in preview, outline, image drop, opt-in rendered diff exist. Excalidraw custom editor exists for .excalidraw files but arbitrary-image annotation needs a new editor. No built-in local HTML preview found.",
+   "evidence": "https://code.visualstudio.com/api/extension-guides/webview; .../custom-editors; .../markdown-extension; https://code.visualstudio.com/docs/languages/markdown; custom-editor-sample/src/catScratchEditor.ts and pawDrawEditor.ts; https://github.com/excalidraw/excalidraw-vscode",
+   "confidence": "medium"
+  },
+  {
+   "topic": "LSP and AST access",
+   "finding": "Built-in language features are reachable through commands vscode.executeDefinitionProvider, executeReferenceProvider, executeDocumentSymbolProvider, executeWorkspaceSymbolProvider, executeHoverProvider, executeImplementationProvider, executeCodeActionProvider, executeDocumentRenameProvider (returns WorkspaceEdit), and call hierarchy commands. Anthropic's model-visible IDE tools cover diagnostics and notebooks only. Claude Code loads LSP servers from plugins (lspServers). Serena runs as an MCP server with its own language servers. Community VS Code extensions already bridge these commands to MCP. Kotlin server support not checked.",
+   "evidence": "https://code.visualstudio.com/api/references/commands; https://code.claude.com/docs/en/plugins-reference; search results for Serena and VS Code LSP MCP bridges",
+   "confidence": "medium"
+  },
+  {
+   "topic": "Jira and GitHub PRs",
+   "finding": "claude.ai connectors (Atlassian) load in terminal and VS Code claude sessions when the login is a claude.ai subscription; they do not load with ANTHROPIC_API_KEY, apiKeyHelper, third-party providers or setup-token credentials, and claude -p cannot run connector OAuth. The GitHub Pull Requests extension offers PR checkout and review UI; its API file declares a Git provider API, getRepositoryDescription with optional PR fields, and reviewer comment providers, with no PR query API found. Agents read PRs through gh or a GitHub MCP server.",
+   "evidence": "https://code.claude.com/docs/en/mcp (Use MCP servers from claude.ai); https://raw.githubusercontent.com/microsoft/vscode-pull-request-github/main/src/api/api.d.ts; https://github.com/microsoft/vscode-pull-request-github",
+   "confidence": "medium"
+  },
+  {
+   "topic": "Terminal limits",
+   "finding": "createTerminal, sendText and Terminal.shellIntegration.executeCommand are usable without API proposals. window.onDidWriteTerminalData is behind the terminalDataWriteEvent proposal, which runs only in Insiders or with --enable-proposed-api and cannot be published. Reading claude TUI output in a stock terminal is therefore unavailable in stable; task state would come from Claude Code hooks or transcript files (design not tested). An extension-owned Pseudoterminal exists (extension-terminal-sample); node-pty bundling not checked.",
+   "evidence": "candidates/vscode-extension-samples/terminal-sample/package.json and src/extension.ts; shell-integration-sample/src/extension.ts; https://code.visualstudio.com/api/advanced-topics/using-proposed-api",
+   "confidence": "medium"
+  },
+  {
+   "topic": "VS Code Agents window and agent host in 2026",
+   "finding": "The Agents window is a separate window (sessions list, session grid, Secondary Side Bar with Files, Changes, Search, Browser). No extension API to add views or agent types is described. VS Code's Claude harness runs on the Claude Agent SDK via the Agent Host, billed through Copilot or a bring-your-own key, not the user's subscription through the unmodified CLI. Claude and Codex harnesses are disabled under enterprise-managed settings. Agent Host Protocol is open with client libraries in several languages. No restriction on extensions that start claude was found; Anthropic's legal page permits an end user to sign in to the unmodified binary with their own subscription.",
+   "evidence": "https://code.visualstudio.com/docs/agents/run/agents-window.md; https://code.visualstudio.com/docs/copilot/agents/third-party-agents; https://code.visualstudio.com/blogs/2026/08/26/agent-host-architecture; https://code.claude.com/docs/en/legal-and-compliance",
+   "confidence": "medium"
+  },
+  {
+   "topic": "Other agents (Codex, Gemini, Kimi)",
+   "finding": "Any agent CLI runs in an integrated terminal. VS Code has no native ACP support per search results; a community ACP client extension exists with Gemini and Codex presets. No Kimi or ACP adapter for Kimi was found. VS Code's own Codex route is experimental and Codex is not listed by default.",
+   "evidence": "https://github.com/formulahendry/vscode-acp (via search results); https://code.visualstudio.com/docs/copilot/agents/third-party-agents",
+   "confidence": "low"
+  }
+ ],
+ "requirement_scores": [
+  {
+   "req": "R1 desktop GUI",
+   "score": 3,
+   "effort_days": 0,
+   "rationale": "VS Code is the desktop GUI; layout limits are scored under R6."
+  },
+  {
+   "req": "R2 attach context",
+   "score": 2,
+   "effort_days": 4,
+   "rationale": "Anthropic extension attaches files, selections, images and terminal output, but a tree-owned claude terminal needs its own attach path (sendText of @paths, files for agent output, optionally own ide-protocol notifications)."
+  },
+  {
+   "req": "R3 image annotation",
+   "score": 2,
+   "effort_days": 5,
+   "rationale": "Webview with Excalidraw and PNG export via blob to workspace.fs; existing Excalidraw editor does not annotate arbitrary images."
+  },
+  {
+   "req": "R4 agents",
+   "score": 3,
+   "effort_days": 0,
+   "rationale": "Unmodified claude and the other CLIs run in terminals under the user's own login; Kimi ACP adapter not found; session tracking is under R6."
+  },
+  {
+   "req": "R5 GitHub PR",
+   "score": 2,
+   "effort_days": 3,
+   "rationale": "PR extension gives checkout and review UI; no PR data API found, so task-from-PR needs gh and worktree glue."
+  },
+  {
+   "req": "R6 task tree",
+   "score": 2,
+   "effort_days": 10,
+   "rationale": "Tree with drag and drop and nested folders is documented and sampled; persistence, sibling order, terminal mapping, resume, hook-based status and the three start paths are new code; no task-first layout enforcement."
+  },
+  {
+   "req": "R7 connectors, skills, plugins",
+   "score": 3,
+   "effort_days": 0,
+   "rationale": "Unmodified CLI in a terminal gets them; requires subscription login for connectors."
+  },
+  {
+   "req": "R8 UI parity via MCP",
+   "score": 2,
+   "effort_days": 6,
+   "rationale": "Extension-hosted localhost HTTP MCP with token and Origin check; handlers call executeCommand and TreeView.reveal; vscode.lm provider does not serve claude."
+  },
+  {
+   "req": "R9 code browsing and agent AST",
+   "score": 2,
+   "effort_days": 3,
+   "rationale": "Browsing is built in; agent access needs a bridge over vscode.execute*Provider commands or Serena and ast-grep MCP servers; Kotlin server unchecked."
+  },
+  {
+   "req": "R10 build tools via CLI (weight 1)",
+   "score": 3,
+   "effort_days": 0,
+   "rationale": "Integrated terminal and tasks."
+  },
+  {
+   "req": "R11 Markdown and HTML",
+   "score": 2,
+   "effort_days": 8,
+   "rationale": "Preview, editing and opt-in rendered diff exist; document model, WYSIWYG editor and HTML preview are webview work; HTML preview confidence low."
+  }
+ ],
+ "unverified": [
+  "No code was built or run; sample behaviour comes from reading source",
+  "Dragging files from Finder into a tree view, and the exact TreeViewOptions text (typings fetch did not reach that block)",
+  "Inline rename in a tree row",
+  "Minimum VS Code version and official documentation for secondarySidebar view containers",
+  "Exact argv of the Anthropic extension's claude spawn (closed source)",
+  "Whether the Anthropic extension returns exports from activate",
+  "createTerminal editor-area location option, node-pty bundling in the extension host, and whether --strict-mcp-config excludes claude.ai connectors",
+  "Whether the GitHub Pull Requests extension contributes language model tools or other PR query API",
+  "Local HTML preview options (Live Preview extension not checked)",
+  "Kimi CLI and any ACP adapter for Kimi; Serena repository details; Kotlin language server support in VS Code",
+  "VS Code 1.128 to 1.133 release notes read only via search summaries",
+  "Telemetry and auto-update behaviour of VS Code and the Anthropic extension",
+  "Memory and start time of a webview-heavy extension",
+  "Claude Code hooks driving tree status (design only, not tested)"
+ ],
+ "notes_file": "notes/triage-vscode.md",
+ "license": "vscode-extension-samples: MIT. A custom extension would be our own code. Anthropic Claude Code extension: All rights reserved (Anthropic PBC), used unmodified. tjx666/vscode-mcp: Anti 996 License (prior art only)."
+}

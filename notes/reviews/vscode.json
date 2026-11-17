@@ -1,0 +1,61 @@
+{
+ "verdict": "accept_with_corrections",
+ "corrections": [
+  {
+   "claim": "All estimates come from reading docs and samples; nothing was run. Hook-driven tree status is design only, not tested.",
+   "problem": "The spike already holds run evidence for the two main design assumptions of the extension option, and the report ignores it. An interactive claude in a PTY with a per-session --mcp-config HTTP server called the app tools, and SessionStart, UserPromptSubmit, PreToolUse/PostToolUse and Stop hooks fired with session_id, transcript_path and last_assistant_message. The extension design (claude in a terminal plus hooks plus a localhost HTTP MCP server) is the same launch path.",
+   "evidence": "probes/out/p1b_report_basic.json and p1b_report_mcp_perm_hook_perm_screen.json (hook_sequence includes PreToolUse:mcp__app__ui_create_folder and Stop). I re-ran probes/p3_mcp.mjs on claude 2.1.326 from a temp copy with an empty work dir (haiku, budget 0.25, --setting-sources user, --strict-mcp-config): the app server connected, the tools ran, a missing type was skipped, a bad token returned failed, and the cost was about 0.005 USD."
+  },
+  {
+   "claim": "R2: a tree-owned claude terminal needs its own attach path for files and selections",
+   "problem": "This undercounts what works today. The Claude Code docs say a claude started in VS Code's integrated terminal connects to the ide server on its own and sends the current editor selection and the active file path with each prompt. The Attach Selection and Attach Open File settings also apply there. What is still missing is image attach, agent-output attach and @-insert while the terminal has focus, because insertAtMention needs the editor to have focus. R2 stays at 2, but effort is closer to 3 days than 4.",
+   "evidence": "https://code.claude.com/docs/en/ide-integrations: 'While connected, the CLI includes your current editor selection and the path of the active file as context on each prompt you send'; 'Both settings also apply when you run claude in VS Code's integrated terminal.'"
+  },
+  {
+   "claim": "Issue reports show failures: openLast and primaryEditor.open not found",
+   "problem": "This may be stale. The 2.1.326 manifest declares both claude-vscode.editor.openLast and claude-vscode.primaryEditor.open. The manifest also adds session-tab commands (renameSessionTab, addSessionTabToGroup, markSessionUnread, reopenClosedSession), and the report does not mention them. They are still an undocumented contract.",
+   "evidence": "https://openvsx.eclipsecontent.org/Anthropic/claude-code/darwin-arm64/2.1.326/package.json commands list"
+  },
+  {
+   "claim": "Unverified: createTerminal editor-area location option; sessions live in terminals outside the tree",
+   "problem": "This is answerable from the typings the report already cites. TerminalOptions.location accepts TerminalLocation.Editor, TerminalEditorLocationOptions or TerminalSplitLocationOptions in stable 1.100, so a session can open as an editor tab next to the tree. The point that the tree and the session are separate surfaces still holds.",
+   "evidence": "unpkg @types/vscode@1.100.0 index.d.ts: enum TerminalLocation { Panel = 1, Editor = 2 } and line 12466 'location?: TerminalLocation | TerminalEditorLocationOptions | TerminalSplitLocationOptions'"
+  },
+  {
+   "claim": "R9: Kotlin server support not checked",
+   "problem": "Agent-side LSP is partly settled on this machine. The user's enabled plugins kotlin-lsp, jdtls-lsp, rust-analyzer-lsp and clangd-lsp load in claude's init with or without --strict-mcp-config. This holds for any base. The open items are editor-side Kotlin support in VS Code and AST refactor (rename) tools for the agent.",
+   "evidence": "probes/out/p2_report_listing.json plugins_in_init and enabled_plugins_missing_in_init: []"
+  },
+  {
+   "claim": "R7 score 3: unmodified CLI in a terminal gets connectors, skills and plugins",
+   "problem": "Skills and plugins are verified by probe, in -p mode only. For claude.ai connectors the evidence is docs only: no probe output in the spike shows a claude.ai connector loading in a terminal session. The P2 field strict_excludes_claude_ai_connectors=true says nothing, because the run without strict also listed no claude.ai servers. The report also misses a conflict. The plan's safety rule requires --strict-mcp-config when claude starts in a PR checkout, which is the task-from-PR path. If strict drops connectors, a PR task loses the Atlassian connector. The score of 3 can stand, but at medium confidence, with the strict/connector interaction marked as an open risk for R5 and R7.",
+   "evidence": "probes/out/p2_report_listing.json (without_strict.claude_ai_tools: [], with_strict.mcp_servers: []); probes/p2_reuse.mjs line 30, where the check passes whenever the strict list is empty; docs/spike-plan.md safety rules"
+  }
+ ],
+ "additions": [
+  "The report gives no weighted score under the 0001 rule (must-haves weigh 3, R9 and R11 weigh 2, R3 and extra models weigh 1), so the base cannot be compared with greenfield as written. 0001 weighs R4 Claude (3) and extra models (1) separately. The report scores R4 as one item and should split it: Claude 3, extra models 2 or lower, because Kimi has no adapter or CLI check and the ACP evidence is low confidence.",
+  "The 39-day sum in the notes double-counts shared work: the hook/status plumbing in R6 and R2, and the localhost MCP server used by both R8 and R9. The notes say so, but the report gives no deduplicated figure for the 70% comparison.",
+  "The VS Code Claude harness facts check out. The Agent SDK is integrated into VS Code, billing goes through Copilot or BYOK with ANTHROPIC_API_KEY, Codex is not listed by default, and both harnesses are disabled under enterprise-managed settings (code.visualstudio.com/docs/copilot/agents/third-party-agents).",
+  "The manifest claims check out for 2.1.326: engines ^1.94.0; a secondarySidebar container claude-sidebar-secondary guarded by !claude-code:doesNotSupportSecondarySidebar; no languageModelTools, chatParticipants or extensionDependencies.",
+  "The sample claims check out: handleDrop(target, dataTransfer, token) has no insertion index (typings line 12049 and the sample at line 58); onDidWriteTerminalData is behind enabledApiProposals in terminal-sample; shell-integration-sample calls shellIntegration.executeCommand; the MCP sample uses globalState and vscode.lm.registerMcpServerDefinitionProvider.",
+  "Missing risk: the Anthropic extension's ide auto-connect means every tree-owned claude in an integrated terminal also gets the Anthropic extension's selection context and diagnostics tools. The tool depends on a closed-source extension that changes often for part of R2. It should treat that path as optional and plan its own attach path.",
+  "Missing: telemetry and auto-update of VS Code and the Anthropic extension are listed as unverified, but the plan's Phase 1 sheet requires them for every candidate."
+ ],
+ "score_adjustments": [
+  "R2: keep 2. Lower effort_days from 4 to about 3, because selection and open-file context already reach a terminal claude through the ide bridge. The remaining work is image attach, agent-output attach and attach from the tree.",
+  "R4: split per 0001. Claude 3, effort 0. Extra models 2, effort about 2 (tree integration of the other CLIs; Kimi unchecked); low confidence.",
+  "R7: keep 3, but at medium confidence. Connector loading in a terminal session is docs only. The --strict-mcp-config and connector question is unresolved and touches the PR-checkout safety rule.",
+  "R8: keep 2 and 6 days. Raise confidence: the HTTP MCP path with type http and a bearer token works on 2.1.326 (P3 re-run) and in an interactive PTY (P1b).",
+  "R9: keep 2. Note that agent-side Kotlin/Java LSP plugins already load in claude. effort_days 3 is plausible.",
+  "R11: keep 2 with 8 days at low confidence. A WYSIWYG Markdown editor with a document model plus a sandboxed HTML preview in webviews is near the line between moderate work (2) and major work (1)."
+ ],
+ "not_checked": [
+  "Whether claude.ai connectors (Atlassian) load in an interactive claude in VS Code's integrated terminal, and whether --strict-mcp-config removes them. No probe in the spike shows either, and I did not run the connector probe.",
+  "The Agents window page, the Agent Host architecture blog post, and VS Code 1.128-1.133 release notes.",
+  "Issue 30417 and the stream-json argv reports for the extension's chat panel.",
+  "The tjx666/vscode-mcp license and tools, the Excalidraw extension, the vscode-acp extension, and Serena.",
+  "The GitHub Pull Requests extension api.d.ts contents.",
+  "The webview, custom-editor and Markdown extension guides. I accepted their summaries without re-reading them.",
+  "Whether the extension host can bind a localhost HTTP server without trouble (design inference only)."
+ ]
+}

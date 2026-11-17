@@ -1,0 +1,161 @@
+{
+ "name": "nimbalyst",
+ "license": "MIT (LICENSE, Nimbalyst Inc., 2024-2026). No CLA (DCO sign-off only). No ee/enterprise folder. Sync server is a separate, unlicensed-here project; Agent SDK dependency is under Anthropic Commercial terms.",
+ "summary": "Nimbalyst is an MIT-licensed Electron/React/Jotai monorepo that already contains much of the target shape: a persisted session tree with grouping containers and drag-and-drop with undo, an app-hosted loopback MCP server (bearer token, per-session URL, main-to-renderer bridge), GitHub PR screens built on gh, a Lexical Markdown editor with a tree-based diff and accept/reject, an embedded terminal, and an extension SDK (editors, panels, MCP tools, agent providers).\n\nClaude launch: the default provider uses the Agent SDK, which decision 0001 excludes. A second provider, claude-code-cli, runs the unmodified interactive claude in a PTY (never -p, so the --bare default does not apply). It passes --mcp-config via a temp file without --strict-mcp-config, a PreToolUse permission hook through --settings, and tracks status by polling the CLI's pid state file, not hooks. It is off by default. It builds transcripts through a local ANTHROPIC_BASE_URL proxy that sees the subscription token in flight, which conflicts with 0001's no-credentials rule.\n\nGaps: no Jira integration; no LSP or AST tooling (Monaco only); no tools to create a folder, move a session or open a file; containers must stay roots, so folders cannot nest; no Kimi provider; Gemini only through an Antigravity login; mockup annotation is ephemeral and mockup-only.\n\nFork cost signals: very high upstream commit rate, 88% from one author; SessionHistory.tsx is 3.7k lines with frequent churn; the database is mid-migration between PGLite and SQLite; a large account, sync and team surface is dead weight for a personal fork; telemetry is default-on PostHog; auto-update points at the vendor's GitHub releases.\n\nAll must-haves score at least 2. The estimates sum to roughly 41 working days, with R9 the largest. Nothing was built or run, so every estimate rests on reading code.",
+ "findings": [
+  {
+   "topic": "Claude launch path",
+   "finding": "Default Claude provider (claude-code) drives the Agent SDK (@anthropic-ai/claude-agent-sdk 0.3.321), which conflicts with decision 0001. Provider claude-code-cli launches the unmodified interactive claude in a node-pty/ghostty-web terminal, never with -p, so it does not depend on --bare behaviour. It is disabled by default.",
+   "evidence": "packages/runtime/src/ai/server/protocols/ClaudeSDKProtocol.ts; packages/electron/src/main/services/ai/ClaudeCliSessionLauncher.ts; claudeCliSpawnConfig.ts header 'never -p/--print'; shared/settings/keys.ts claude-code-cli enabled:false",
+   "confidence": "high"
+  },
+  {
+   "topic": "CLI flags, MCP and hooks",
+   "finding": "CLI path writes mcpServers to a temp --mcp-config file (type sse, http://127.0.0.1 URL with sessionId, Bearer header), omits --strict-mcp-config so claude.ai connectors stay visible (per code comment), registers one PreToolUse command hook via --settings for permission widgets, and tracks turn status by polling ~/.claude/sessions/{pid}.json, not hooks.",
+   "evidence": "claudeCliSpawnConfig.ts; claudeCliPermissionHookConfig.ts; claudeCliPidState.ts; McpConfigService.ts lines 140-166",
+   "confidence": "high"
+  },
+  {
+   "topic": "Subscription traffic proxy",
+   "finding": "CLI transcripts are built by an in-app loopback proxy set as ANTHROPIC_BASE_URL that tees request and SSE bodies. The OAuth token header passes through unchanged; the comment says the app never reads it. This needs a decision against 0001's no-claude.ai-credentials rule.",
+   "evidence": "claudeCliObservation/claudeApiProxy.ts header; claudeCliObservationSingleton.ts",
+   "confidence": "medium"
+  },
+  {
+   "topic": "Session tree and S1",
+   "finding": "Persisted session hierarchy (parent_session_id, any depth) and user-made workstream containers with drag-and-drop and undo exist. Containers must remain roots and are not draggable, so nested folders need changes in the hierarchy rules, drag hook, tree model and the 3.7k-line SessionHistory.tsx. No extension point for the Agent-mode sidebar; extension sidebar panels render only in Files mode at fixed width.",
+   "evidence": "main/services/sessionHierarchy.ts lines 80-82; renderer/components/AgenticCoding/useSessionTreeMove.ts; docs/SESSION_HIERARCHY.md; renderer/App.tsx extension-panel-sidebar",
+   "confidence": "medium"
+  },
+  {
+   "topic": "App-hosted MCP and S3",
+   "finding": "Local, no account, loopback bearer-token server in the Electron main process with per-endpoint tool subsets. spawn_session/create_session start tasks. No tool for creating a session folder, moving a session or opening a file; extension_test_open_file (dev server, test-labelled) is a template. /mcp has no Origin check beyond omitting CORS headers.",
+   "evidence": "main/mcp/httpServer.ts; mcpTopology.ts; metaAgentServer.ts; extensionDevServer.ts; mcpAuth.ts",
+   "confidence": "high"
+  },
+  {
+   "topic": "Jira and PR (S2)",
+   "finding": "No Jira integration; only a preset MCP entry for mcp-remote in settings. PR mode uses the gh CLI with a tracker overlay per PR and review sessions; canonicalPrUrl parses github.com PR URLs. A Jira key start can be a prompt that tells the agent to use the Atlassian connector, which depends on connector OAuth in the PTY session (untested).",
+   "evidence": "renderer/components/GlobalSettings/panels/MCPServersPanel.tsx line 390; main/services/GhApiService.ts; GithubPrOverlayService.ts",
+   "confidence": "medium"
+  },
+  {
+   "topic": "Markdown document model and diff",
+   "finding": "Lexical node tree is the document model, Markdown the file format. Diff is a tree diff over canonicalized Lexical nodes (thresholded order-preserving tree matching, similarity scoring) with word-level diffs inside matched nodes; not mdast and not a text diff. HTML pages use a sandboxed preview plus Monaco source with text-level diff.",
+   "evidence": "packages/runtime/src/editor/plugins/DiffPlugin/core/TreeMatcher.ts, canonicalTree.ts, ThresholdedOrderPreservingTree.ts; renderer/components/HtmlPage/HtmlPageEditor.tsx",
+   "confidence": "medium"
+  },
+  {
+   "topic": "Annotation",
+   "finding": "Mockup editor has a red-pen canvas over a .mockup.html iframe; strokes are ephemeral and used as an AI prompt affordance. It cannot annotate arbitrary images. Excalidraw extension has a PNG export wrapper and could host an annotate-image flow (image insertion not verified).",
+   "evidence": "packages/extensions/mockuplm/src/components/useMockupDrawing.ts header; excalidraw/src/components/ExcalidrawEditor.tsx exportToPngBlob",
+   "confidence": "medium"
+  },
+  {
+   "topic": "Telemetry and auto-update",
+   "finding": "PostHog analytics default on with opt-out in settings and NIMBALYST_DISABLE_ANALYTICS=1; renderer posthog-js has autocapture and session recording off. Docs claim an opt-out retention ping that the code read does not send. Auto-update uses electron-updater against the vendor's GitHub releases with autoDownload true.",
+   "evidence": "main/services/analytics/AnalyticsService.ts; main/utils/store.ts analyticsEnabled default; renderer/index.tsx; main/services/autoUpdater.ts GITHUB_UPDATE_PROVIDER; docs/ANALYTICS_GUIDE.md",
+   "confidence": "high"
+  },
+  {
+   "topic": "Upstream health",
+   "finding": "Very high commit activity over the last eight weeks, 88% from one author. Frequent releases, many marked prerelease. Many recent issues have no non-author comment on the thread in a small sample (internal tracker not visible). High churn on SessionHistory.tsx.",
+   "evidence": "gh api read-only calls on 2026-11-17; see measurements table in notes file",
+   "confidence": "medium"
+  },
+  {
+   "topic": "Cloud dependency",
+   "finding": "Account (Stytch), sync server wss://sync.nimbalyst.com, team collaboration, shared links, mobile sync, Cloudflare sandbox, extension registry and PostHog use vendor services. Local wiki, sessions, trackers, editors, MCP, PR mode and terminal work without an account per docs. Offline startup not run.",
+   "evidence": "main/services/SyncManager.ts; StytchAuthService.ts; docs/IDENTITY_AUTH_AND_ROOMS.md; docs/FEATURE_INVENTORY.md",
+   "confidence": "medium"
+  },
+  {
+   "topic": "Other agents",
+   "finding": "Codex (SDK, app-server, ACP), Copilot, Cursor, Grok and OpenCode providers exist; Gemini only through an Antigravity login; no Kimi provider; extension-contributed agent providers via AgentProtocol exist as a hook.",
+   "evidence": "packages/runtime/src/ai/server/providers/; packages/extension-sdk/src/agents/AgentProtocol.ts",
+   "confidence": "medium"
+  }
+ ],
+ "requirement_scores": [
+  {
+   "req": "R1 desktop GUI",
+   "score": 3,
+   "effort_days": 1,
+   "rationale": "Electron app with macOS builds; one day for a clean VM build (Node 24, pnpm, node-pty, better-sqlite3). Build not tested."
+  },
+  {
+   "req": "R2 attach context",
+   "score": 2,
+   "effort_days": 3,
+   "rationale": "File mentions, selection chips, pasted images, @@ session mentions, path-based CLI attachments exist; attaching a single agent message is missing."
+  },
+  {
+   "req": "R3 image annotation",
+   "score": 2,
+   "effort_days": 4,
+   "rationale": "Annotation is mockup-only and ephemeral; Excalidraw and PNG export exist as parts; annotate-and-attach for arbitrary images is new. Low confidence."
+  },
+  {
+   "req": "R4 agents",
+   "score": 2,
+   "effort_days": 8,
+   "rationale": "Unmodified CLI in a PTY exists but is off by default and uses a transcript proxy; default path is the Agent SDK. Codex exists; Gemini via Antigravity only; no Kimi; ACP and extension providers as hooks."
+  },
+  {
+   "req": "R5 GitHub PR integration",
+   "score": 3,
+   "effort_days": 0,
+   "rationale": "PR list, detail, diff, review sessions and tracker overlay on gh. PR-URL start counted under R6."
+  },
+  {
+   "req": "R6 task tree and task start",
+   "score": 2,
+   "effort_days": 8,
+   "rationale": "Session tree with containers and drag-and-drop persists; nested folders need about 5 days; PR URL and Jira key start about 3 days. S1 may exceed the 3-day stop rule."
+  },
+  {
+   "req": "R7 reuse connectors, skills, plugins, marketplace",
+   "score": 3,
+   "effort_days": 1,
+   "rationale": "Real CLI launched with additive --mcp-config, no --strict-mcp-config, --plugin-dir; one day to confirm connector OAuth and marketplace in the PTY path. Not run."
+  },
+  {
+   "req": "R8 agent parity through MCP",
+   "score": 2,
+   "effort_days": 6,
+   "rationale": "MCP host, token, per-session URL and renderer bridge exist; spawn tools exist; no folder, session-move or file-open tools; wider parity not found."
+  },
+  {
+   "req": "R9 LSP and AST refactor",
+   "score": 1,
+   "effort_days": 10,
+   "rationale": "Monaco only; no language client; no ast-grep or Serena integration. Kotlin LSP is a separate risk."
+  },
+  {
+   "req": "R10 build tools via command line",
+   "score": 3,
+   "effort_days": 0,
+   "rationale": "Embedded ghostty-web and node-pty terminal plus agent shell. Weight 1."
+  },
+  {
+   "req": "R11 Markdown and HTML",
+   "score": 3,
+   "effort_days": 0,
+   "rationale": "Lexical Markdown editor with tree diff and accept/reject; HTML preview with Monaco source; HTML has no document model and a text-level diff. Medium confidence for HTML."
+  }
+ ],
+ "unverified": [
+  "Nothing was built or run; all behaviour claims come from reading code and docs.",
+  "Whether the claude-code-cli path works end to end on Claude Code 2.1.326 (pid state file schema, --plugin-dir, bracketed-paste submit, proxy).",
+  "Whether claude.ai connectors (Atlassian) load and authorize inside the PTY session launched with --mcp-config.",
+  "Whether the Agent SDK path runs the claude binary in a mode affected by the --bare default.",
+  "Offline startup and use without an account.",
+  "Whether PostHog sends the opt-out retention ping (docs say yes, code read says no).",
+  "How the renderer routes a claude-code-cli session between the provider stub and the launcher (read only at IPC level).",
+  "Excalidraw image insertion, in-app HTML diff, what @@ session mentions inject.",
+  "The jsonl transcript bridge was only skimmed; whether it can replace the proxy.",
+  "Upstream response-time figures come from a small sample that excludes the internal NIM tracker and PR review comments.",
+  "Whether a backend-module sessions.create call accepts claude-code-cli as provider."
+ ],
+ "notes_file": "notes/triage-nimbalyst.md"
+}

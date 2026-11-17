@@ -1,0 +1,181 @@
+{
+ "name": "Greenfield Electron macOS shell and shared library choices",
+ "summary": "A greenfield Electron shell with React is feasible and every requirement has a maintained library path. Nothing was installed, run or cloned. Recommended stack: Electron for the shell, node-pty with xterm.js for terminals, a localhost MCP server built on the MCP TypeScript SDK, Monaco with monaco-languageclient for code (CodeMirror 6 as fallback), mdast with source positions as the Markdown model, a sandboxed iframe for HTML preview, Excalidraw for annotation, headless-tree with SQLite for the task tree, ACP for Codex, Gemini and Kimi, and gh for GitHub. Claude runs as the unmodified CLI in a PTY, with stream-json as a second path. The Claude ACP adapter is an Agent SDK integration, so decision 0001 excludes it. Jira is reached only through the agent and the claude.ai connector, so a ticket picker inside the app has limits. The weakest areas are Kotlin (the JetBrains language server is alpha and its builds expire), Markdown structural diff (no mature library) and the lockstep versions of monaco-vscode-api. tldraw is excluded by license terms. The effort sum and weighted score are in the notes file table. Estimates come from documentation and source reading and have wide margins.",
+ "findings": [
+  {
+   "topic": "Shell choice",
+   "finding": "Recommend Electron over Tauri for a macOS-only tool. The needed libraries (node-pty, xterm.js, Monaco, Excalidraw, MCP and ACP TypeScript SDKs) are TypeScript and run natively in Electron's Node and Chromium. Tauri would need Rust PTY code (portable-pty has had no release since early 2025; tauri-plugin-pty is small), a bundled Node sidecar for language servers, and WKWebView testing for Monaco and Excalidraw. Tauri's size and memory advantages do not matter for a personal tool, but memory was not measured.",
+   "evidence": "Electron 45.3.3 ships Node 24.22.3 and Chromium 156 (releases.electronjs.org). node-pty 1.1.0 package contains darwin-arm64 prebuilds (unpkg listing). Tauri sidecar docs require target-triple-named binaries; Tauri uses WKWebView on macOS (v2.tauri.app).",
+   "confidence": "medium"
+  },
+  {
+   "topic": "Terminal stack",
+   "finding": "node-pty with xterm.js is the PTY path for claude and build tools. node-pty's stable release is from December 2025 and its beta line continues, so the stable line is slow-moving but maintained by Microsoft.",
+   "evidence": "npm: node-pty 1.1.0 2025-12-22, beta 1.2.0-beta.18 2026-10-23; GitHub commits through 2026-11-02; @xterm/xterm 6.0.0 MIT, push 2026-11-16.",
+   "confidence": "high"
+  },
+  {
+   "topic": "Code browsing",
+   "finding": "Monaco with monaco-languageclient is the recommended editor and LSP client. Language servers run as stdio child processes in Electron main or a utility process and connect through a token-protected localhost WebSocket, which is the documented pattern. The cost is lockstep versions of monaco-vscode-api. CodeMirror 6's official lsp-client is a smaller fallback covering completion, definition, diagnostics, formatting, hover, references, rename and signature help, but no outline or code actions in the source listing.",
+   "evidence": "monaco-languageclient README (examples use WebSocket and web workers, MessagePort not mentioned; versions listed); @codemirror/lsp-client src file list and README Transport interface; CodeMirror and ProseMirror GitHub repos archived with moved notices to code.haverbeke.berlin while npm releases continue.",
+   "confidence": "medium"
+  },
+  {
+   "topic": "TypeScript pass gate",
+   "finding": "Use typescript-language-server on TypeScript 6.0.x for the gate. npm latest for typescript is now the native 7.0.x package whose bin lists only tsc. Whether typescript-language-server 6.1.0 runs on it, and which binary serves LSP in 7.0.2, is not verified. Serena documents a native TypeScript 7 server under the name typescript_tsgo.",
+   "evidence": "npm typescript 7.0.2 bin {tsc}; typescript-language-server 6.1.0 dev dependency typescript ^6.0.3; Serena docs 020_programming-languages.md.",
+   "confidence": "low"
+  },
+  {
+   "topic": "Kotlin language server",
+   "finding": "JetBrains kotlin-lsp is official but alpha, partly closed source, a read-only mirror, with no Kotlin Multiplatform. Its builds expire: Serena keeps its default on an older version because newer ones keep expiring, and the issue tracker has repeated 'build has expired' reports, one open from 2026-11-13. This is a recorded risk for Kotlin and Gradle projects. The older fwcd server has had no push since June 2025.",
+   "evidence": "Kotlin/kotlin-lsp README (Alpha, partially closed-source); issues 305, 302, 271, 270, 217; comment in serena src/solidlsp/language_servers/kotlin_language_server.py; fwcd pushed_at 2025-06-02.",
+   "confidence": "high"
+  },
+  {
+   "topic": "Agent LSP and AST",
+   "finding": "Serena gives the agent LSP-backed symbol tools (find symbol, find referencing symbols, rename symbol, replace symbol body, insert before and after, safe delete, diagnostics). Serena is GPL-3.0-or-later with an MIT solidlsp part, runs as a separate Python MCP process, and sends anonymous usage data unless SERENA_USAGE_REPORTING=false. The ast-grep MCP server is MIT, experimental and read-only (dump_syntax_tree, test_match_code_rule, find_code, find_code_by_rule). Structural rewrite goes through the ast-grep CLI (-r and -U), which the agent calls from Bash.",
+   "evidence": "serena LICENSE, README, docs/01-about/070_privacy.md, src/serena/tools/symbol_tools.py; ast-grep-mcp README and LICENSE; ast-grep CLI run reference.",
+   "confidence": "high"
+  },
+  {
+   "topic": "Markdown document model and diff",
+   "finding": "Recommend source editing in Monaco with mdast (unified, remark-parse, remark-gfm, remark-frontmatter) as the model, using source positions for text patches and mdast-util-to-markdown only for generated fragments. WYSIWYG is optional: Milkdown (ProseMirror plus remark) or MDXEditor (Lexical plus mdast) keep an mdast model; Tiptap's markdown extension calls itself an early release and Lexical is pre-1.0. No mature structural Markdown diff library was found; markdown-ast-diff (BULD, 1.0.2) is a candidate with unchecked maintenance, so a small block-level mdast diff is app work.",
+   "evidence": "npm metadata for the listed packages; tiptap.dev markdown docs; web search results for mdast diff libraries.",
+   "confidence": "medium"
+  },
+  {
+   "topic": "HTML preview",
+   "finding": "Use a sandboxed iframe (srcdoc or custom protocol, no allow-same-origin, scripts off by default) or a WebContentsView in its own session partition with no preload. Electron's docs advise against the webview tag.",
+   "evidence": "electronjs.org webview-tag page. The approach was not exercised.",
+   "confidence": "medium"
+  },
+  {
+   "topic": "Annotation",
+   "finding": "Excalidraw (MIT) meets R3: embed the component, supply the base image through the files map, export with exportToBlob (PNG by default). Fonts load from a CDN by default, so self-host them and set EXCALIDRAW_ASSET_PATH to avoid network requests. tldraw is excluded: production use needs a key, the hobby license is discretionary, needs a watermark, and its price is not stated.",
+   "evidence": "plus.excalidraw.com SDK export and installation docs; tldraw LICENSE.md and tldraw.dev/community/license; npm @excalidraw/excalidraw 0.18.1 (2026-04-20) with weekly next-tag builds.",
+   "confidence": "high"
+  },
+  {
+   "topic": "ACP and other agents",
+   "finding": "The ACP TypeScript SDK (@agentclientprotocol/sdk, Apache-2.0) uses a fluent client() API; ClientSideConnection is deprecated; releases arrive about weekly. Codex goes through @agentclientprotocol/codex-acp (wraps the Codex App Server, bundles @openai/codex). Gemini CLI has native gemini --acp. Kimi has kimi acp in the new MoonshotAI/kimi-code (MIT, TypeScript); the Python kimi-cli is archived and the ACP registry page still links it. Kimi's docs list gaps: no audio, blob resources dropped, fork ignores cwd.",
+   "evidence": "agentclientprotocol.com agents page and TypeScript library page; typescript-sdk README and releases; codex-acp package.json and README; gemini-cli docs acp-mode.md; kimi.com kimi-acp reference; GitHub API for kimi-cli (archived) and kimi-code.",
+   "confidence": "medium"
+  },
+  {
+   "topic": "Claude ACP adapter and Agent SDK",
+   "finding": "@agentclientprotocol/claude-agent-acp is built on @anthropic-ai/claude-agent-sdk (exact-version dependency) and drives a claude binary found through CLAUDE_CODE_EXECUTABLE, next to the adapter, or in the SDK's platform package. It is an Agent SDK integration, which decision 0001 excludes, so Claude should use a PTY or claude -p stream-json. The SDK's npm license field reads 'SEE LICENSE IN README.md' and the text was not extracted.",
+   "evidence": "claude-agent-acp package.json (SDK 0.3.325, Apache-2.0 adapter), src/claude-cli.ts, README; npm claude-agent-sdk metadata.",
+   "confidence": "high"
+  },
+  {
+   "topic": "Task tree and persistence",
+   "finding": "headless-tree (MIT, single maintainer) covers nested trees with async loading, drag and drop including reparenting and keyboard DnD, renaming and virtualization; react-arborist is the ready-made alternative. SQLite with an adjacency list and fractional-index positions fits moves with single-row updates; node:sqlite is a release candidate in Node 24 but exposure inside Electron 45 is unverified, so better-sqlite3 13.x with an Electron rebuild is the safe choice. The headless-tree docs read did not show onDrop and ordering callbacks.",
+   "evidence": "headless-tree docs pages (dnd feature, behavior, overview); npm metadata; nodejs.org sqlite docs (stability 1.2); fractional-indexing 4.0.0 CC0.",
+   "confidence": "medium"
+  },
+  {
+   "topic": "Jira path",
+   "finding": "The app has no Jira client and cannot call connector tools directly. Claude Code fetches claude.ai connectors itself in terminal, IDE and Agent SDK sessions, but only under a claude.ai subscription login (not with API key variables, third-party providers, profiles or a setup-token). Connector OAuth cannot run under claude -p; it needs an interactive session or claude mcp login. Starting a task from a Jira key means a session whose first prompt names the key; an in-app ticket search would need a headless claude -p call per query. Whether --strict-mcp-config excludes claude.ai connectors is not stated in the docs read.",
+   "evidence": "code.claude.com/docs/en/mcp (Use MCP servers from claude.ai, non-interactive mode text) and CLI reference.",
+   "confidence": "high"
+  },
+  {
+   "topic": "GitHub path",
+   "finding": "gh covers PR data: gh pr view --json offers files, reviews, latestReviews, reviewDecision, statusCheckRollup, comments, headRefName, baseRefName, mergeable and more; inline review comments are not in that field list and come from gh api repos/{owner}/{repo}/pulls/{n}/comments. gh uses the existing login so the app stores no token. The spike plan's rule not to start claude in a PR checkout without --setting-sources user --strict-mcp-config applies to the PR start flow.",
+   "evidence": "cli.github.com manual gh_pr_view; gh release v2.104.0, MIT.",
+   "confidence": "high"
+  },
+  {
+   "topic": "App-hosted MCP server",
+   "finding": "Use @modelcontextprotocol/sdk Streamable HTTP on 127.0.0.1 with a per-session token and Origin check, and write the config entry with type http (an entry with a url and no type is read as stdio). One command registry driving both the UI and the MCP tools gives parity by construction. For other agents pass the same server in ACP session/new mcpServers. The MCP SDK's LICENSE says the project is moving from MIT to Apache-2.0 with mixed licensing.",
+   "evidence": "MCP docs page text on type field; MCP typescript-sdk LICENSE; Kimi ACP docs on MCP forwarding.",
+   "confidence": "medium"
+  }
+ ],
+ "requirement_scores": [
+  {
+   "req": "R1 desktop GUI",
+   "score": 3,
+   "effort_days": 4,
+   "rationale": "Electron, React and Vite with split panes, menus, layout persistence and local packaging; no library gap."
+  },
+  {
+   "req": "R2 attach context",
+   "score": 2,
+   "effort_days": 5,
+   "rationale": "Attachment tray, drag and drop, paste and agent output as an item are app work; how attachments reach the interactive claude TUI through a PTY is an unverified probe, while stream-json takes content blocks."
+  },
+  {
+   "req": "R3 image annotation",
+   "score": 3,
+   "effort_days": 3,
+   "rationale": "Excalidraw embed, self-hosted fonts and exportToBlob to a PNG saved into the attachment tray."
+  },
+  {
+   "req": "R4 agents",
+   "score": 2,
+   "effort_days": 10,
+   "rationale": "Claude in a PTY is direct; an ACP client UI (message stream, permissions, plans, terminals) for Codex, Gemini and Kimi is the work, and Kimi and codex-acp behavior is untested."
+  },
+  {
+   "req": "R5 GitHub PRs",
+   "score": 3,
+   "effort_days": 6,
+   "rationale": "gh --json for list and detail, Monaco diff editor, checks, inline comments through gh api."
+  },
+  {
+   "req": "R6 task tree and starts",
+   "score": 2,
+   "effort_days": 10,
+   "rationale": "headless-tree, SQLite with fractional positions, drag and persist, and three start flows; the Jira picker is limited by the connector-only path."
+  },
+  {
+   "req": "R7 reuse Claude connectors, skills, plugins",
+   "score": 3,
+   "effort_days": 2,
+   "rationale": "The unmodified CLI loads its own skills, plugins, marketplace and connectors in interactive mode; work is a clean-environment launch, first-run login and checking that --strict-mcp-config keeps wanted servers."
+  },
+  {
+   "req": "R8 UI parity through MCP",
+   "score": 3,
+   "effort_days": 6,
+   "rationale": "One command registry exposes UI actions as MCP tools; token, Origin check, type http entry and ACP mcpServers pass-through."
+  },
+  {
+   "req": "R9 LSP and agent AST",
+   "score": 2,
+   "effort_days": 12,
+   "rationale": "Monaco with monaco-languageclient and main-process servers (TypeScript about 5 days, Kotlin about 4 days with the expiring-build risk) plus Serena and ast-grep wiring about 3 days; Kotlin caps the score."
+  },
+  {
+   "req": "R10 build tools by CLI (weight 1)",
+   "score": 3,
+   "effort_days": 2,
+   "rationale": "node-pty and xterm.js tabs with login-shell PATH resolution and a working directory per task."
+  },
+  {
+   "req": "R11 Markdown and HTML",
+   "score": 2,
+   "effort_days": 12,
+   "rationale": "Monaco source editing, rendered preview, sandboxed HTML preview, mdast outline and an in-app block-level structural diff since no mature library exists; WYSIWYG not included."
+  }
+ ],
+ "unverified": [
+  "Nothing was installed, built or run; every claim comes from docs, package metadata or source reading.",
+  "Electron memory and start time against Tauri, and WKWebView behavior for Monaco and Excalidraw.",
+  "How the interactive claude TUI accepts images and file attachments through a PTY.",
+  "Whether --strict-mcp-config excludes claude.ai connectors (the MCP docs read do not say).",
+  "Which TypeScript 7.0.2 binary serves LSP and whether typescript-language-server 6.1.0 runs on it.",
+  "Kotlin LSP behavior on Gradle projects and the expiry date of the current build.",
+  "monaco-languageclient inside an Electron renderer with the WebSocket bridge, and exact monaco-vscode-api peer versions for the chosen Monaco version.",
+  "Kimi and Gemini ACP behavior with this client; codex-acp release notes (the fetch result may be mixed up with the SDK's); whether Codex and Gemini accept HTTP MCP servers passed through ACP.",
+  "Text of the Agent SDK license in its README and the binary terms of the Kotlin LSP build.",
+  "markdown-ast-diff repository, maintainers and quality.",
+  "headless-tree onDrop and ordering callbacks.",
+  "Whether Electron 45's Node build exposes node:sqlite.",
+  "Tauri's license beyond the GitHub-reported Apache-2.0, and tldraw hobby license price.",
+  "Effort estimates are code-reading estimates with wide margins, widest for R9 and R11."
+ ],
+ "notes_file": "notes/greenfield-and-libraries.md"
+}
