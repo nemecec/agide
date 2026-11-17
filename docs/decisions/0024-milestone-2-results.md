@@ -18,7 +18,7 @@ Inputs: 0004, 0006, 0009, 0010, 0012, 0013, 0014, 0015 to 0023; `probes/RESULTS.
 7. A fix step that applied the review findings and added "Amendments after review" to 0023.
 8. This record, then a cross-review of 0020 to 0024 and the READMEs against the code, the test runs and the probe logs. Its corrections are in the text below; `docs/measurements/cross-review.md` lists them.
 
-The code is in `app/` of this repository. HEAD is the user's commit from before the run; every milestone 2 change is uncommitted, because each step of the run was told not to commit.
+The code is in `app/` of this repository. The steps of the run were told not to commit; the milestone 2 changes were committed afterwards in two commits, the application code and then the records, notes and probes, and the CI run on them passed.
 
 This record states what milestone 2 built and what it shows against R20 to R23 and the milestone 1 findings, which statements in 0004, 0019 and 0021 the probes and the build change, what the reviews found and what was fixed, the test and coverage figures, the measured effort, the re-estimate, what stays open, and what milestone 3 should do.
 
@@ -233,7 +233,6 @@ The hours are the remaining days times the unrounded rates above (minutes divide
 
 | Item | Where |
 |---|---|
-| All milestone 2 work is uncommitted | user |
 | Default permission mode (manual today; 0012 says auto with ask rules); whether `mcp__app__*` is allowed without a prompt | user; 0012 |
 | Local agents run as the user: shell reads of the app root, other profiles and `mcp.json` before the first `SessionStart` are not prevented; the deny rules cover the CLI's file tools only and their effect is unverified | 0022, 0023 limits; isolation providers |
 | A layout file written straight to `layouts/` is adopted without a scope check | 0023 limit |
@@ -269,7 +268,6 @@ Keep the milestone 2 process: survey and probes, designs with an independent rev
 
 ### Questions for the user
 
-- The last commit ("Add a root README and bring the docs index and app README up to date") was made two minutes before the run started and holds README changes, so the README commit of the request appears to be done. The milestone 2 work, with its own README updates, is uncommitted, because the run's steps were told not to commit. Should it be committed now, in one commit or per slice, and on which branch?
 - 0020, 0021 and 0022 are `proposed`. Do you confirm them, with the amendments listed above for 0021?
 - Default permission mode for sessions you start: manual (every tool call asks, as now), or auto with ask rules (0012)? Should `mcp__app__*` tools be allowed without a prompt?
 - Local agents run as you and can read other profiles' files through the shell. Is that acceptable until a container or srt provider exists, and do you agree to install the third-party software those probes need (0022 D, O and S series)?
