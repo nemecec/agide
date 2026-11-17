@@ -17,11 +17,14 @@ Spike to choose the base for a personal, macOS-only desktop tool for agentic cod
 | [0009](decisions/0009-agent-swarm-visibility-design.md) | proposed | R16 design: event sources, node states, count, removal, history, app-started agents |
 | [0010](decisions/0010-layered-review-and-escalation-design.md) | proposed | R19 design: levels, risk reasons, ladder, policy, outward-action gate, first slice |
 | [0011](decisions/0011-collaboration-tooling-and-swarm-orchestration.md) | proposed | R17 and R18 design: per-service access and approval, orchestration primitives, swarm definition, tiers and budgets |
-| [0012](decisions/0012-greenfield-accepted-and-defaults.md) | accepted | Greenfield accepted by the user; milestones; defaults for the open rows of 0007 |
+| [0012](decisions/0012-greenfield-accepted-and-defaults.md) | accepted | Greenfield accepted by the user; the name Agide; the Apache 2.0 license; milestones; defaults for the open rows of 0007 |
 | [0013](decisions/0013-stage2-architecture-and-contracts.md) | accepted | Stage 2 toolchain, modules, contracts, ownership and test strategy; amendments after review |
 | [0014](decisions/0014-milestone-1-results.md) | accepted | Milestone 1 results: slices against R1, R4, R6 and R8, probe results that amend 0004, review fixes, measured effort and re-estimate, milestone 2 |
 | [0015](decisions/0015-composable-ui-requirement.md) | proposed | R20 composable, user-assembled UI |
 | [0016](decisions/0016-tasks-reminders-and-inbox-requirement.md) | proposed | R21 tasks, reminders and inbox |
+| [0017](decisions/0017-profiles-requirement.md) | proposed | R22 profiles: separate Claude logins, browser sessions and data, one process per profile, unread badges |
+| [0018](decisions/0018-pluggable-agent-isolation-requirement.md) | proposed | R23 pluggable isolation providers (host, container, OpenShell, remote) |
+| [0019](decisions/0019-usage-visibility-requirement.md) | proposed | R24 token and plan usage visibility, with swarms on the subscription login |
 
 0007 is accepted for the base through 0012. 0004 needs the amendments listed in 0014.
 

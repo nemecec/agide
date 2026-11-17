@@ -34,7 +34,9 @@ Right-click the tree to add folders and surfaces. "New Claude session" is offere
 ```sh
 pnpm typecheck    # tsc over the Node side (core, main, preload, e2e) and the renderer
 pnpm test         # Vitest unit tests of src/core in plain Node
+pnpm coverage     # the unit tests with V8 coverage; thresholds on src/core and src/main/modules; report in coverage/
 pnpm e2e          # builds, then launches the app hidden with Playwright
+pnpm parity       # every UI-bound command is an MCP tool or states an exemption; writes ../docs/parity.md
 pnpm check        # typecheck, unit tests and end-to-end tests
 ```
 
