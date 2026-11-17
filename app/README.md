@@ -66,3 +66,7 @@ Tests that call the real `claude` CLI are scripts outside these commands: `pnpm 
 ## Dependencies
 
 Only packages listed under `allowBuilds` in `pnpm-workspace.yaml` run lifecycle scripts. Read a package's install script before adding it there.
+
+## License
+
+Apache License 2.0. See `../LICENSE` and `../NOTICE`.
