@@ -30,3 +30,41 @@ Nothing took long. The first e2e run failed because the new session leaf started
 - Renaming a session leaf changes the tree title only, not the session title.
 - Expanded folders are still not persisted across restarts.
 - The real-Claude run happened once; the parity check still covers only the built-in commands.
+
+# integrate, milestone 2
+
+Start: 2026-11-17T17:22:07Z
+End: 2026-11-17T17:40:44Z (about 19 minutes wall time)
+
+## State at the start
+
+`pnpm typecheck` and `pnpm test` passed. `pnpm e2e` failed in four tests: `integration.spec.ts` parsed `--mcp-config` as inline JSON (it is now a file path), and `profiles.spec.ts` found no colour strip and no rail, because the layout host had replaced `App.tsx` and nothing mounted the profile components.
+
+## What was built
+
+- Main process: the module order of 0023 was already in `modules.ts` (profile, tree, mcp, session, layout, inbox, then `mcp.start()`), and session launch already went through the provider with `profileLaunchSpec` over the profile settings. The dock badge was set twice, by the profile module and by the inbox module; the inbox module no longer sets it, so the count reaches the registry and the badge only through `inbox.unread_changed` and the profile module, as 0023 states. The `emitUnread` test hook is gone; the e2e test posts a real item instead.
+- Layout: both presets place `agide/profile-rail` at the left edge and `agide/inbox` as a tab beside the surface host. The layout host hides the tab header of a group that holds only the rail, and shows the profile strip above the layout bar. `App.tsx` mounts the setup pane over the layout. The new-profile form is fixed-positioned so the pane frame does not clip it.
+- Capture mask: the inbox and the rail are masked for folder-scoped callers next to the tree, since they show every folder and other profiles.
+- Tests: `e2e/sessionMcp.ts` reads the session's MCP config file and connects as the session; `integration.spec.ts`, `inbox.spec.ts` and `profiles.spec.ts` use it. New: a 0600 config file test with no token in any argument; the rail badge of the other profile after `inbox_post` over MCP (with the dock badge and a registry entry without item text); `e2e/workspace.spec.ts` with the layout instances, a layout file edit and an MCP `layout_apply` that change the window and the Undo button that restores it, and a hook event that becomes an item in the inbox tab. Unit tests that indexed the preset arrangement now point at the shifted children.
+- Real Claude: `scripts/lib/realClaude.mjs` holds the shared parts; `scripts/e2e-real-claude-inbox.mjs` (`pnpm e2e:real-claude-inbox`) is new and `scripts/e2e-real-claude.mjs` uses the library.
+- `dockview-react` is an exact version like the other dependencies; `pnpm install --offline` updated the lockfile specifier.
+
+## Real-Claude runs
+
+Haiku, `--max-budget-usd 0.25`, `--strict-mcp-config`, `--setting-sources user`, app permission mode `default` (the CLI shows "manual mode on"), working directory `<tmpdir>/agide-smoke-cwd`.
+
+- First inbox run: failed before SessionStart. The folder-trust dialog lists "No, exit" first and highlights it. The script moved the selection to "Yes", but its check matched an older frame in the output stream while a later frame showed "No, exit" again, so Enter ended the CLI ("didn't start because this folder isn't trusted"). This is the same failure w-provider saw.
+- The trust answer now reads the selection marker of the latest frame and presses Enter only after two reads in a row show "Yes, I trust this folder"; it needed two Down moves in the passing run, so something moved the selection back once after the first move.
+- Second inbox run: pass in 17.7 s, cost 0.0053 USD. Hooks SessionStart, UserPromptSubmit, PreToolUse, PostToolUse (ToolSearch), PreToolUse, PermissionRequest, PostToolUse, Stop; statuses idle, busy, waiting, busy, idle. The `mcp__app__inbox_post` call showed the CLI's approval dialog in the PTY ("Do you want to proceed? 1. Yes / 2. Yes, and don't ask again for app - InboxPost commands in <cwd> / 3. No"), with "Yes" highlighted, the session status `waiting` and `permission_mode` `default` in the hook payload. Enter in the terminal pane allowed it; the item (kind `status`, origin `mcp:inbox_post`, in the session's folder) was in the store 0.2 s later and in the inbox tab with "1 unread" 0.1 s after that. The MCP config file had mode 600, and the CLI read it from the file path.
+- Folder run with the refactored script: pass in 8.8 s, cost 0.0048 USD, no trust dialog (the directory was trusted by the run before).
+- Side effect: the passing trust answer added a trust entry for `<tmpdir>/agide-smoke-cwd` to the user's Claude config.
+
+## What took long
+
+Finding why the trust answer failed: the plain-text screen holds every frame since the dialog header, so a match anywhere in it is not the current selection.
+
+## Not finished
+
+- The rail width is a share of the window (about 60 px at the default width), not a fixed width; a narrow window makes it narrower.
+- The inbox tab title shows no unread count; the own count shows on the dock badge and in the rail.
+- In a run without profiles (`AGIDE_USER_DATA` only) the rail column stays empty.

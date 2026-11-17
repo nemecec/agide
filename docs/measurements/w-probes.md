@@ -1,6 +1,6 @@
 # w-probes
 
-Start: 2026-11-17 08:48:13 UTC (date -u). End: teisipäev 17 november 2026 09:24.18 UTC (date -u). Wall time about 36 minutes.
+Start: 2026-11-17 08:48:13 UTC (date -u). End: 2026-11-17 09:24:18 UTC (date -u). Wall time about 36 minutes.
 
 ## Built
 

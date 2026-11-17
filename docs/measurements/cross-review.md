@@ -46,3 +46,45 @@ The mutation run: the `UNION ALL` case hung until its timeout.
 - Not checked: the reports of the builder, integration, review and fix steps that 0014 summarizes (not stored as files), the statement that the reviews rejected the integrated code, and the flake fix beyond the two e2e runs of this review.
 - The shell guard refused the removal of my scratch files: `/tmp/agui-review-mut`, `/tmp/agui-review-hookshell` and the `/tmp/agui-review-*.log` files. They hold a mutation script, checksum lists, the hook probe script and test logs.
 - No token count is available to me.
+
+## Cross-review of milestone 2
+
+Start: 2026-11-17 19:01:24 UTC (date -u). End: 2026-11-17 19:30:12 UTC (date -u). Wall time about 29 minutes.
+
+Scope: 0020 to 0024, the root README, `app/README.md`, `docs/README.md`, and their claims about `app/`, checked against the code, the test runs and the probe logs in `probes/out/`.
+
+### Commands run
+
+- `pnpm typecheck`: passes (also after my edits).
+- `pnpm coverage`: 61 files, 597 tests pass, thresholds met. Per-area figures computed from `coverage/coverage-summary.json`.
+- `pnpm e2e`: 26 pass, twice; 27 pass with the test I added.
+- `pnpm parity` and `pnpm blocks-docs`: `docs/parity.md` and `docs/blocks.md` come out with the same checksums.
+- `pnpm e2e:claude-mcp`, `node scripts/smoke-real-claude.mjs`, `pnpm e2e:real-claude`, `pnpm e2e:real-claude-inbox`, once each on Haiku: the first three pass (0.0042, 0.0036 and 0.0047 USD); the inbox script failed, and passes after my fix (0.0048 USD).
+- `pnpm coverage:e2e` four times: see the findings.
+- A search of every tracked and untracked file outside the ignore rules for employer names, user directory paths, e-mail addresses, token shapes and long identifiers, and a search of the docs and the code for the words the style rules exclude.
+
+### Findings and what I changed
+
+- `scripts/e2e-real-claude-inbox.mjs` failed since the fix step: it read the mode of `mcp.json` after `SessionStart`, when the app has removed the file. The script reads the mode right after the launch and checks at the end that the file is gone. 0024 said that all real-Claude scripts pass at the end of the fix step; the row now says which ran when.
+- `e2e/coverageHook.ts` put the process environment back under the environment a spec passes, so `CLAUDE_CONFIG_DIR`, which `profiles.spec.ts` removes, came back under `pnpm coverage:e2e` and the two-profiles test failed. The hook uses the spec's environment as it is. This is the failure that the quality step saw and the fix step could not reproduce with `pnpm e2e`.
+- After that fix, two of three `pnpm coverage:e2e` runs failed in one inbox test each, with the load average of the machine near 18, and the failing test ran far past its timeout. The fourth run passed. Listed as open in 0024.
+- 0024 said the `BEFORE DELETE` trigger was checked in the Electron e2e runs; no e2e test removed a folder. I added one to `e2e/inbox.spec.ts`; it passes inside Electron 45. It is not mutation-checked.
+- 0024: coverage tables replaced by figures measured after the fixes; the re-estimate uses unrounded rates (the per-day rates 21.5 and 27.5 were rounded down, which moved the hour ranges); the comparison with milestone 1 names the probe step that took longer than the fix step; the registry entry is described by its real fields; the open list gains the probes C3, C4 and the `--settings` path half of C2, the unwritten probe scripts, the `proposed` status of 0020 to 0022 and the coverage-run flake; the question about the README commit is corrected, because the last commit, made two minutes before the run, holds README changes.
+- 0023: amendments for the inline `--settings`, the unwritten `settings.json` session file and probe scripts, and the two settled "Not verified" items.
+- Root README: continuous integration also runs the parity check, and on pushes to `main` only. `app/README.md`: what crosses profiles (definitions and the registry entry fields).
+- Style: one comment in `src/core/layout/diff.ts` used an excluded phrase. Three measurement files held a date in the locale format of the machine; they now use the ISO form.
+- The search for employer names, user directory paths, e-mail addresses and tokens found nothing in tracked or untracked files. The author's name stands in `NOTICE` and in the "Decided by" lines of records the user committed; I left it. `probes/out/` and `probes/work/` hold absolute user paths and are ignored by git.
+
+Supported as written: the probe statements of 0021, 0023 and 0024 about P11 to P15 against the builder and reviewer reports (delays, payload keys, the waiting-hook cases, the elicitation answers, the atomic write test), the wall times and their sums, the estimates quoted from 0005, 0007 and 0014 to 0019, the constants and rules named in 0023 and 0024 where I looked them up in the code (file modes, the staleness time, the daily occurrence limit, the reminder limit, the message length, the resize tolerance, the timer cap, deny rules, the refused working directory, `onLaunchFailed`, the module order, the environment variables of the README).
+
+### What took long
+
+The `pnpm coverage:e2e` runs: one failing inbox test kept a run going for more than five minutes.
+
+### Not finished
+
+- Not checked: the verification step's two clean-copy runs and the mutation checks of the quality and review steps (no file records them); the 572-test figure of the quality step; the `cost-state` totals quoted in `notes/probes-m2.md` beyond the status line cost in the report; most of the body of 0020 to 0022 beyond their probe statements, estimates and style.
+- The cause of the inbox test failures under `pnpm coverage:e2e` and of the long run after a failure.
+- The effect of the deny rules in a real session, and everything 0024 lists as not checked on screen.
+- The real-Claude runs wrote transcripts for `agide-smoke-cwd` to the user's Claude config, as the earlier runs did.
+- No token count is available to me.

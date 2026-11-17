@@ -4,9 +4,18 @@ Agide is a desktop tool for agentic coding on macOS. A tree of folders holds Cla
 
 ## Status
 
-Early prototype. Today the tree (nested folders, drag and drop, persistence), Claude sessions in a terminal with resume, and the app MCP server with a UI and MCP parity check work. The inbox, swarm and usage views, layered review, browser and Slack surfaces, profiles, isolation providers and a composable layout are designed in the decision records and not built yet. `docs/decisions/0014-milestone-1-results.md` lists what exists and what was verified.
+Early prototype. These parts work:
 
-Continuous integration runs the typecheck, the unit tests with coverage thresholds and the end-to-end tests on every push and pull request.
+- The tree (nested folders, drag and drop, persistence).
+- Claude sessions in a terminal with resume, launched through an isolation provider that runs `claude` on the host.
+- The app MCP server with a UI and MCP parity check.
+- A window built from a layout file that the user or an agent edits, with presets, undo and window capture.
+- An inbox of items from Claude hooks and from agents, with notifications, a dock badge, tasks and recurring reminders.
+- Profiles that run side by side, each with its own data, Claude login and tool credentials, with a switcher rail and unread badges.
+
+Swarm and usage views, layered review, browser and Slack surfaces, task start from a PR or ticket, user-written blocks and isolation providers other than the host are designed in the decision records and not built yet. Nothing has been checked on screen; the tests run the app with a hidden window. `docs/decisions/0014-milestone-1-results.md` and `docs/decisions/0024-milestone-2-results.md` list what exists and what was verified.
+
+Continuous integration runs the typecheck, the unit tests with coverage thresholds, the end-to-end tests and the UI and MCP parity check on every pull request and on every push to `main`.
 
 ## Repository
 

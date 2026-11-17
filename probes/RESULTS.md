@@ -65,7 +65,7 @@ Details in `notes/probes-stage2.md`; evidence in `probes/out/p6_*` to `p10_*` an
 
 | Probe | Result | Short finding |
 |---|---|---|
-| P6 PTY permissions | pass | The `PermissionRequest` hook fires for Bash, Edit and an MCP tool in the TUI. Deny blocks the call, the deny message reaches the agent as an error tool result, and no dialog shows. The payload has no `tool_use_id` (the `PreToolUse` payload has it). |
+| P6 PTY permissions | pass | The `PermissionRequest` hook fires for Bash, Edit and an MCP tool in the TUI. Deny blocks the call, the deny message reaches the agent as an error tool result, and the dialog closes without a keypress once the hook answers (corrected by P14; the raw logs show the dialog while the hook runs). The payload has no `tool_use_id` (the `PreToolUse` payload has it). |
 | P7 PTY sessions | pass | `--session-id` sets the id and the transcript name. `--resume` keeps id and file. `--fork-session` makes a new id and file with history. A reused id and `--resume` with `--session-id` but no fork exit with an error. |
 | P8 additionalContext | pass | Injected context reaches the model in `-p` and in the PTY, from a JSON field or plain stdout. Above 10,000 characters the model gets a preview of about 2,000 characters and a file note. |
 | P9 setting sources | pass | In `-p` and in the PTY, `--setting-sources user` skips the project `.mcp.json`, hooks and `CLAUDE.md` and keeps connectors and user MCP servers. `--strict-mcp-config` drops connectors and user servers (controlled comparison), keeping only built-in `claude-in-chrome`. |
@@ -86,3 +86,17 @@ Details in `notes/probes-stage2.md`; evidence in `probes/out/p6_*` to `p10_*` an
 PTY approval in the other permission modes and for subagents; `updatedInput`; folder-trust dialog with an untrusted checkout; image paste; interrupt during an approval dialog; models other than Haiku. The scripts are listed in `notes/probes-stage2.md`.
 
 New scripts: `stage2_lib.py`, `p6_pty_permissions.py`, `p7_pty_sessions.py`, `p8_additional_context.py`, `p9_setting_sources_p.mjs`, `p9_setting_sources_pty.py`, `p9b_strict_compare.mjs`, `p10_pty_interrupt.py`, `make_checkout.py`, `fixtures/proj_mcp_server.mjs`, `hooks/perm_policy.py`, `hooks/ctx_hook.py`, `hooks/marker_hook.py`.
+
+## Milestone 2 probes P11 to P15 (2026-11-17)
+
+Details in `notes/probes-m2.md`; evidence in `probes/out/p11_*` to `p15_*`, reviewer re-runs in `probes/out/m2-review/`. Same safety settings as above, except that the PTY runs have no budget cap (`--max-budget-usd` only works with `--print`). New helper `m2_lib.py` answers the folder-trust dialog, which fresh directories under `probes/work/` raised in these runs; the prompt typed into that dialog exits the session.
+
+| Probe | Result | Short finding |
+|---|---|---|
+| P11 Notification hook | pass | `notification_type` distinguishes `permission_prompt`, `idle_prompt`, `elicitation_dialog` and `elicitation_response`. The permission and elicitation types fire about 6 s after the dialog opens, the idle type about 59 s after `Stop`. The payload has `message` and `notification_type`, no tool fields. |
+| P12 status line | partial | The `--settings` status line command gets JSON with cost, context window (latest request only), prompt cache and `rate_limits` (`five_hour`, `seven_day`, `used_percentage`, `resets_at`). The cost includes subagent requests (inferred from totals in P13). It fires at start and during turns, and every `refreshInterval` seconds when set; a refresh repeats the last rate-limit values. It overrides a project status line. Atomic per-session file writes held under concurrency. A user-level status line was not available to test. |
+| P13 transcript usage | pass | Per assistant line `usage` with separate cache creation (5 m and 1 h) and cache read fields. One API message spans several lines with the same id and usage: count each `message.id` once. Subagents write their own files under `<session>/subagents/`. Internal agents leave no file, so the process total comes from the `cost-state` rows written at exit. Background subagents end the main turn with `Stop` before their results return as `<task-notification>` prompts. |
+| P14 waiting PermissionRequest hook | pass | The dialog shows while the hook waits. A keypress during the wait answers the request and beats the hook (Esc kills the hook). A hook `timeout` hands the decision back to the dialog. Corrects the P6 statement that no dialog shows. |
+| P15 Elicitation | pass | The `Elicitation` hook fires with `mcp_server_name`, `message`, `mode`, `requested_schema`; a hook answer with `action` and `content` reaches the server with no dialog. The test used a stdio server because `mcp_host.mjs` has no server-initiated requests. |
+
+New scripts: `m2_lib.py`, `p11_notification_hook.py`, `p12_statusline.py`, `p13_transcript_usage.py`, `p14_waiting_permission_hook.py`, `p15_elicitation.py`, `fixtures/elicit_mcp_server.mjs`, `hooks/statusline_capture.py`, `hooks/perm_wait.py`, `hooks/elicit_answer.py`.

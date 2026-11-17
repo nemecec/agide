@@ -19,7 +19,7 @@ Results (`p6_report.json`, `p6_<case>_hooks.jsonl`, `p6_<case>_hooks.jsonl.perm`
 - Deny works for all three. No marker file, the file still says `alpha`, the host state has no new folder. The deny message from the hook reaches the agent as an error tool result, and the model quoted it back in each case.
 - Allow works for all three: the marker exists, the file says `beta`, the folder exists.
 - Sequence on deny: `PreToolUse`, `PermissionRequest`, `Stop`. No `PostToolUse` fires for a denied call. On allow: `PreToolUse`, `PermissionRequest`, `PostToolUse`.
-- No dialog appears on screen when the hook answers.
+- The dialog closes without a keypress when the hook answers. The raw output contains the dialog text, and P14 (`notes/probes-m2.md`) shows that the dialog stays on screen while a hook waits.
 - PermissionRequest payload keys: `session_id`, `transcript_path`, `cwd`, `scratchpad_dir`, `prompt_id`, `permission_mode`, `effort`, `hook_event_name`, `tool_name`, `tool_input`, `permission_suggestions`, and `mcp_server` for MCP tools. There is no `tool_use_id` and no `agent_id`. The `PreToolUse` payload of the same call carries `tool_use_id`, so an app pairs the two by order within a session and by identical `tool_input`.
 - `tool_input` per tool: Bash `command` and `description`; Edit `file_path`, `old_string`, `new_string`, `replace_all`; MCP the arguments object. The tool name for the MCP tool is `mcp__app__ui_create_folder`.
 - `permission_suggestions` entries seen: `addDirectories` (Bash, destination `session`), `setMode` to `acceptEdits` (Edit), `addRules` with `toolName` (MCP, destination `localSettings`).
