@@ -25,8 +25,21 @@ describe('launch arguments', () => {
     expect(args.slice(-2), 'extra arguments').toEqual(['--mcp-config', '{}']);
   });
 
+  it('add permission rules that deny reading and editing the listed paths', () => {
+    const args = buildLaunchArgs({ ...base, resume: false, permissionMode: 'default', denyPaths: ['/app/root'] });
+    const settings = JSON.parse(args[args.indexOf('--settings') + 1] ?? '') as { permissions?: { deny: string[] } };
+    expect(settings.permissions?.deny, 'absolute paths use a double slash').toEqual(['Read(//app/root/**)', 'Edit(//app/root/**)']);
+    const none = JSON.parse(buildLaunchArgs({ ...base, resume: false, permissionMode: 'default' }).at(buildLaunchArgs({ ...base, resume: false, permissionMode: 'default' }).indexOf('--settings') + 1) ?? '') as object;
+    expect(Object.keys(none), 'no permissions without paths').toEqual(['hooks']);
+  });
+
   it('name the prompting mode manual for the CLI', () => {
     expect(cliPermissionMode('default'), 'default maps to manual').toBe('manual');
     expect(cliPermissionMode('bypassPermissions'), 'other modes pass through').toBe('bypassPermissions');
+  });
+
+  it('pass the MCP config as a file path before the integrator arguments', () => {
+    const args = buildLaunchArgs({ ...base, resume: false, permissionMode: 'default', mcpConfigPath: '/s/mcp.json', extraArgs: ['--model', 'haiku'] });
+    expect(args.slice(-4), 'config path then extra arguments').toEqual(['--mcp-config', '/s/mcp.json', '--model', 'haiku']);
   });
 });

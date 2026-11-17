@@ -1,0 +1,56 @@
+import { describe, expect, it } from 'vitest';
+import { ageOf, KIND_LABEL, payloadText, tomorrowMorning } from './format';
+
+const NOW = Date.parse('2026-11-17T12:00:00Z');
+const ago = (ms: number) => new Date(NOW - ms).toISOString();
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+
+describe('ageOf', () => {
+  it('says just now below a minute and for a time in the future', () => {
+    expect(ageOf(ago(30_000), NOW), 'half a minute').toBe('just now');
+    expect(ageOf(ago(-5 * MIN), NOW), 'future time').toBe('just now');
+  });
+
+  it('counts minutes below an hour', () => {
+    expect(ageOf(ago(5 * MIN), NOW), 'five minutes').toBe('5 min ago');
+    expect(ageOf(ago(59 * MIN), NOW), 'fifty-nine minutes').toBe('59 min ago');
+  });
+
+  it('counts hours up to two days and days after that', () => {
+    expect(ageOf(ago(3 * HOUR), NOW), 'three hours').toBe('3 h ago');
+    expect(ageOf(ago(47 * HOUR), NOW), 'forty-seven hours').toBe('47 h ago');
+    expect(ageOf(ago(72 * HOUR), NOW), 'three days').toBe('3 d ago');
+  });
+});
+
+describe('KIND_LABEL', () => {
+  it('labels every item kind the inbox shows', () => {
+    expect(Object.keys(KIND_LABEL).sort(), 'kinds').toEqual(['alert', 'approval', 'failure', 'input', 'reminder', 'review', 'status']);
+  });
+});
+
+describe('tomorrowMorning', () => {
+  it('is 09:00 local time on the next day', () => {
+    const next = tomorrowMorning(new Date(2026, 10, 17, 22, 15, 30, 500));
+    expect([next.getFullYear(), next.getMonth(), next.getDate()], 'next calendar day').toEqual([2026, 10, 18]);
+    expect([next.getHours(), next.getMinutes(), next.getSeconds(), next.getMilliseconds()], 'at nine').toEqual([9, 0, 0, 0]);
+  });
+
+  it('rolls over a month end and does not change its input', () => {
+    const start = new Date(2026, 10, 30, 8, 0);
+    expect(tomorrowMorning(start).getDate(), 'first of December').toBe(1);
+    expect(start.getDate(), 'input unchanged').toBe(30);
+  });
+});
+
+describe('payloadText', () => {
+  it('returns a string tool input as is and formats an object as indented JSON', () => {
+    expect(payloadText({ toolInput: 'ls -la' }), 'string input').toBe('ls -la');
+    expect(payloadText({ toolInput: { path: 'a' } }), 'object input').toBe('{\n  "path": "a"\n}');
+  });
+
+  it('returns nothing for a payload without tool input', () => {
+    for (const payload of [undefined, null, 'text', 4, {}]) expect(payloadText(payload), `payload ${JSON.stringify(payload)}`).toBeUndefined();
+  });
+});

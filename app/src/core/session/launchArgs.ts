@@ -13,8 +13,18 @@ export interface LaunchArgsInput {
   readonly permissionMode: PermissionMode;
   /** Directory the hook commands write their payload files to. */
   readonly inboxDir: string;
+  /** Path of the app MCP server config file, as the CLI sees it. The file carries the bearer token, so the token never appears in the arguments. */
+  readonly mcpConfigPath?: string | undefined;
+  /** Absolute paths the CLI may not read or edit. Rules cover the CLI's file tools; a shell command is not covered. */
+  readonly denyPaths?: readonly string[];
   /** Arguments the integrator adds, such as the app MCP server config. */
   readonly extraArgs?: readonly string[];
+}
+
+/** Claude Code settings write an absolute path with a leading double slash. */
+function denyRules(paths: readonly string[]): { permissions?: { deny: string[] } } {
+  if (paths.length === 0) return {};
+  return { permissions: { deny: paths.flatMap((path) => [`Read(/${path}/**)`, `Edit(/${path}/**)`]) } };
 }
 
 /**
@@ -30,7 +40,8 @@ export function buildLaunchArgs(input: LaunchArgsInput): string[] {
     '--setting-sources',
     'user',
     '--settings',
-    JSON.stringify(hookSettings(input.inboxDir)),
+    JSON.stringify({ ...hookSettings(input.inboxDir), ...denyRules(input.denyPaths ?? []) }),
+    ...(input.mcpConfigPath === undefined ? [] : ['--mcp-config', input.mcpConfigPath]),
     ...(input.extraArgs ?? []),
   ];
 }

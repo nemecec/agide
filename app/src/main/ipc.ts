@@ -2,6 +2,7 @@ import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { CommandRegistry } from '../core/commands/index';
 import type { AppEventBus } from '../core/events/index';
 import { IPC } from '../shared/ipc';
+import { invokeFromRenderer, isTrustedSource, listFromRenderer } from './ipcPolicy';
 import { isAppFrameUrl } from './window';
 
 /**
@@ -10,17 +11,17 @@ import { isAppFrameUrl } from './window';
  */
 export function registerIpc(commands: CommandRegistry, events: AppEventBus): () => void {
   const trusted = (event: IpcMainInvokeEvent): boolean =>
-    BrowserWindow.fromWebContents(event.sender) !== null &&
-    event.senderFrame === event.sender.mainFrame &&
-    isAppFrameUrl(event.senderFrame.url);
+    isTrustedSource(
+      {
+        inAppWindow: BrowserWindow.fromWebContents(event.sender) !== null,
+        isMainFrame: event.senderFrame === event.sender.mainFrame,
+        frameUrl: event.senderFrame?.url ?? '',
+      },
+      isAppFrameUrl,
+    );
 
-  ipcMain.handle(IPC.invoke, (event, commandId: unknown, input: unknown) => {
-    if (!trusted(event) || typeof commandId !== 'string') {
-      return { ok: false, error: { code: 'not_found', message: 'rejected' } };
-    }
-    return commands.invoke(commandId, input, { kind: 'ui' });
-  });
-  ipcMain.handle(IPC.list, (event) => (trusted(event) ? commands.describe() : []));
+  ipcMain.handle(IPC.invoke, (event, commandId: unknown, input: unknown) => invokeFromRenderer(commands, trusted(event), commandId, input));
+  ipcMain.handle(IPC.list, (event) => listFromRenderer(commands, trusted(event)));
 
   const unsubscribe = events.onAny((appEvent) => {
     for (const window of BrowserWindow.getAllWindows()) {

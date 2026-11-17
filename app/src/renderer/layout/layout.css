@@ -1,0 +1,81 @@
+.layout-host {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.layout-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--pane-bg);
+}
+
+.dock-wrap {
+  flex: 1;
+  min-height: 0;
+}
+
+.dock {
+  height: 100%;
+}
+
+.pane-frame {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.pane-tab {
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 26px;
+}
+
+.layout-notice {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--pane-bg);
+}
+
+.layout-notice ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.layout-error {
+  color: #b00020;
+}
+
+.placeholder-pane {
+  padding: 12px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+[data-capture-mask]::after {
+  content: 'Hidden from the agent';
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: var(--pane-bg);
+  color: var(--muted);
+}
+
+.pane-frame > .tree-pane,
+.pane-frame > .surface-pane,
+.pane-frame > .profile-rail {
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.pane-frame > .profile-rail {
+  width: 100%;
+}

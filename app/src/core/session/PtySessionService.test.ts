@@ -1,4 +1,4 @@
-import { mkdtempSync, existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, existsSync, writeFileSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -147,14 +147,41 @@ describe('state from hook events', () => {
     expect(stop, 'Stop hook event').toMatchObject({ payload: { session_id: session.id, last_assistant_message: 'echo: hi' } });
   });
 
+  it('removes mcp.json after the first SessionStart and removes stale session directories at start', async () => {
+    const sessionFilesDir = join(dir, 'sessions');
+    mkdirSync(join(sessionFilesDir, 'stale'), { recursive: true });
+    writeFileSync(join(sessionFilesDir, 'stale', 'mcp.json'), '{"token":"old"}');
+    start({ sessionFilesDir, mcpConfig: () => ({ mcpServers: {} }) });
+    expect(existsSync(join(sessionFilesDir, 'stale')), 'directory left by a crash is removed').toBe(false);
+    const session = await service.create({ folderId: FOLDER, cwd: workdir });
+    await idle(session.id);
+    await until('mcp.json removed', () => !existsSync(join(sessionFilesDir, session.id, 'mcp.json')));
+    expect(hooks(session.id), 'SessionStart arrived').toContain('SessionStart');
+  });
+
+  it('reports a failed create and a failed resume to onLaunchFailed', async () => {
+    const failed: string[] = [];
+    start({ onLaunchFailed: (session) => failed.push(session.id) });
+    await expect(service.create({ folderId: FOLDER, cwd: join(workdir, 'missing') }), 'create in a missing directory').rejects.toThrow();
+    expect(failed, 'one failure reported for the create').toHaveLength(1);
+    const session = await service.create({ folderId: FOLDER, cwd: workdir });
+    await idle(session.id);
+    service.sendText(session.id, '/exit');
+    await until('exited', () => service.get(session.id)?.status === 'exited');
+    rmSync(workdir, { recursive: true, force: true });
+    await expect(service.resume(session.id), 'resume in a removed directory').rejects.toThrow();
+    expect(failed.at(-1), 'the failed resume names its session').toBe(session.id);
+    expect(failed, 'one failure for the create and one for the resume').toHaveLength(2);
+  });
+
   it('shows waiting while a permission request is open', async () => {
     start();
     const session = await service.create({ folderId: FOLDER, cwd: workdir });
     await idle(session.id);
     service.sendText(session.id, '/perm');
     await until('waiting', () => service.get(session.id)?.status === 'waiting');
+    await until('prompt text shown', () => output(session.id).includes('Allow?'));
     service.write(session.id, 'y\r');
-    expect(output(session.id), 'prompt text').toContain('Allow?');
     await until('answer echoed', () => output(session.id).includes('allowed'));
   });
 

@@ -1,0 +1,36 @@
+/** "just now", "5 min ago", "3 h ago", "2 d ago". */
+export function ageOf(iso: string, now: number = Date.now()): string {
+  const seconds = Math.max(0, Math.round((now - Date.parse(iso)) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} h ago`;
+  return `${Math.round(hours / 24)} d ago`;
+}
+
+export const KIND_LABEL: Record<string, string> = {
+  status: 'Update',
+  input: 'Needs input',
+  approval: 'Approval',
+  review: 'Review',
+  failure: 'Failure',
+  reminder: 'Reminder',
+  alert: 'Alert',
+};
+
+/** The next 09:00 local time after the instant. */
+export function tomorrowMorning(now: Date = new Date()): Date {
+  const next = new Date(now);
+  next.setDate(next.getDate() + 1);
+  next.setHours(9, 0, 0, 0);
+  return next;
+}
+
+/** Raw tool input of an approval item, as plain text. */
+export function payloadText(payload: unknown): string | undefined {
+  if (payload === null || typeof payload !== 'object') return undefined;
+  const input = (payload as { toolInput?: unknown }).toolInput;
+  if (input === undefined) return undefined;
+  return typeof input === 'string' ? input : JSON.stringify(input, null, 2);
+}

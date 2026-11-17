@@ -18,9 +18,12 @@
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "e2e": "electron-vite build && playwright test",
+    "coverage:e2e": "node scripts/coverage-e2e.mjs",
     "parity": "node scripts/parity.mjs",
+    "blocks-docs": "node scripts/blocks-docs.mjs",
     "e2e:claude-mcp": "node scripts/e2e-claude-mcp.mjs",
     "e2e:real-claude": "electron-vite build && node scripts/e2e-real-claude.mjs",
+    "e2e:real-claude-inbox": "electron-vite build && node scripts/e2e-real-claude-inbox.mjs",
     "check": "pnpm typecheck && pnpm test && pnpm e2e"
   },
   "dependencies": {
@@ -29,6 +32,7 @@
     "@modelcontextprotocol/sdk": "1.32.2",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
+    "dockview-react": "8.9.0",
     "node-pty": "1.1.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
@@ -43,6 +47,8 @@
     "@vitest/coverage-v8": "^5.1.0",
     "electron": "45.3.3",
     "electron-vite": "6.0.0",
+    "jsdom": "^31.0.1",
+    "monocart-coverage-reports": "^3.2.1",
     "typescript": "7.0.2",
     "vite": "8.3.8",
     "vitest": "5.1.0"

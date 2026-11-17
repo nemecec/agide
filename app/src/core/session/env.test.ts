@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { claudeArgsFromEnv, claudeEnv, defaultSessionCwd } from './env';
+import { claudeArgsFromEnv, claudeEnv, defaultPermissionModeFromEnv, defaultSessionCwd } from './env';
 
 describe('launch environment', () => {
   it('drops variables a parent Claude Code session injects and keeps the config directory', () => {
@@ -23,7 +24,17 @@ describe('launch environment', () => {
   });
 
   it('starts sessions in the configured directory, else in the home directory', () => {
-    expect(defaultSessionCwd({ AGIDE_SESSION_CWD: '/work' }), 'configured directory').toBe('/work');
-    expect(defaultSessionCwd({}), 'home directory').toBe(homedir());
+    expect(defaultSessionCwd('f1', { AGIDE_SESSION_CWD: '/work' }), 'configured directory').toBe('/work');
+    expect(defaultSessionCwd('f1', {}), 'a directory per folder below the home directory').toBe(join(homedir(), 'Agide', 'f1'));
+  });
+
+  it('defaults the permission mode to the prompting mode and reads AGIDE_PERMISSION_MODE', () => {
+    expect(defaultPermissionModeFromEnv({}), 'no variable').toBe('default');
+    expect(defaultPermissionModeFromEnv({ AGIDE_PERMISSION_MODE: 'auto' }), 'auto from the variable').toBe('auto');
+  });
+
+  it('refuses unknown permission modes and bypassPermissions as a default', () => {
+    expect(() => defaultPermissionModeFromEnv({ AGIDE_PERMISSION_MODE: 'autoo' }), 'typo').toThrow('AGIDE_PERMISSION_MODE');
+    expect(() => defaultPermissionModeFromEnv({ AGIDE_PERMISSION_MODE: 'bypassPermissions' }), 'bypass needs confirmation per session').toThrow();
   });
 });

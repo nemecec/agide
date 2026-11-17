@@ -17,8 +17,8 @@ import type { NodeId } from '../tree/types';
  * - The server name in the `--mcp-config` entry is `app`: names such as `claude-in-chrome` or `workspace` are
  *   reserved by the CLI and skipped.
  * - The folder scope protects against an agent's mistakes. It does not protect against an adversarial agent with
- *   shell access: the bearer token is in the `claude` process arguments, so a same-user process can read it, and
- *   a session can open the app database directly.
+ *   shell access: the bearer token is in a 0600 file under the session directory, not in the process arguments, but a
+ *   same-user process can still read that file, and a session can open the app database directly.
  * - Revoking a grant closes the session's open MCP transports; later requests with its token get 401.
  */
 

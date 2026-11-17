@@ -7,6 +7,7 @@ export const HOOK_EVENTS = [
   'Notification',
   'PermissionRequest',
   'Stop',
+  'StopFailure',
   'SubagentStart',
   'SubagentStop',
   'SessionEnd',

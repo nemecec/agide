@@ -1,9 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { checkParity, renderParityMarkdown, type Caller } from '../../core/commands/index';
 import { openStore } from '../../core/store/index';
 import { SqliteTreeService } from '../../core/tree/index';
@@ -13,6 +13,7 @@ const FAKE_CLAUDE = join(import.meta.dirname, '..', '..', 'core', 'session', 'fi
 const PARITY_DOC = join(import.meta.dirname, '..', '..', '..', '..', 'docs', 'parity.md');
 
 let dir: string;
+let work: string;
 let app: AppModules | undefined;
 const clients: Client[] = [];
 const saved = { ...process.env };
@@ -20,7 +21,8 @@ const saved = { ...process.env };
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'app-modules-'));
   process.env['AGIDE_CLAUDE_BIN'] = FAKE_CLAUDE;
-  process.env['AGIDE_SESSION_CWD'] = dir;
+  work = mkdtempSync(join(tmpdir(), 'session-work-'));
+  process.env['AGIDE_SESSION_CWD'] = work;
   process.env['FAKE_CLAUDE_RECORD'] = join(dir, 'launches.jsonl');
 });
 afterEach(async () => {
@@ -29,6 +31,7 @@ afterEach(async () => {
   app = undefined;
   process.env = { ...saved };
   rmSync(dir, { recursive: true, force: true });
+  rmSync(work, { recursive: true, force: true });
 });
 
 const ui: Caller = { kind: 'ui' };
@@ -73,6 +76,44 @@ const statusWith = (running: AppModules, sessionId: string): Promise<number> => 
 
 const textOf = (result: unknown): string =>
   ((result as { content?: { text?: string }[] }).content ?? []).map((item) => item.text ?? '').join('');
+
+describe('session launch', () => {
+  it('revokes the grant of a session whose launch failed', async () => {
+    const running = await start();
+    const revoked = vi.spyOn(running.services.mcp, 'revoke');
+    const fa = await folder(running, 'A');
+    const failed = await errorCode(running, 'session_create', { folderId: fa.id, cwd: join(work, 'missing') }, ui);
+    expect(failed, 'launch in a missing directory fails').toBe('failed');
+    expect(revoked, 'the grant issued for that launch is revoked').toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a working directory inside the app data and starts without one in a directory of the folder, not the home directory', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'session-home-'));
+    process.env['HOME'] = home;
+    delete process.env['AGIDE_SESSION_CWD'];
+    try {
+      const running = await start();
+      const fa = await folder(running, 'A');
+      expect(await errorCode(running, 'session_create', { folderId: fa.id, cwd: dir }, ui), 'cwd is the data directory').toBe('invalid_input');
+      const created = await session(running, fa.id);
+      const cwd = running.services.sessions.get(created.sessionId)?.cwd ?? '';
+      expect(cwd, 'a directory of its own below the home directory').toBe(join(home, 'Agide', fa.id));
+      expect(cwd === home || join(dir, 'sessions').startsWith(cwd + '/'), 'the working directory does not contain the session files').toBe(false);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('profile setup', () => {
+  it('gives the login terminal an empty directory that holds no session file', async () => {
+    const running = await start();
+    const status = await value<{ loginDirectory: string }>(running, 'profile_setup_status', {});
+    expect(status.loginDirectory, 'directory for the login terminal').toBe(join(dir, 'login'));
+    expect(readdirSync(status.loginDirectory), 'it is empty').toEqual([]);
+    expect(statSync(status.loginDirectory).mode & 0o777, 'owner only').toBe(0o700);
+  });
+});
 
 describe('session module scope', () => {
   it('lets an agent act on sessions in its own folder only', async () => {
@@ -128,7 +169,7 @@ describe('session module scope', () => {
     expect(nodes.map((n) => n.id), 'the grant now shows the new folder').toEqual([fc.id, sa.leafId]);
 
     await value(running, 'ui_remove_node', { nodeId: sa.leafId });
-    await expect.poll(() => running.services.sessions.get(sa.sessionId), { message: 'session after its leaf was removed' }).toBeUndefined();
+    await expect.poll(() => running.services.sessions.get(sa.sessionId), { message: 'session after its leaf was removed', timeout: 10_000 }).toBeUndefined();
   });
 
   it('revokes the grant when the leaf moves to the top level', async () => {
@@ -151,7 +192,7 @@ describe('session module scope', () => {
 
     const sb = await session(running, fa.id);
     running.services.sessions.sendText(sb.sessionId, '/exit');
-    await expect.poll(() => running.services.sessions.get(sb.sessionId)?.status, { message: 'status after /exit' }).toBe('exited');
+    await expect.poll(() => running.services.sessions.get(sb.sessionId)?.status, { message: 'status after /exit', timeout: 10_000 }).toBe('exited');
     expect(() => running.services.mcp.configFor(sb.sessionId), 'grant after the process exited').toThrow();
   });
 

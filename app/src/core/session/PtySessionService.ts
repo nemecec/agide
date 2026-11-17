@@ -1,10 +1,14 @@
-import { randomUUID } from 'node:crypto';
-import { accessSync, constants as fsConstants, mkdirSync, rmSync, statSync } from 'node:fs';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { mkdirSync, rmSync, statSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import * as nodePty from 'node-pty';
 import type { Unsubscribe } from '../events/EventBus';
-import { claudeEnv, resolveClaudeBinary } from './env';
+import { LocalProvider } from '../isolation/LocalProvider';
+import type { AgentEnvironment, IsolationProvider, McpEndpoint, ProfileLaunchSpec } from '../isolation/types';
+import { resolveClaudeBinary } from './env';
+import { DEFAULT_PROFILE_ID, type ProfileId } from '../profile/types';
+
 import { HookInbox } from './HookInbox';
 import { buildLaunchArgs } from './launchArgs';
 import { OutputBuffer } from './OutputBuffer';
@@ -24,19 +28,45 @@ import {
 export interface PtySessionServiceOptions {
   /** Directory that holds one hook inbox directory per session. */
   readonly eventsDir: string;
-  /** Path of the `claude` executable. Defaults to `resolveClaudeBinary()`. */
+  /** Where the sessions run (0018). Defaults to a `LocalProvider`, which runs `claude` on the host. */
+  readonly provider?: IsolationProvider;
+  /** The profile the sessions belong to (0017). Defaults to `default`. */
+  readonly profileId?: ProfileId;
+  /**
+   * The profile's launch inputs, read before every launch so a changed profile applies to the next start:
+   * `CLAUDE_CONFIG_DIR`, `GH_CONFIG_DIR`, extra environment and tool files. Defaults to `baseEnv` plus `env` with
+   * no Claude directory, which is milestone 1 behaviour.
+   */
+  readonly profileLaunch?: () => ProfileLaunchSpec;
+  /** Port of the app HTTP listener, read before every launch. */
+  readonly appPort?: () => number;
+  /**
+   * The app MCP server config for a session, or undefined for a session without it. The service writes it to a
+   * 0600 file in the session's directory and passes the file path, so the bearer token is not in the process
+   * arguments. `endpoint` is the address of the app server as the CLI inside the environment must use it.
+   */
+  readonly mcpConfig?: (session: SessionInfo, endpoint: McpEndpoint) => object | undefined | Promise<object | undefined>;
+  /** Directory of the session files of the default provider. Defaults to `sessions` next to `eventsDir`. */
+  readonly sessionFilesDir?: string;
+  /** Permission mode of a session that names none. Defaults to `default`, the CLI's prompting mode. */
+  readonly defaultPermissionMode?: PermissionMode;
+  /** Path of the `claude` executable of the default provider. Defaults to `resolveClaudeBinary()`. */
   readonly claudeBinary?: string;
   /** Defaults to a store in memory. */
   readonly store?: SessionStore;
-  /** Environment the launched process inherits. Defaults to `process.env`. */
+  /** Environment the launched process inherits when `profileLaunch` is absent. Defaults to `process.env`. */
   readonly baseEnv?: NodeJS.ProcessEnv;
-  /** Variables added after the scrub. */
+  /** Variables added after the scrub when `profileLaunch` is absent. */
   readonly env?: NodeJS.ProcessEnv;
   /**
-   * Hook point for the integrator: arguments appended to every launch, such as `--mcp-config`.
-   * Runs before each spawn, for `create` and for `resume`.
+   * Arguments appended to every launch, such as `--model`. Runs before each spawn, for `create` and for
+   * `resume`. Secrets do not belong here: process arguments are readable by every process of the user.
    */
   readonly extraArgs?: (session: SessionInfo) => readonly string[] | Promise<readonly string[]>;
+  /** Called with the session when a launch fails, for `create` and for `resume`, so a grant issued for it can be revoked. */
+  readonly onLaunchFailed?: (session: SessionInfo) => void;
+  /** Absolute paths the CLI may not read or edit, passed as permission rules in `--settings`. */
+  readonly denyPaths?: readonly string[];
   /** Pause between typed text and the Enter key in `sendText`. */
   readonly submitDelayMs?: number;
   /** Pause between the first `SessionStart` and the typing of the create prompt. */
@@ -56,11 +86,14 @@ interface Entry {
   cols: number;
   rows: number;
   process?: nodePty.IPty | undefined;
+  environment?: AgentEnvironment | undefined;
   inbox?: HookInbox | undefined;
   /** Resolves when the current process has ended. */
   ended?: Promise<void>;
   /** First prompt, typed once after the first `SessionStart`. */
   pendingPrompt?: string | undefined;
+  /** True while `mcp.json` exists; the first `SessionStart` removes it, since the CLI has read it by then. */
+  mcpFileWritten?: boolean;
   typing: Promise<void>;
   closing?: Promise<void>;
 }
@@ -70,8 +103,10 @@ export class PtySessionService implements SessionService {
   private readonly entries = new Map<SessionId, Entry>();
   private readonly listeners = new Set<(event: SessionEvent) => void>();
   private readonly store: SessionStore;
-  private readonly claudeBinary: string;
-  private readonly baseEnv: NodeJS.ProcessEnv;
+  private readonly provider: IsolationProvider;
+  private readonly environments = new Set<AgentEnvironment>();
+  private readonly profileId: ProfileId;
+  private readonly defaultPermissionMode: PermissionMode;
   private readonly submitDelayMs: number;
   private readonly firstPromptDelayMs: number;
   private readonly killTimeoutMs: number;
@@ -79,8 +114,14 @@ export class PtySessionService implements SessionService {
 
   constructor(private readonly options: PtySessionServiceOptions) {
     this.store = options.store ?? new MemorySessionStore();
-    this.baseEnv = options.baseEnv ?? process.env;
-    this.claudeBinary = options.claudeBinary ?? resolveClaudeBinary(this.baseEnv);
+    this.profileId = options.profileId ?? DEFAULT_PROFILE_ID;
+    this.defaultPermissionMode = options.defaultPermissionMode ?? 'default';
+    this.provider =
+      options.provider ??
+      new LocalProvider({
+        sessionFilesDir: options.sessionFilesDir ?? join(dirname(options.eventsDir), 'sessions'),
+        claudeBinary: options.claudeBinary ?? resolveClaudeBinary(options.baseEnv ?? process.env),
+      });
     this.submitDelayMs = options.submitDelayMs ?? 300;
     this.firstPromptDelayMs = options.firstPromptDelayMs ?? 1500;
     this.killTimeoutMs = options.killTimeoutMs ?? 2000;
@@ -109,7 +150,7 @@ export class PtySessionService implements SessionService {
     };
     const entry: Entry = {
       info,
-      permissionMode: input.permissionMode ?? 'default',
+      permissionMode: input.permissionMode ?? this.defaultPermissionMode,
       output: new OutputBuffer(),
       cols: input.cols ?? DEFAULT_COLS,
       rows: input.rows ?? DEFAULT_ROWS,
@@ -164,6 +205,7 @@ export class PtySessionService implements SessionService {
   /** Ends every process and keeps the sessions, so the next start lists them as exited. For app quit. */
   async shutdown(): Promise<void> {
     await Promise.all([...this.entries.values()].map((entry) => this.shutdownEntry(entry)));
+    await Promise.all([...this.environments].map((environment) => environment.dispose()));
   }
 
   sendText(id: SessionId, text: string): void {
@@ -220,32 +262,52 @@ export class PtySessionService implements SessionService {
     const { info } = entry;
     mkdirSync(this.options.eventsDir, { recursive: true, mode: 0o700 });
     const inboxDir = this.inboxDir(info.id);
+    let environment: AgentEnvironment | undefined;
     try {
-      this.checkLaunchable(info.cwd);
-      const extraArgs = (await this.options.extraArgs?.(info)) ?? [];
+      if (!statSync(info.cwd).isDirectory()) throw new Error(`${info.cwd} is not a directory`);
+      const check = await this.provider.check();
+      if (!check.ok) throw new Error(check.fix === undefined ? check.reason : `${check.reason}. ${check.fix}`);
+      environment = await this.provider.prepare({
+        key: { profileId: this.profileId },
+        profile: this.profileLaunch(),
+        workspace: { mode: 'bind', hostPath: info.cwd },
+        network: { mode: 'unrestricted' },
+        appEndpoint: { port: this.options.appPort?.() ?? 0 },
+      });
+      this.environments.add(environment);
+      const delivery = environment.hookDelivery(info.id, { inboxHostDir: inboxDir, httpPath: `/hooks/${info.id}`, token: randomBytes(32).toString('hex') });
+      if (delivery.kind !== 'inbox-dir') throw new Error(`hook delivery ${delivery.kind} is not supported by the session service`);
+      const config = await this.options.mcpConfig?.(info, environment.mcpEndpoint(info.id));
+      const mcpConfigPath = config === undefined ? undefined : await environment.writeSessionFile(info.id, 'mcp.json', JSON.stringify(config));
+      entry.mcpFileWritten = mcpConfigPath !== undefined;
       const args = buildLaunchArgs({
         sessionId: info.id,
         resume,
         permissionMode: entry.permissionMode,
-        inboxDir,
-        extraArgs,
+        inboxDir: delivery.dir,
+        mcpConfigPath,
+        denyPaths: this.options.denyPaths ?? [],
+        extraArgs: (await this.options.extraArgs?.(info)) ?? [],
       });
+      const command = await environment.ptyCommand({ sessionId: info.id, cwd: info.cwd, args, cols: entry.cols, rows: entry.rows });
       const inbox = new HookInbox(inboxDir, (record) => this.onHook(entry, record));
       let proc: nodePty.IPty;
       try {
-        proc = nodePty.spawn(this.claudeBinary, args, {
+        proc = nodePty.spawn(command.file, [...command.args], {
           name: 'xterm-256color',
           cols: entry.cols,
           rows: entry.rows,
-          cwd: info.cwd,
-          env: claudeEnv(this.baseEnv, this.options.env),
+          cwd: command.cwd,
+          env: { ...command.env },
         });
       } catch (error) {
         inbox.dispose();
         throw error;
       }
+      environment.attach(info.id, proc.pid);
       entry.inbox = inbox;
       entry.process = proc;
+      entry.environment = environment;
       entry.ended = new Promise<void>((resolve) => {
         proc.onExit(({ exitCode, signal }) => {
           if (entry.process === proc) this.onExit(entry, exitCode, signal);
@@ -258,16 +320,25 @@ export class PtySessionService implements SessionService {
         this.emit({ type: 'session.output', sessionId: info.id, data });
       });
     } catch (error) {
+      await environment?.releaseSession(info.id).catch(() => undefined);
+      try {
+        this.options.onLaunchFailed?.(info);
+      } catch (callbackError) {
+        console.error(callbackError);
+      }
       throw error instanceof SessionError
         ? error
-        : new SessionError('launch_failed', `cannot start ${this.claudeBinary}: ${error instanceof Error ? error.message : String(error)}`);
+        : new SessionError('launch_failed', `cannot start claude: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  /** node-pty reports a missing executable or directory only after the fork, as an exit; this reports it as an error. */
-  private checkLaunchable(cwd: string): void {
-    if (this.claudeBinary.includes('/')) accessSync(this.claudeBinary, fsConstants.X_OK);
-    if (!statSync(cwd).isDirectory()) throw new Error(`${cwd} is not a directory`);
+  private profileLaunch(): ProfileLaunchSpec {
+    if (this.options.profileLaunch) return this.options.profileLaunch();
+    const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries(this.options.baseEnv ?? process.env)) if (value !== undefined) env[key] = value;
+    const extraEnv: Record<string, string> = {};
+    for (const [key, value] of Object.entries(this.options.env ?? {})) if (value !== undefined) extraEnv[key] = value;
+    return { claudeConfigDir: undefined, env, extraEnv, toolFiles: [] };
   }
 
   private onHook(entry: Entry, record: unknown): void {
@@ -275,6 +346,10 @@ export class PtySessionService implements SessionService {
     const hookEvent = (record as { hook_event_name?: unknown }).hook_event_name;
     if (typeof hookEvent !== 'string') return;
     this.emit({ type: 'session.hook', sessionId: entry.info.id, hookEvent, payload: record });
+    if (hookEvent === 'SessionStart' && entry.mcpFileWritten) {
+      entry.mcpFileWritten = false;
+      void entry.environment?.removeSessionFile(entry.info.id, 'mcp.json').catch(() => undefined);
+    }
     const next = statusAfterHook(entry.info.status, hookEvent);
     if (next === undefined) return;
     const wasStarting = entry.info.status === 'starting';
@@ -293,15 +368,17 @@ export class PtySessionService implements SessionService {
     entry.inbox?.stop();
     entry.inbox = undefined;
     entry.process = undefined;
+    void entry.environment?.releaseSession(entry.info.id).catch(() => undefined);
     const session = this.setInfo(entry, (info) => ({ ...info, status: 'exited', exitCode }));
     this.emit({ type: 'session.exited', session, exitCode, signal: signalName(signal) });
   }
 
   private async shutdownEntry(entry: Entry): Promise<void> {
-    const proc = entry.process;
-    if (!proc) return;
-    proc.kill('SIGTERM');
-    const killer = setTimeout(() => proc.kill('SIGKILL'), this.killTimeoutMs);
+    const { process: proc, environment } = entry;
+    if (!proc || !environment) return;
+    const sessionId = entry.info.id;
+    await environment.terminate(sessionId, 'SIGTERM');
+    const killer = setTimeout(() => void environment.terminate(sessionId, 'SIGKILL').catch(() => undefined), this.killTimeoutMs);
     try {
       await entry.ended;
     } finally {

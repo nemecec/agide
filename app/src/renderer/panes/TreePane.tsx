@@ -176,6 +176,7 @@ export function TreePane({ nodes, loaded, onOpen }: TreePaneProps) {
     ];
     if (target) {
       entries.push(
+        { label: 'Open to the side', run: () => void run('ui_open_to_side', { nodeId: target.getId() }) },
         { label: 'Rename', run: () => target.startRenaming() },
         { label: 'Delete', run: () => void remove(target) },
       );

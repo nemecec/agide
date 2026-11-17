@@ -21,6 +21,7 @@ describe('hook settings', () => {
       'SessionEnd',
       'SessionStart',
       'Stop',
+      'StopFailure',
       'SubagentStart',
       'SubagentStop',
       'UserPromptSubmit',

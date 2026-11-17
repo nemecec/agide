@@ -1,11 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test';
-import type { McpConfigJson } from '../src/core/mcp/types';
 import type { TreeNode } from '../src/core/tree/types';
+import { connectAsSession, flag, recordedLaunches, sessionMcpConfig, toolJson } from './sessionMcp';
 
 const MAIN = join(import.meta.dirname, '..', 'out', 'main', 'index.js');
 const FAKE_CLAUDE = join(import.meta.dirname, '..', 'src', 'core', 'session', 'fixtures', 'fake-claude.mjs');
@@ -77,32 +77,7 @@ async function addFromMenu(page: Page, target: string | null, entry: string, tit
 }
 
 /** The arguments of every `claude` launch so far, as the fake executable recorded them. */
-function launches(): string[][] {
-  if (!existsSync(launchesFile())) return [];
-  return readFileSync(launchesFile(), 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => (JSON.parse(line) as { args: string[] }).args);
-}
-
-const flag = (args: readonly string[], name: string): string | undefined => {
-  const at = args.indexOf(name);
-  return at < 0 ? undefined : args[at + 1];
-};
-
-/** Connects to the app MCP server the way the launched session would, with its `--mcp-config`. */
-async function connectAsSession(args: readonly string[]): Promise<Client> {
-  const config = JSON.parse(flag(args, '--mcp-config') ?? 'null') as McpConfigJson;
-  const server = config.mcpServers.app;
-  const connected = new Client({ name: 'e2e', version: '0' });
-  await connected.connect(new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers: server.headers } }));
-  return connected;
-}
-
-function toolJson<T>(result: unknown): T {
-  const content = (result as { content: { type: string; text: string }[] }).content;
-  return JSON.parse(content.find((part) => part.type === 'text')?.text ?? 'null') as T;
-}
+const launches = (): string[][] => recordedLaunches(launchesFile()).map((launch) => launch.args);
 
 const terminalText = (page: Page) => page.getByTestId('terminal-host').locator('.xterm-rows');
 
@@ -133,7 +108,7 @@ test('shows a folder an agent creates over MCP and lists a folder the user creat
   await addFromMenu(page, null, 'New folder', 'Task');
   await addSession(page, 'Task');
   await expect.poll(() => launches().length, { message: 'the session started one claude process' }).toBe(1);
-  client = await connectAsSession(launches()[0] ?? []);
+  client = await connectAsSession(recordedLaunches(launchesFile())[0]!);
 
   const created = toolJson<TreeNode>(await client.callTool({ name: 'ui_create_folder', arguments: { title: 'from-mcp' } }));
   await expect(item(page, 'from-mcp'), 'the folder from the MCP call appears without a reload').toBeVisible();
@@ -173,9 +148,25 @@ test('opens the terminal of a Claude session leaf and passes typed input to the 
   await item(page, SESSION).click();
   await expect(terminalText(page), 'reopening the leaf redraws the earlier output').toContainText('echo: hello');
 
-  const args = launches()[0] ?? [];
-  const config = JSON.parse(flag(args, '--mcp-config') ?? 'null') as McpConfigJson;
-  expect(config.mcpServers.app.type, 'the launch carries the app MCP server config').toBe('http');
-  expect(config.mcpServers.app.url, 'the MCP URL names the session').toContain(flag(args, '--session-id') ?? 'missing');
-  expect(config.mcpServers.app.headers.Authorization, 'the launch carries a bearer token').toMatch(/^Bearer [0-9a-f]{64}$/);
+});
+
+test('launches a session with its MCP config in a 0600 file and no token in the arguments', async () => {
+  const page = await launch();
+  await addFromMenu(page, null, 'New folder', 'Work');
+  await addSession(page, 'Work');
+  await expect(page.getByTestId('terminal-status'), 'the session is idle after SessionStart').toHaveAttribute('data-status', 'idle');
+
+  const [launched] = recordedLaunches(launchesFile());
+  if (!launched) throw new Error('no launch recorded');
+  const { path, mode, config } = sessionMcpConfig(launched);
+  const token = config.mcpServers.app.headers.Authorization;
+  expect(path.startsWith(join(userData, 'sessions')), 'the config file lies in the session files of the data directory').toBe(true);
+  expect(mode, 'the config file is readable by the user only').toBe(0o600);
+  expect(launched.mcpConfigFile?.mode, 'the file had mode 0600 when claude read it').toBe(0o600);
+  expect(config.mcpServers.app.type, 'the file holds the app MCP server config').toBe('http');
+  expect(config.mcpServers.app.url, 'the MCP URL names the session').toContain(flag(launched.args, '--session-id') ?? 'missing');
+  expect(token, 'the file holds a bearer token').toMatch(/^Bearer [0-9a-f]{64}$/);
+  const secret = token.slice('Bearer '.length);
+  expect(launched.args.some((arg) => arg.includes(secret)), 'no argument holds the token').toBe(false);
+  await expect.poll(() => existsSync(path), { message: 'the config file is removed once the CLI has started' }).toBe(false);
 });

@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, shell } from 'electron';
+import { decideWindowOpen, isAppFrameUrl as isAppFrame, mainWindowWebPreferences } from './windowPolicy';
 
 export const APP_TITLE = 'Agide';
 
@@ -12,25 +13,19 @@ function devServerUrl(): string | undefined {
 const RENDERER_DIR_URL = pathToFileURL(join(import.meta.dirname, '../renderer')).href;
 
 /** True for a frame URL that belongs to the app: its own built page, or the dev server. */
-export function isAppFrameUrl(url: string): boolean {
-  if (url.startsWith(`${RENDERER_DIR_URL}/`)) return true;
-  const dev = devServerUrl();
-  return dev !== undefined && new URL(url).origin === new URL(dev).origin;
-}
+export const isAppFrameUrl = (url: string): boolean => isAppFrame(url, { rendererDirUrl: RENDERER_DIR_URL, devServerUrl: devServerUrl() });
 
-export function createMainWindow(options: { show: boolean }): BrowserWindow {
+export function createMainWindow(options: { show: boolean; title?: string }): BrowserWindow {
   const window = new BrowserWindow({
-    title: APP_TITLE,
+    title: options.title ?? APP_TITLE,
     width: 1280,
     height: 800,
     show: false,
-    webPreferences: {
-      preload: join(import.meta.dirname, '../preload/index.cjs'),
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-    },
+    webPreferences: mainWindowWebPreferences(join(import.meta.dirname, '../preload/index.cjs')),
   });
+
+  // The page title would replace the profile name in the window title.
+  if (options.title) window.on('page-title-updated', (event) => event.preventDefault());
 
   // The app window needs no web permission (camera, notifications and the like).
   window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -40,8 +35,9 @@ export function createMainWindow(options: { show: boolean }): BrowserWindow {
 
   // Links open in the default browser; the app window never navigates away from the app.
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/.test(url)) void shell.openExternal(url);
-    return { action: 'deny' };
+    const decision = decideWindowOpen(url);
+    if (decision.openExternal) void shell.openExternal(decision.openExternal);
+    return { action: decision.action };
   });
   window.webContents.on('will-navigate', (event) => event.preventDefault());
 

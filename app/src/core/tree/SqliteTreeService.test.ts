@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openStore, type Database } from '../store/index';
 import { SqliteTreeService } from './SqliteTreeService';
+import { treeMigrations } from './treeMigrations';
 import { describeTreeServiceContract } from './treeServiceContract';
 
 describeTreeServiceContract('SqliteTreeService', () => new SqliteTreeService(openStore(':memory:')));
@@ -55,7 +56,7 @@ describe('SqliteTreeService persistence', () => {
     new SqliteTreeService(db);
     new SqliteTreeService(db);
     const row = db.prepare("SELECT version FROM schema_versions WHERE module = 'tree'").get();
-    expect(row, 'tree module has a recorded schema version').toMatchObject({ version: 1 });
+    expect(row, 'tree module has a recorded schema version').toMatchObject({ version: treeMigrations.length });
   });
 
   it('removes the descendants rows from the database, not only from the listing', () => {

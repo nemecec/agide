@@ -19,4 +19,12 @@ export const treeMigrations: readonly Migration[] = [
       CREATE INDEX tree_nodes_by_parent ON tree_nodes (parent_id, position);
     `,
   },
+  {
+    version: 2,
+    sql: `
+      ALTER TABLE tree_nodes ADD COLUMN description TEXT CHECK (description IS NULL OR length(description) <= 2000);
+      ALTER TABLE tree_nodes ADD COLUMN description_updated_at TEXT;
+      ALTER TABLE tree_nodes ADD COLUMN is_project INTEGER NOT NULL DEFAULT 0 CHECK (is_project IN (0, 1));
+    `,
+  },
 ];

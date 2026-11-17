@@ -1,10 +1,14 @@
-import { join } from 'node:path';
+import { mkdirSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { z } from 'zod';
 import { CommandError, requireInScope, type Caller } from '../../core/commands/index';
 import type { AppMcpServer } from '../../core/mcp/index';
+import { profilePaths, type ProfileService } from '../../core/profile/index';
 import {
   claudeArgsFromEnv,
+  defaultPermissionModeFromEnv,
   defaultSessionCwd,
+  profileLaunchSpec,
   PtySessionService,
   SessionError,
   SqliteSessionStore,
@@ -26,18 +30,25 @@ const permissionMode = z.enum(['default', 'acceptEdits', 'plan', 'auto', 'bypass
  */
 export async function init(
   ctx: ModuleContext,
-  deps: { tree: TreeService; mcp: AppMcpServer },
+  deps: { tree: TreeService; mcp: AppMcpServer; profile: ProfileService },
 ): Promise<ModuleHandle<SessionService>> {
   const { tree, mcp } = deps;
   const launchArgs = claudeArgsFromEnv();
-  const granted = new Set<string>();
+  const { port } = await mcp.start();
+  const appRoot = ctx.profile?.root ?? ctx.dataDir;
+  const paths = profilePaths(appRoot, deps.profile.id);
   const sessions = new PtySessionService({
     eventsDir: join(ctx.dataDir, 'session-events'),
+    sessionFilesDir: join(ctx.dataDir, 'sessions'),
     store: new SqliteSessionStore(ctx.db),
-    extraArgs: (session) => {
-      granted.add(session.id);
-      return [...launchArgs, ...mcpArgs(mcp, session, leafOf(session.id))];
-    },
+    profileId: deps.profile.id,
+    profileLaunch: () => profileLaunchSpec(deps.profile.settings(), paths, process.env),
+    appPort: () => port,
+    denyPaths: [appRoot],
+    onLaunchFailed: (session) => mcp.revoke(session.id),
+    defaultPermissionMode: defaultPermissionModeFromEnv(),
+    extraArgs: () => launchArgs,
+    mcpConfig: (session, endpoint) => mcpConfig(mcp, session, leafOf(session.id), endpoint.url),
   });
 
   // The leaf each session owns. Only that leaf drives the session: any other leaf with the same surface id is
@@ -140,22 +151,16 @@ export async function init(
           if (input.permissionMode === 'bypassPermissions' && input.confirmBypassPermissions !== true) {
             throw new CommandError('invalid_input', 'bypassPermissions needs confirmBypassPermissions: true');
           }
-          let session: SessionInfo;
-          try {
-            session = await sessions.create({
-              folderId: folder.id,
-              cwd: input.cwd ?? defaultSessionCwd(),
-              ...(input.title === undefined ? {} : { title: input.title }),
-              ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
-              ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
-            });
-          } catch (error) {
-            // A launch that failed after the grant was issued leaves no session to revoke it later.
-            for (const id of granted) if (!sessions.get(id)) mcp.revoke(id);
-            granted.clear();
-            throw error;
-          }
-          granted.clear();
+          const cwd = input.cwd ?? defaultSessionCwd(folder.id);
+          if (isWithin(appRoot, cwd)) throw new CommandError('invalid_input', 'a session cannot run inside the data directory of the app');
+          if (input.cwd === undefined) mkdirSync(cwd, { recursive: true, mode: 0o700 });
+          const session = await sessions.create({
+            folderId: folder.id,
+            cwd,
+            ...(input.title === undefined ? {} : { title: input.title }),
+            ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
+            ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+          });
           try {
             const leaf = tree.createLeaf({ title: session.title, parentId: folder.id, surfaceType: SURFACE_TYPE, surfaceId: session.id });
             leafIds.set(session.id, leaf.id);
@@ -273,17 +278,18 @@ export async function init(
 }
 
 /**
- * Grants the session access to the app MCP server and returns the CLI arguments for it. A session whose leaf
- * left its folder gets no grant, because its scope would name a folder it is no longer in.
+ * Grants the session access to the app MCP server and returns the config the CLI reads from a file. A session
+ * whose leaf left its folder gets no grant, because its scope would name a folder it is no longer in.
  */
-function mcpArgs(mcp: AppMcpServer, session: SessionInfo, leaf: TreeNode | undefined): string[] {
-  if (leaf && leaf.parentId !== session.folderId) return [];
+function mcpConfig(mcp: AppMcpServer, session: SessionInfo, leaf: TreeNode | undefined, url: string): object | undefined {
+  if (leaf && leaf.parentId !== session.folderId) return undefined;
   try {
     mcp.grant(session.id, session.folderId);
-    return ['--mcp-config', JSON.stringify(mcp.configFor(session.id))];
+    const { app } = mcp.configFor(session.id).mcpServers;
+    return { mcpServers: { app: { ...app, url } } };
   } catch (error) {
     console.warn(`session ${session.id} starts without the app MCP server:`, error);
-    return [];
+    return undefined;
   }
 }
 
@@ -297,4 +303,10 @@ function rescope(mcp: AppMcpServer, sessionId: string, folderId: string): void {
 
 function logError(error: unknown): void {
   console.error(error);
+}
+
+/** True when `path` is `root` or lies below it. */
+function isWithin(root: string, path: string): boolean {
+  const from = relative(resolve(root), resolve(path));
+  return from === '' || (!from.startsWith('..') && !isAbsolute(from));
 }

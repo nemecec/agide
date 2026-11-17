@@ -5,6 +5,31 @@ A command with a UI binding must be an MCP tool unless it declares `mcpExempt` w
 
 | Command | UI binding | MCP tool | Status |
 |---|---|---|---|
+| `blocks_list` | none | yes | ok |
+| `inbox_context` | none | no | ok |
+| `inbox_list` | none | yes | ok |
+| `inbox_mark_seen` | none | no | ok |
+| `inbox_mark_unread` | none | no | ok |
+| `inbox_post` | none | yes | ok |
+| `inbox_reopen` | none | no | ok |
+| `inbox_resolve` | none | yes | ok |
+| `inbox_set_project_summary` | none | no | ok |
+| `inbox_set_session_summary` | none | no | ok |
+| `inbox_set_viewing` | none | no | ok |
+| `inbox_snooze` | none | no | ok |
+| `layout_apply` | none | yes | ok |
+| `layout_get` | none | yes | ok |
+| `layout_switch` | menu app | yes | ok |
+| `layout_undo` | key CmdOrCtrl+Z | yes | ok |
+| `layout_validate` | none | yes | ok |
+| `profile_create` | menu app | no | exempt: Agents do not manage profiles: 0017 allows no action across profiles. |
+| `profile_list` | none | no | ok |
+| `profile_open` | menu app | no | exempt: Agents do not manage profiles: 0017 allows no action across profiles. |
+| `profile_set_git` | none | no | ok |
+| `profile_setup_status` | none | no | ok |
+| `reminder_create` | none | yes | ok |
+| `reminder_delete` | none | yes | ok |
+| `reminder_list` | none | yes | ok |
 | `session_close` | none | no | ok |
 | `session_create` | menu tree-node | no | exempt: Agents do not start Claude sessions; the user does. |
 | `session_get` | none | yes | ok |
@@ -15,11 +40,17 @@ A command with a UI binding must be an MCP tool unless it declares `mcpExempt` w
 | `session_send_text` | none | yes | ok |
 | `session_write` | none | no | ok |
 | `surfaces_list` | none | yes | ok |
+| `task_create` | none | yes | ok |
+| `task_list` | none | yes | ok |
+| `task_update` | none | yes | ok |
+| `ui_capture_window` | menu app | yes | ok |
 | `ui_create_folder` | menu tree-background | yes | ok |
 | `ui_create_leaf` | none | yes | ok |
 | `ui_focus_node` | menu tree-node | yes | ok |
+| `ui_get_context` | none | no | ok |
 | `ui_list_surface_types` | none | yes | ok |
 | `ui_list_tree` | none | yes | ok |
 | `ui_move_node` | menu tree-node | yes | ok |
+| `ui_open_to_side` | menu tree-node | yes | ok |
 | `ui_remove_node` | menu tree-node, key CmdOrCtrl+Backspace | yes | ok |
 | `ui_rename_node` | menu tree-node, key F2 | yes | ok |
