@@ -1,5 +1,5 @@
 candidates/
-app/
+.app-git-backup/
 probes/out/
 probes/work/
 probes/__pycache__/

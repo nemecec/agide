@@ -29,7 +29,7 @@ The plan: [spike-plan.md](spike-plan.md).
 
 ## Application (`../app/`)
 
-The greenfield app is its own git repository in `../app/` on the branch `spike/stage2`, with no commits. `../app/README.md` covers install, run, environment variables and the test commands. Architecture and contracts: 0013.
+The greenfield app lives in `../app/` in this repository. `../app/README.md` covers install, run, environment variables and the test commands. Architecture and contracts: 0013.
 
 | Command (run in `../app/`) | Checks |
 |---|---|

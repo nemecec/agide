@@ -1,0 +1,10 @@
+export * from './types';
+export { CommandRegistry } from './CommandRegistry';
+export { requireInScope } from './scope';
+export { inputJsonSchema, describeFields } from './jsonSchema';
+export { validationMessage } from './validationMessage';
+export type { UiEvent } from './uiEvents';
+export { registerBuiltinCommands } from './builtinCommands';
+export { registerTreeCommands, nodesVisibleTo, type TreeCommandDeps } from './treeCommands';
+export { registerSurfaceCommands } from './surfaceCommands';
+export { checkParity, renderParityMarkdown, type ParityReport, type ParityRow } from './parity';

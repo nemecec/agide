@@ -9,7 +9,7 @@ Inputs: 0004, 0006, 0009, 0012, `probes/RESULTS.md`, `probes/mcp_host.mjs`, `pro
 
 0012 starts milestone 1 of the greenfield Electron shell: the shell, the task tree with persistence, the Claude session surface in a PTY, and the app MCP server with the command registry. Builders implement these slices in parallel. They need a repository, a toolchain that builds and tests, and contracts fixed before they start, so that no two builders edit the same file.
 
-The application repository is `app/` (its own git repository on `spike/stage2`, no commits).
+The application code is in `app/` of the Agide repository.
 
 ## Decision
 

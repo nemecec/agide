@@ -1,0 +1,3 @@
+# pnpm 11 replaced onlyBuiltDependencies with allowBuilds. Packages not listed here do not run lifecycle scripts.
+allowBuilds:
+  node-pty: true
