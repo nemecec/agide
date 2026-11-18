@@ -12,7 +12,7 @@ The goal is a desktop tool for agentic coding with a task tree, context attachme
 
 - The tool is for personal use. Anthropic's legal page lets an end user sign in to the unmodified Claude Code binary with their own subscription, so a personal tool needs no commercial agreement. A team version needs a new decision and a conversation with Anthropic.
 - The target platform is macOS only. Cross-platform support is out of scope and is not a reason to prefer a base.
-- Jira access goes through the claude.ai Atlassian connector. The tool does not store Jira tokens.
+- Jira access from Claude sessions goes through the claude.ai Atlassian connector. Amended on 2026-11-18 (0033): Agide may store a Jira API token per profile in the OS keychain for the Jira source of the apps.
 - Claude runs as the unmodified `claude` CLI under the user's own login. The tool does not use the Agent SDK and does not handle claude.ai credentials.
 - The spike uses Claude Code 2.1.326, the latest release on the npm `latest` tag on 2026-11-17. Probe results are valid for that version only.
 - Candidate repositories are read as shallow clones in fresh directories under `candidates/`. They are not installed, built or run on the host during the spike's first stage. Running third-party code needs a separate decision, which the base decision record (0007) puts to the user.
