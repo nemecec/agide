@@ -1,0 +1,45 @@
+.settings-panel {
+  width: min(680px, calc(100vw - 32px));
+  max-height: 86vh;
+  top: 6%;
+}
+.settings-panel section + section {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.settings-panel textarea {
+  font: inherit;
+}
+.settings-panel .setting-check {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+.settings-panel .setting-check input {
+  margin-top: 2px;
+}
+.isolation-providers {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.isolation-providers > li {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.isolation-providers > li[data-available='false'] {
+  opacity: 0.6;
+}
+.isolation-providers h4 {
+  margin: 8px 0 2px;
+  font-size: 12px;
+}
+.isolation-check[data-ok='false'] {
+  color: var(--danger);
+}
+.isolation-check[data-warning='true'] {
+  color: var(--warn);
+}

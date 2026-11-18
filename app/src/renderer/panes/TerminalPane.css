@@ -18,14 +18,10 @@
   font: inherit;
 }
 
-.terminal-status[data-status='busy'],
-.terminal-status[data-status='waiting'] {
-  color: var(--fg);
-}
 
 .terminal-host {
   flex: 1;
   min-height: 0;
   padding: 6px 0 0 8px;
-  background: var(--terminal-bg, #1e1e1e);
+  background: var(--bg);
 }

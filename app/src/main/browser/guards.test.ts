@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import { attachGuards, setupPartition, type GuardedContents, type GuardedSession } from './guards';
 import { debuggerTransport, type DebuggerLike } from './cdpTransport';
-import { overlayScript, removeOverlayScript } from './capture';
+import { overlayScript, removeOverlayScript, STILL_Z_INDEX } from './capture';
 import { openInChrome } from './openInChrome';
 import { isUnderDataDir } from '../../core/profile/partition';
 
@@ -163,6 +163,8 @@ describe('window capture composition', () => {
     expect(script, 'the image of a view that is not shared never enters the script').not.toContain('BBBB');
     expect(script, 'mask text').toContain('not shared');
     expect(script, 'masked pane in the DOM wins').toContain('data-capture-mask');
+    expect(script, 'stills sit below dialogs, menus and popovers').toContain(`z-index:${STILL_Z_INDEX};`);
+    expect(script, 'a still is not drawn over everything').not.toContain('2147483647');
     expect(removeOverlayScript, 'removal').toContain('data-capture-view');
   });
 });

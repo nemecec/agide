@@ -8,6 +8,12 @@ import { useViewSuspension } from './suspension';
 
 const MODES: readonly ObserveMode[] = ['off', 'on-demand', 'live'];
 
+const MODE_HELP: Readonly<Record<ObserveMode, string>> = {
+  off: 'Agents cannot read this tab.',
+  'on-demand': 'An agent reads the page only when it asks, and each read is logged.',
+  live: 'Agents see the page as it changes, without asking each time.',
+};
+
 /** The indicator of a tab as a button; it opens the switch and the tab's recent access log entries. */
 export function ObservationControl({ leafId, mode, reading, forcedOff }: { readonly leafId: string; readonly mode: ObserveMode; readonly reading: boolean; readonly forcedOff: boolean }) {
   const [open, setOpen] = useState(false);
@@ -45,19 +51,20 @@ export function ObservationControl({ leafId, mode, reading, forcedOff }: { reado
                   disabled={forcedOff}
                   onChange={() => void api().invoke('ui_set_observation', { nodeId: leafId, mode: candidate })}
                 />{' '}
-                {MODE_LABEL[candidate]}
+                <strong>{MODE_LABEL[candidate]}</strong>
+                <span className="observation-help">{MODE_HELP[candidate]}</span>
               </label>
             ))}
           </div>
           {forcedOff && <p className="muted">A blocked address keeps observation off.</p>}
-          <ol className="observation-log" aria-label="Recent access">
+          <ul className="observation-log" aria-label="Recent access">
             {entries.length === 0 && <li className="muted">No agent has read this tab.</li>}
             {entries.map((entry) => (
               <li key={entry.id}>
                 {new Date(entry.at).toLocaleTimeString()} {entry.kind} {entry.outcome}
               </li>
             ))}
-          </ol>
+          </ul>
         </div>
       )}
     </span>

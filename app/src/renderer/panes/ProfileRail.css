@@ -6,6 +6,7 @@
   background: var(--pane-bg);
   border-right: 1px solid var(--border);
   position: relative;
+  box-sizing: border-box;
 }
 .profile-rail ul {
   list-style: none;
@@ -105,6 +106,16 @@
   display: flex;
   gap: 6px;
 }
+.profile-temporary {
+  margin: 0 6px;
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--muted);
+  text-align: center;
+}
+.profile-strip-temporary {
+  background: var(--muted);
+}
 .profile-strip {
   height: 20px;
   display: flex;
@@ -129,4 +140,18 @@
 .setup-pane h3 {
   margin: 0 0 6px;
   font-size: 13px;
+}
+.setup-field {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.setup-field input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 2px;
+}
+.setup-pane .muted {
+  font-size: 11px;
 }

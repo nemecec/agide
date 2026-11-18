@@ -21,6 +21,7 @@
     "coverage:e2e": "node scripts/coverage-e2e.mjs",
     "mutation": "node scripts/mutation-checks.mjs",
     "parity": "node scripts/parity.mjs",
+    "visual-check": "node scripts/visual-check.mjs",
     "blocks-docs": "node scripts/blocks-docs.mjs",
     "e2e:claude-mcp": "node scripts/e2e-claude-mcp.mjs",
     "e2e:real-claude": "electron-vite build && node scripts/e2e-real-claude.mjs",

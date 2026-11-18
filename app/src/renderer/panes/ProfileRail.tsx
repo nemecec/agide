@@ -9,13 +9,23 @@ import './ProfileRail.css';
 
 /**
  * The profile switcher rail (`agide/profile-rail`). Lists every profile with its colour, initial, running
- * mark and unread badge; a click focuses the running profile or starts it. Shown only for persistent profiles.
+ * mark and unread badge; a click focuses the running profile or starts it. A temporary profile shows a note instead of the list.
  */
 export function ProfileRail({ instanceId }: PaneProps) {
   const { list, reload } = useProfiles();
   const [creating, setCreating] = useState(false);
   const [problem, setProblem] = useState<string | undefined>(undefined);
-  if (!list?.persistent) return null;
+  if (!list) return null;
+  if (!list.persistent) {
+    return (
+      <nav className="profile-rail" data-testid="profile-rail" data-instance={instanceId} aria-label="Profiles">
+        <p className="profile-temporary" title="This window runs a temporary profile: nothing here is kept after it closes and no other profiles are listed.">
+          Temporary profile
+        </p>
+        <PlanUsage />
+      </nav>
+    );
+  }
 
   const open = (id: string): void => {
     setProblem(undefined);

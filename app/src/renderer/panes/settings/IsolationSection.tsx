@@ -1,11 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { IsolationStatus, ProviderRow } from '../../../core/isolation/statusTypes';
 import { api } from '../../api';
+import './settings.css';
 
 const OPTION_FIELD: Partial<Record<string, { key: 'srtBinary' | 'containerImage'; label: string }>> = {
   srt: { key: 'srtBinary', label: 'srt path' },
   container: { key: 'containerImage', label: 'Image' },
 };
+
+/** Text with `backtick` spans drawn as code. */
+function Code({ text }: { readonly text: string }) {
+  return (
+    <>
+      {text.split('`').map((part, index) => (index % 2 === 1 ? <code key={index}>{part}</code> : part))}
+    </>
+  );
+}
 
 function ProviderChoice({
   row,
@@ -23,13 +33,14 @@ function ProviderChoice({
   const field = OPTION_FIELD[row.id];
   const { statement } = row;
   return (
-    <li data-testid={`isolation-${row.id}`}>
-      <label>
+    <li data-testid={`isolation-${row.id}`} data-available={row.check.ok}>
+      <label className="setting-check">
         <input type="radio" name="isolation-provider" checked={selected} disabled={!row.selectable && !selected} onChange={onChoose} />
         <strong>{statement.label}</strong>
+        {row.check.ok && statement.isolated.length === 0 ? <span className="chip" data-tone="waiting">Not isolated</span> : null}
       </label>
-      <p data-testid={`isolation-${row.id}-check`}>
-        {row.check.ok ? 'Ready.' : `${row.check.reason}.${row.check.fix ? ` ${row.check.fix}` : ''}`}
+      <p className="isolation-check" data-ok={row.check.ok} data-warning={row.check.ok && statement.isolated.length === 0} data-testid={`isolation-${row.id}-check`}>
+        {row.check.ok ? 'Ready.' : <Code text={`${row.check.reason}.${row.check.fix ? ` ${row.check.fix}` : ''}`} />}
         {row.check.ok && row.selectableReason ? ` ${row.selectableReason}` : ''}
       </p>
       {field ? (
@@ -104,7 +115,7 @@ export function IsolationSection() {
           <button type="button" onClick={() => refresh(optionsOf())}>Check again</button>
         </>
       )}
-      {problem ? <p role="alert">{problem}</p> : null}
+      {problem ? <p role="alert" className="dialog-error">{problem}</p> : null}
     </section>
   );
 }

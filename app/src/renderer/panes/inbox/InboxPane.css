@@ -36,13 +36,63 @@
   margin: 0;
   font-size: 14px;
 }
-.inbox-header [role='tablist'] {
-  margin-left: auto;
-  display: flex;
-  gap: 4px;
+.inbox-header h1 {
+  order: 1;
 }
-.inbox-header button[aria-selected='true'] {
+.inbox-header > span {
+  order: 3;
+  flex-basis: 100%;
+  font-size: 12px;
+}
+.inbox-header [role='tablist'] {
+  order: 2;
+  margin-left: auto;
+}
+.inbox-segments {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.inbox-segments button {
+  font: inherit;
+  padding: 2px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.inbox-segments button + button {
+  border-left: 1px solid var(--border);
+}
+.inbox-segments button[aria-selected='true'] {
+  background: var(--accent);
+  color: #fff;
   font-weight: 600;
+}
+.inbox-waiting {
+  color: var(--warn);
+  font-weight: 600;
+}
+.inbox-needs-answer {
+  flex: none;
+}
+.inbox-row[data-kind='approval'] .inbox-row-kind,
+.inbox-row[data-kind='failure'] .inbox-row-kind {
+  color: var(--danger);
+}
+.inbox-row[data-kind='alert'] .inbox-row-kind {
+  color: var(--warn);
+}
+.inbox-row[data-kind='reminder'] .inbox-row-kind {
+  color: var(--ok);
+}
+.inbox-row:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.inbox-raw-block summary {
+  cursor: pointer;
 }
 .inbox-list {
   list-style: none;
@@ -62,13 +112,14 @@
   cursor: pointer;
 }
 .inbox-row[aria-current='true'] {
-  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  background: var(--select-bg);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 .inbox-row[data-state='new'] .inbox-row-message {
   font-weight: 600;
 }
 .inbox-row[data-urgency='high'] .inbox-row-kind {
-  color: #c0392b;
+  color: var(--danger);
 }
 .inbox-row-top {
   display: flex;
@@ -95,7 +146,7 @@
   background: transparent;
 }
 .inbox-dot[data-unread='true'] {
-  background: #2f7bf6;
+  background: var(--accent);
 }
 .inbox-empty,
 .inbox-muted {
@@ -159,7 +210,7 @@
   padding: 0;
   border: 0;
   background: none;
-  color: #2f7bf6;
+  color: var(--accent);
   font: inherit;
   cursor: pointer;
 }

@@ -10,6 +10,8 @@ export interface BrowserApproval {
   readonly kind: 'act' | 'navigate';
   readonly service: ServiceId;
   readonly tabNumber: number;
+  /** Title of the session that asks; absent or null when the session is unknown. */
+  readonly sessionTitle?: string | null | undefined;
 }
 
 /** What `browser_tab_state` returns for a tab the browser module recorded; `known: false` for any other leaf. */

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ItemContextInfo, ItemRow } from '../../../core/inbox/viewTypes';
 import { api } from '../../api';
-import { ageOf, KIND_LABEL, payloadText, tomorrowMorning } from './format';
+import { ageOf, KIND_LABEL, needsAnswer, payloadText, tomorrowMorning } from './format';
 
 const SEEN_AFTER_MS = 1000;
 const COLLAPSED_CHARS = 240;
@@ -46,7 +46,7 @@ export function ItemCard({ item, canPeek, peeking, onPeek }: { item: ItemRow; ca
     <article className="inbox-card" data-testid="inbox-card" data-item-id={item.id} data-state={item.state}>
       <header className="inbox-card-context" data-testid="inbox-card-context">
         <div>
-          <span className="inbox-label">Project</span>{' '}
+          <span className="inbox-label">Folder</span>{' '}
           <strong data-testid="inbox-project-name">{context.project?.name ?? 'No project'}</strong>
           {context.project?.summary !== undefined && <p data-testid="inbox-project-summary">{context.project.summary}</p>}
         </div>
@@ -86,12 +86,17 @@ export function ItemCard({ item, canPeek, peeking, onPeek }: { item: ItemRow; ca
           </>
         )}
         {raw !== undefined && (
-          <>
-            <p className="inbox-label">Raw request</p>
+          <details className="inbox-raw-block" open={details === undefined}>
+            <summary className="inbox-label">Raw request</summary>
             <pre className="inbox-raw" data-testid="inbox-raw">
               {raw}
             </pre>
-          </>
+          </details>
+        )}
+        {needsAnswer(item) && typeof browserApprovalId !== 'string' && (
+          <p className="inbox-muted" data-testid="inbox-answer-note">
+            The session is waiting for your answer. Allow or deny it in the session; this card cannot answer for it.
+          </p>
         )}
         {url !== undefined && (
           <p>
@@ -119,8 +124,18 @@ export function ItemCard({ item, canPeek, peeking, onPeek }: { item: ItemRow; ca
                 </button>
               </>
             )}
-            <button type="button" onClick={() => act('inbox_resolve', { itemId: item.id, resolution: 'dismissed' })} data-testid="inbox-done">
-              Done
+            {needsAnswer(item) && item.linkNodeId !== undefined && typeof browserApprovalId !== 'string' && (
+              <button type="button" className="btn-primary" onClick={() => act('ui_focus_node', { nodeId: item.linkNodeId })} data-testid="inbox-answer-in-session">
+                Answer in session
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => act('inbox_resolve', { itemId: item.id, resolution: 'dismissed' })}
+              data-testid="inbox-done"
+              title={item.kind === 'approval' ? 'Hides this item. The request stays open in its session.' : undefined}
+            >
+              {item.kind === 'approval' ? 'Dismiss without answering' : 'Done'}
             </button>
             {item.state === 'new' ? (
               <button type="button" onClick={() => act('inbox_mark_seen', { itemId: item.id })} data-testid="inbox-mark-seen">

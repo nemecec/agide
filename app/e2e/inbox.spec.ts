@@ -68,7 +68,7 @@ test('shows an item that an agent posts over MCP and updates the unread count', 
   await invoke('inbox_set_project_summary', { folderId, summary: 'Rewrite of the invoice job' });
   await invoke('inbox_set_session_summary', { sessionId, summary: 'Fixing the retry loop', model: 'haiku' });
   await openInboxPane();
-  await expect(unread(), 'nothing waits at first').toHaveText('Nothing waits for you');
+  await expect(unread(), 'nothing waits at first').toHaveText('No unread items');
 
   expect(existsSync(join(userData, 'launches.jsonl')), 'the fake claude recorded its launch').toBe(true);
   client = await connectAsSession();
@@ -95,7 +95,7 @@ test('shows an item that an agent posts over MCP and updates the unread count', 
   await expect(page.getByTestId('inbox-details'), 'details expand in place').toHaveAttribute('data-expanded', 'true');
   await expect(page.getByTestId('inbox-details'), 'the full text is shown').toContainText('Step one done.');
 
-  await expect(unread(), 'showing the card for a second marks the item seen').toHaveText('Nothing waits for you', { timeout: 5000 });
+  await expect(unread(), 'showing the card for a second marks the item seen').toHaveText('No unread items', { timeout: 5000 });
   await page.getByTestId('inbox-mark-unread').click();
   await expect(unread(), 'mark unread raises the count again').toHaveText('1 unread');
 

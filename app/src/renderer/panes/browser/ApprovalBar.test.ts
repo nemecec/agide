@@ -37,6 +37,20 @@ describe('ApprovalBar', () => {
     expect(rendered!.container.textContent, 'verb for navigating').toContain('An agent asks to open');
   });
 
+  it('names the session that asks and states a navigation request once', async () => {
+    await mount(approval({ kind: 'navigate', sessionTitle: 'Check the dashboard', tool: 'navigate', summary: 'Open https://example.test' }));
+    const text = rendered!.container.textContent!;
+    expect(text, 'session named').toContain('The session "Check the dashboard" asks to open');
+    expect(text.split('https://example.test').length - 1, 'the address appears once').toBe(1);
+  });
+
+  it('makes Allow once the primary action and keeps the standing allowance behind a disclosure', async () => {
+    await mount(approval({ service: 'web' }));
+    expect(buttons().find((button) => button.textContent === 'Allow once')?.classList.contains('btn-primary'), 'Allow once is primary').toBe(true);
+    expect(buttons().find((button) => button.textContent === 'Deny')?.classList.contains('btn-primary'), 'Deny is not primary').toBe(false);
+    expect(buttons().find((button) => button.textContent === 'Always allow this site')?.closest('details'), 'standing allowance sits in a closed disclosure').not.toBeNull();
+  });
+
   it('sends the chosen answer with the request id and tells the pane afterwards', async () => {
     const { fake, answered } = await mount(approval());
     await press('Allow once');

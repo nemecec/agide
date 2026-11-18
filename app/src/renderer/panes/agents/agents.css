@@ -89,6 +89,8 @@
 
 .agent-row {
   display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
   align-items: center;
   gap: 6px;
   height: 22px;
@@ -98,7 +100,24 @@
 }
 
 .agent-row[data-selected='true'] {
-  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  background: var(--select-bg);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.agent-mark,
+.agent-elapsed,
+.agent-origin,
+.agent-dismiss {
+  flex: none;
+}
+
+.agent-dismiss {
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.agent-row[data-state='failed'] .agent-label {
+  color: var(--danger);
 }
 
 .agent-row[data-state='done'],
@@ -107,7 +126,7 @@
 }
 
 .agent-row[data-state='failed'] .agent-mark {
-  color: #d33;
+  color: var(--danger);
 }
 
 .agent-row[data-state='waiting'] .agent-mark {
@@ -115,6 +134,15 @@
 }
 
 .agent-label {
+  flex: 0 1 auto;
+  min-width: 3ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-detail {
+  flex: 0 100 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -129,6 +157,7 @@
 .agent-row-wrap {
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 
 .session-decorations,
@@ -140,8 +169,17 @@
   color: var(--muted);
 }
 
+.session-decorations {
+  flex: none;
+}
+
 .agent-waiting {
-  color: #d90;
+  color: var(--warn);
+}
+
+.agent-failed {
+  color: var(--danger);
+  font-weight: 600;
 }
 
 .heat-marker {
@@ -165,4 +203,39 @@
   line-height: 1.3;
   color: var(--muted);
   word-break: break-word;
+}
+
+.usage-columns,
+.usage-ranking li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 7em 9em 3.5em 5em 2.5em;
+  gap: 8px;
+  align-items: baseline;
+}
+.usage-columns {
+  padding: 2px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+}
+.usage-ranking li span:not(.usage-label) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.usage-columns span:not(:first-child) {
+  text-align: right;
+}
+.history-filters label,
+.history-settings label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.history-table tr[data-state='failed'] td:nth-child(1),
+.history-table tr[data-state='failed'] td:nth-child(2) {
+  color: var(--danger);
+}
+.history-table tbody tr:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
 }

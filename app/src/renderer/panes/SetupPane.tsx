@@ -67,9 +67,16 @@ export function SetupPane() {
         <h3>Git identity {status.git ? '(done)' : ''}</h3>
         {status.git ? null : (
           <>
-            <input aria-label="Git name" placeholder="Name" value={userName} onChange={(e) => setUserName(e.target.value)} />
-            <input aria-label="Git e-mail" placeholder="E-mail" value={userEmail} onChange={(e) => setUserEmail(e.target.value)} />
+            <label className="setup-field">
+              Name
+              <input aria-label="Git name" placeholder="Name" value={userName} onChange={(e) => setUserName(e.target.value)} />
+            </label>
+            <label className="setup-field">
+              E-mail
+              <input aria-label="Git e-mail" placeholder="E-mail" value={userEmail} onChange={(e) => setUserEmail(e.target.value)} />
+            </label>
             <button type="button" disabled={userName.trim() === '' || userEmail.trim() === ''} onClick={() => void saveGit()}>Save</button>
+            {userName.trim() === '' || userEmail.trim() === '' ? <span className="muted"> Enter a name and an e-mail to save.</span> : null}
           </>
         )}
       </section>

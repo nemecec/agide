@@ -182,7 +182,7 @@ test('an agent reads and clicks a local page over MCP, asks through the inbox fo
   const page = await launchApp();
   const folderId = await createFolder(page, 'Work');
   const { leafId } = await value<{ leafId: string }>(page, 'browser_new_tab', { folderId, url: `${origin}/` });
-  await page.getByRole('treeitem', { name: '127.0.0.1', exact: true }).click();
+  await page.getByRole('treeitem', { name: /127\.0\.0\.1|Integration page/ }).click();
   await expect(page.getByTestId('browser-pane'), 'the tab opens in the surface host').toBeVisible();
   await expect.poll(async () => (await value<{ title: string }>(page, 'browser_tab_state', { leafId })).title, { message: 'the page loaded' }).toBe('Integration page');
 

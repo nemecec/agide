@@ -219,6 +219,7 @@ export function init(
     const service = host === undefined ? 'web' : (serviceForHost(host) ?? 'web');
     const surfaceId = randomUUID();
     const leaf = tree.createLeaf({ title: host ?? 'New tab', parentId: input.folderId, surfaceType: SURFACE_BROWSER_TAB, surfaceId });
+    appTitles.set(leaf.id, host ?? 'New tab');
     const record = catalog.add({ leafId: leaf.id, surfaceId, service, url, title: host ?? 'New tab', observe: 'on-demand', createdBy: input.createdBy, ...{} });
     observation.register(surfaceId, service);
     views?.ensure(leaf.id, record.state);
@@ -304,6 +305,27 @@ export function init(
     }
   };
 
+  const hostOf = (url: string): string | undefined => {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return undefined;
+    }
+  };
+
+  // A leaf keeps the title the app gave it (the host, then the page title) until the user renames it.
+  const appTitles = new Map<string, string>();
+  const followPageTitle = (leafId: string, pageTitle: string): void => {
+    const title = pageTitle.trim();
+    const node = tree.get(leafId);
+    if (title === '' || node === undefined || node.title === title) return;
+    const record = catalog.get(leafId);
+    const known = appTitles.get(leafId) ?? (record === undefined ? undefined : hostOf(record.state.url));
+    if (node.title !== known && node.title !== 'New tab') return;
+    tree.rename(leafId, title);
+    appTitles.set(leafId, title);
+  };
+
   const enforceBlocked = (leafId: string, url: string): void => {
     if (matchesBlocked(url, blocked)) runtime.detach(leafId);
   };
@@ -314,12 +336,14 @@ export function init(
     switch (event.type) {
       case 'navigated': {
         catalog.update(event.leafId, { url: originOf(event.url) === undefined && event.url !== 'about:blank' ? record.state.url : event.url, title: event.title || record.state.title, ...(event.history ? { history: event.history } : {}) });
+        followPageTitle(event.leafId, event.title);
         enforceBlocked(event.leafId, event.url);
         noteChange(event.leafId, 'navigated');
         break;
       }
       case 'title':
         catalog.update(event.leafId, { title: event.title });
+        followPageTitle(event.leafId, event.title);
         noteChange(event.leafId, 'title changed');
         break;
       case 'crashed':
@@ -553,7 +577,7 @@ export function init(
         blocked: matchesBlocked(url, blocked),
         acting: tools.isActing(leafId),
         object: recognize(url) ?? null,
-        approvals: [...pending.values()].filter((entry) => entry.request.leafId === leafId).map((entry) => ({ id: entry.id, ...entry.request })),
+        approvals: [...pending.values()].filter((entry) => entry.request.leafId === leafId).map((entry) => ({ id: entry.id, ...entry.request, sessionTitle: deps.sessions.get(entry.request.sessionId)?.title ?? null })),
       };
     },
   });

@@ -32,7 +32,7 @@ test.afterEach(async () => {
 /** Starts a Claude session in a folder from the menu. The new leaf opens its terminal. */
 async function addSession(page: Page, folder: string): Promise<void> {
   await item(page, folder).click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'New Claude session', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'New Claude session…', exact: true }).click();
   await page.getByTestId('new-session-start').click();
   await expect(item(page, SESSION), 'the session leaf appears in the tree').toBeVisible();
   await expect(page.getByTestId('terminal-pane'), 'the new session opens its terminal').toBeVisible();

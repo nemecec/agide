@@ -54,7 +54,7 @@ const invoke = (page: Page, id: string, input: unknown) =>
 async function startSession(page: Page, mode?: string, defaultMode = 'auto'): Promise<void> {
   await invoke(page, 'ui_create_folder', { title: 'Project' });
   await page.getByRole('treeitem', { name: /Project/ }).click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'New Claude session', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'New Claude session…', exact: true }).click();
   await expect(page.getByTestId('new-session-dialog'), 'the dialog opens').toBeVisible();
   await expect(page.getByTestId('new-session-mode'), 'the select starts at the profile default').toHaveValue(defaultMode);
   expect(await page.getByTestId('new-session-mode').locator('option').allTextContents(), 'bypass is not offered on the local provider').not.toContain('Bypass');

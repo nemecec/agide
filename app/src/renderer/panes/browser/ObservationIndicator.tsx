@@ -5,6 +5,7 @@ import { MODE_LABEL } from './model';
 export function ObservationIndicator({ mode, reading }: { readonly mode: ObserveMode; readonly reading: boolean }) {
   const filled = mode === 'live' || (mode === 'on-demand' && reading);
   return (
+    <>
     <svg
       className="observation-indicator"
       data-testid="observation-indicator"
@@ -20,5 +21,7 @@ export function ObservationIndicator({ mode, reading }: { readonly mode: Observe
       <circle cx="8" cy="8" r="2" fill={filled ? 'var(--bg, #fff)' : 'currentColor'} />
       {mode === 'off' && <line x1="2" y1="14" x2="14" y2="2" stroke="currentColor" strokeWidth="1.6" />}
     </svg>
+    {mode === 'live' && <span className="observation-live" data-testid="observation-live">Live</span>}
+    </>
   );
 }

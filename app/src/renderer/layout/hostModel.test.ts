@@ -14,13 +14,20 @@ describe('titleOf', () => {
 
   it('falls back to the last segment of the type id, then to the id', () => {
     const layout = { ...SESSION_PRESET, instances: { a: { ...SESSION_PRESET.instances['tree']!, type: 'agide/task-tree', config: {} } } };
-    expect(titleOf(layout, 'a'), 'type segment').toBe('task-tree');
+    expect(titleOf(layout, 'a'), 'type segment in words').toBe('Task tree');
     expect(titleOf(layout, 'unknown'), 'unknown instance').toBe('unknown');
+  });
+
+  it('numbers panes that would otherwise show the same title', () => {
+    const surface = { ...SESSION_PRESET.instances['tree']!, type: 'agide/surface-host', config: {} };
+    const layout = { ...SESSION_PRESET, instances: { a: surface, b: surface, c: { ...surface, type: 'agide/usage-ranking' } } };
+    expect([titleOf(layout, 'a'), titleOf(layout, 'b')], 'two surface panes').toEqual(['Surface host 1', 'Surface host 2']);
+    expect(titleOf(layout, 'c'), 'a pane with its own title stays plain').toBe('Usage ranking');
   });
 
   it('ignores a title that is not a string', () => {
     const layout = { ...SESSION_PRESET, instances: { a: { ...SESSION_PRESET.instances['tree']!, type: 'agide/tree', config: { title: 5 } } } };
-    expect(titleOf(layout, 'a'), 'non-string title').toBe('tree');
+    expect(titleOf(layout, 'a'), 'non-string title').toBe('Tree');
   });
 });
 

@@ -1,9 +1,13 @@
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useViewSuspension } from './browser/suspension';
 
 export interface MenuEntry {
   readonly label: string;
   readonly run: () => void;
+  /** A rule is drawn above the entry. */
+  readonly separated?: boolean;
+  /** The entry removes something: drawn in the warning colour. */
+  readonly danger?: boolean;
 }
 
 export interface MenuState {
@@ -12,9 +16,27 @@ export interface MenuState {
   readonly entries: readonly MenuEntry[];
 }
 
+const EDGE = 4;
+
+/** The left and top that keep a menu of the given size inside the window, as near the pointer as it fits. */
+export function clampToWindow(x: number, y: number, width: number, height: number, windowWidth: number, windowHeight: number): { left: number; top: number } {
+  return {
+    left: Math.max(EDGE, Math.min(x, windowWidth - width - EDGE)),
+    top: Math.max(EDGE, Math.min(y, windowHeight - height - EDGE)),
+  };
+}
+
 /** A small popup menu. It closes on any click outside, on Escape and after an entry runs. */
 export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => void }) {
   useViewSuspension(true);
+  const list = useRef<HTMLUListElement>(null);
+  useLayoutEffect(() => {
+    const element = list.current;
+    if (!element) return;
+    const { left, top } = clampToWindow(menu.x, menu.y, element.offsetWidth, element.offsetHeight, window.innerWidth, window.innerHeight);
+    element.style.left = `${left}px`;
+    element.style.top = `${top}px`;
+  }, [menu.x, menu.y, menu.entries.length]);
   useEffect(() => {
     const close = (event: Event) => {
       if (event instanceof KeyboardEvent && event.key !== 'Escape') return;
@@ -31,12 +53,14 @@ export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () =>
   }, [onClose]);
 
   return (
-    <ul className="context-menu" role="menu" style={{ left: menu.x, top: menu.y }}>
+    <ul ref={list} className="context-menu" role="menu" style={{ left: menu.x, top: menu.y }}>
       {menu.entries.map((entry) => (
         <li key={entry.label} role="none">
+          {entry.separated ? <hr role="separator" /> : null}
           <button
             type="button"
             role="menuitem"
+            data-danger={entry.danger === true}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={() => {
               onClose();

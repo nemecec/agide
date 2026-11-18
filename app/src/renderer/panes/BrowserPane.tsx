@@ -171,16 +171,18 @@ export function BrowserPane({ node }: { readonly node: TreeNode & { readonly kin
             <button type="button" role="menuitem" className="chrome-button" onClick={() => void navigator.clipboard.writeText(state.url).finally(() => setMenu(false))}>
               Copy URL
             </button>
+            <hr role="separator" />
             <button
               type="button"
               role="menuitem"
               className="chrome-button"
+              data-danger="true"
               onClick={() => {
                 setMenu(false);
                 if (window.confirm(`Clear cookies and site data of ${state.service}?`)) void api().invoke('browser_clear_site_data', { leafId });
               }}
             >
-              Clear this service&apos;s site data
+              Clear this service&apos;s site data…
             </button>
             <button type="button" role="menuitem" className="chrome-button" onClick={() => void api().invoke('browser_devtools', { leafId }).then(() => setMenu(false))}>
               DevTools

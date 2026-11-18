@@ -6,7 +6,7 @@ import type { ActionClassId, OutwardMode, PermissionSettings } from './types';
 
 /** One sentence per mode for the setup pane and the new-session dialog (0028 section 1). */
 export const MODE_SENTENCES: Readonly<Record<PermissionMode, string>> = {
-  auto: 'Claude decides with its safety classifier. Outward actions listed below still ask.',
+  auto: 'Claude decides with its safety classifier. Outward actions such as pushes, comments and messages still ask; the profile settings list them.',
   default: 'Every tool call asks before it runs.',
   acceptEdits: 'File edits run without asking; other tool calls ask.',
   plan: 'Claude reads and plans first and asks before it changes anything.',

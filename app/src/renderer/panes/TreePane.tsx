@@ -189,7 +189,7 @@ export function TreePane({ nodes, loaded, onOpen }: TreePaneProps) {
       ...surfaceTypes
         .filter((type) => type.id !== SURFACE_CLAUDE_SESSION || parentId !== null)
         .map((type) => ({
-          label: `New ${type.label}`,
+          label: type.id === SURFACE_CLAUDE_SESSION ? `New ${type.label}…` : `New ${type.label}`,
           run: () => void create(parentId, { surfaceType: type.id, label: type.label }),
         })),
     ];
@@ -197,7 +197,7 @@ export function TreePane({ nodes, loaded, onOpen }: TreePaneProps) {
       entries.push(
         { label: 'Open to the side', run: () => void run('ui_open_to_side', { nodeId: target.getId() }) },
         { label: 'Rename', run: () => target.startRenaming() },
-        { label: 'Delete', run: () => void remove(target) },
+        { label: 'Delete', separated: true, danger: true, run: () => void remove(target) },
       );
     } else {
       entries.push({ label: 'Profile settings…', run: () => openDialog({ kind: 'settings' }) });
@@ -227,6 +227,7 @@ export function TreePane({ nodes, loaded, onOpen }: TreePaneProps) {
             <div
               {...item.getProps()}
               className="tree-item"
+              title={node.title}
               data-selected={item.isSelected()}
               data-focused={item.isFocused()}
               data-drop-target={item.isDragTarget()}
@@ -250,6 +251,11 @@ export function TreePane({ nodes, loaded, onOpen }: TreePaneProps) {
               {node.kind === 'folder' && <FolderDecorations folderId={node.id} />}
               {node.kind === 'leaf' && <LeafDecorations surfaceType={node.surfaceType} surfaceId={node.surfaceId} />}
             </div>
+            {folder && item.isExpanded() && (indexRef.current.childIds.get(node.id)?.length ?? 0) === 0 && (
+              <div className="tree-item tree-empty-folder" style={{ paddingLeft: 8 + (item.getItemMeta().level + 1) * INDENT + 16 }}>
+                (empty)
+              </div>
+            )}
             {node.kind === 'leaf' && node.surfaceType === SURFACE_CLAUDE_SESSION && <AgentRows sessionId={node.surfaceId} level={item.getItemMeta().level} />}
             </Fragment>
           );

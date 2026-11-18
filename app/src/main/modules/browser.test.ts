@@ -163,6 +163,19 @@ describe('browser module in the real module graph', () => {
     await expect(services().browser.openTab({ folderId: leafId, url: 'https://a.example', createdBy: 'user' }), 'a leaf is not a folder').rejects.toThrow('no folder');
   });
 
+  it('renames the leaf to the page title until the user renames it', async () => {
+    await start();
+    const folder = services().tree.createFolder({ title: 'Work' });
+    const { leafId } = await services().browser.openTab({ folderId: folder.id, url: 'https://github.com/acme/app', createdBy: 'user' });
+    views.fire({ type: 'title', leafId, title: 'Sample dashboard' });
+    expect(services().tree.get(leafId)?.title, 'the host title follows the page title').toBe('Sample dashboard');
+    views.fire({ type: 'title', leafId, title: 'Sample dashboard 2' });
+    expect(services().tree.get(leafId)?.title, 'a later page title replaces the one the app set').toBe('Sample dashboard 2');
+    services().tree.rename(leafId, 'My tab');
+    views.fire({ type: 'title', leafId, title: 'Another page' });
+    expect(services().tree.get(leafId)?.title, 'a title the user chose stays').toBe('My tab');
+  });
+
   it('keeps tabs, numbers and switches after a restart and removes a tab with its leaf', async () => {
     const db = join(dir, 'app.db');
     await start(db);

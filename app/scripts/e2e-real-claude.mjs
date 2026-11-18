@@ -21,7 +21,7 @@ try {
   const folder = await invoke('ui_create_folder', { title: 'Real Claude' });
   if (!folder.ok) throw new Error(`folder: ${JSON.stringify(folder)}`);
   await item('Real Claude').click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'New Claude session', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'New Claude session…', exact: true }).click();
   await page.getByTestId('new-session-start').click();
   await item('Claude session').waitFor();
   await page.getByTestId('terminal-pane').waitFor();

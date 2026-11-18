@@ -1,19 +1,54 @@
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 29;
+  background: rgb(0 0 0 / 28%);
+}
 .dialog {
   position: fixed;
   left: 50%;
-  top: 15%;
+  top: 12%;
   transform: translateX(-50%);
   width: min(480px, calc(100vw - 32px));
-  max-height: 70vh;
+  max-height: 76vh;
   overflow: auto;
-  padding: 12px;
+  box-sizing: border-box;
+  padding: 14px 16px;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 35%);
   z-index: 30;
 }
 .dialog h2,
 .dialog h3 {
-  margin: 0 0 6px;
-  font-size: 13px;
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.dialog label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.dialog label > input:not([type='checkbox']):not([type='radio']),
+.dialog label > select,
+.dialog label > textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 2px;
+}
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+.dialog-error {
+  color: var(--danger);
+}
+.dialog-hint {
+  margin: 4px 0 8px;
+  color: var(--muted);
+  font-size: 12px;
 }

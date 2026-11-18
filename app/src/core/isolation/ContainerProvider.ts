@@ -76,7 +76,7 @@ export class ContainerProvider implements IsolationProvider {
   async check(): Promise<ProviderCheck> {
     const { dockerBinary, image } = this.options;
     if (findExecutable(dockerBinary) === undefined) {
-      return { ok: false, reason: 'Docker is not installed', fix: 'Install Docker Desktop, or set the docker path in the profile isolation settings.' };
+      return { ok: false, reason: 'Docker is not installed', fix: 'Install Docker Desktop, or enter the docker path in the field of this provider.' };
     }
     try {
       await run(dockerBinary, ['version', '--format', '{{.Server.Version}}'], { timeout: DOCKER_TIMEOUT_MS });

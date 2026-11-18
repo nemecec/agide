@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { PermissionOptions } from '../../../core/permissions/options';
 import type { DefaultPermissionMode, PermissionSettings } from '../../../core/permissions/types';
 import { api } from '../../api';
+import './settings.css';
 import { networkSentence, OUTWARD_MODES, parseHostLines, withOutwardMode } from './permissionsModel';
 
 /**
@@ -48,8 +49,8 @@ export function PermissionsSection() {
     <section data-testid="settings-permissions">
       <h3>Permissions</h3>
       <label>
-        Mode of new sessions{' '}
-        <select data-testid="permissions-default-mode" value={settings.defaultMode} onChange={(e) => setSettings({ ...settings, defaultMode: e.target.value as DefaultPermissionMode })}>
+        Mode of new sessions
+        <select aria-label="Mode of new sessions" data-testid="permissions-default-mode" value={settings.defaultMode} onChange={(e) => setSettings({ ...settings, defaultMode: e.target.value as DefaultPermissionMode })}>
           {options.modes.filter((mode) => mode.id !== 'bypassPermissions').map((mode) => (
             <option key={mode.id} value={mode.id}>
               {mode.label}
@@ -58,8 +59,8 @@ export function PermissionsSection() {
         </select>
       </label>
       <p data-testid="permissions-mode-sentence">{current?.sentence}</p>
-      <p>A session can pick another mode when it starts. Bypass is offered only inside a provider that limits files and the network of the whole process.</p>
-      <label>
+      <p className="dialog-hint">A session can pick another mode when it starts. Bypass is offered only inside a provider that limits files and the network of the whole process.</p>
+      <label className="setting-check">
         <input type="checkbox" data-testid="permissions-sandbox" checked={settings.network.bashSandbox} onChange={(e) => setSettings({ ...settings, network: { ...settings.network, bashSandbox: e.target.checked } })} /> Limit Bash commands to the allowed hosts
       </label>
       <p data-testid="permissions-network">{networkSentence(settings)}</p>
@@ -71,7 +72,7 @@ export function PermissionsSection() {
         Denied hosts, one per line
         <textarea aria-label="Denied hosts" value={deny} rows={2} onChange={(e) => setDeny(e.target.value)} />
       </label>
-      <label>
+      <label className="setting-check">
         <input type="checkbox" checked={settings.trustAppCreatedFolders} onChange={(e) => setSettings({ ...settings, trustAppCreatedFolders: e.target.checked })} /> Answer Claude&apos;s folder-trust question for folders the app creates
       </label>
       <details>
@@ -94,10 +95,12 @@ export function PermissionsSection() {
         </ul>
       </details>
       {options.runsAsUser ? <p data-testid="permissions-runs-as-user">Agents run as your user on this computer and can read what your user can read.</p> : null}
-      <button type="button" data-testid="permissions-save" onClick={() => void save()}>
-        Save
-      </button>
-      {message ? <p role="status">{message}</p> : null}
+      <div className="dialog-actions">
+        {message ? <p role="status" className="dialog-hint">{message}</p> : null}
+        <button type="button" className="btn-primary" data-testid="permissions-save" onClick={() => void save()}>
+          Save permissions
+        </button>
+      </div>
     </section>
   );
 }

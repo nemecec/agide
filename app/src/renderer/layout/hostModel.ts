@@ -6,12 +6,26 @@ import { arrangementsClose, fromDockview, normalizeArrangement, panelIds } from 
 /** Pane types whose group shows no tab header: window edges such as the profile rail. */
 const HEADERLESS_TYPES: ReadonlySet<string> = new Set(['agide/profile-rail']);
 
-/** The tab title: the instance's `title` config, else the last segment of its type id, else its id. */
-export function titleOf(layout: LayoutDocument, id: string): string {
+const humanise = (segment: string): string => {
+  const words = segment.replace(/[-_]+/g, ' ').trim();
+  return words === '' ? segment : words.charAt(0).toUpperCase() + words.slice(1);
+};
+
+const plainTitleOf = (layout: LayoutDocument, id: string): string => {
   const instance = layout.instances[id];
   const config = instance?.config['title'];
   if (typeof config === 'string') return config;
-  return instance?.type.split('/').at(-1) ?? id;
+  return instance === undefined ? id : humanise(instance.type.split('/').at(-1) ?? id);
+};
+
+/**
+ * The tab title: the instance's `title` config, else the last segment of its type id in words ("Usage ranking"),
+ * else its id. Panes that would show the same title get a number so their tabs differ.
+ */
+export function titleOf(layout: LayoutDocument, id: string): string {
+  const title = plainTitleOf(layout, id);
+  const same = Object.keys(layout.instances).filter((other) => plainTitleOf(layout, other) === title).sort();
+  return same.length > 1 ? `${title} ${same.indexOf(id) + 1}` : title;
 }
 
 /** Values of a pane's inputs: a context binding reads the shared context, a value binding is fixed. Data sources have no value yet. */

@@ -47,11 +47,17 @@ const answers = (agents: AgentNodeView[], usage: UsageState = usageState(), wait
   });
 
 describe('tree decorations', () => {
-  it('shows the running count, the waiting marker and the finished tally on the session leaf', async () => {
-    answers([agent({}), agent({ agentKey: 'a2', state: 'waiting' }), agent({ agentKey: 'a3', state: 'done', endedAt: iso(-10_000), hidden: true })]);
+  it('shows the running count, the waiting count, the failed count and the finished tally on the session leaf', async () => {
+    answers([
+      agent({}),
+      agent({ agentKey: 'a2', state: 'waiting' }),
+      agent({ agentKey: 'a3', state: 'done', endedAt: iso(-10_000), hidden: true }),
+      agent({ agentKey: 'a4', state: 'failed', endedAt: iso(-10_000), hidden: false }),
+    ]);
     mounted = await render(createElement(SessionDecorations, { sessionId: 's1' }));
-    expect(mounted.container.querySelector('[data-testid=agent-count]')?.textContent, 'running count includes waiting agents').toBe('2 running');
-    expect(mounted.container.querySelector('[data-testid=agent-waiting]'), 'waiting marker').not.toBeNull();
+    expect(mounted.container.querySelector('[data-testid=agent-count]')?.textContent, 'running count leaves out the waiting agent').toBe('1 running');
+    expect(mounted.container.querySelector('[data-testid=agent-waiting]')?.textContent, 'waiting count').toBe('1 waiting');
+    expect(mounted.container.querySelector('[data-testid=agent-failed]')?.textContent, 'failed count is its own marker').toBe('1 failed');
     expect(mounted.container.querySelector('[data-testid=agent-finished]')?.textContent, 'finished tally').toBe('1 finished');
   });
 
@@ -125,7 +131,7 @@ describe('usage pane', () => {
     const rows = [...mounted.container.querySelectorAll('[data-testid=usage-row]')];
     expect(rows.map((r) => r.getAttribute('data-subject')), 'order').toEqual(['session:s1', 'session:s2']);
     expect(rows[0]?.textContent, 'label and elapsed').toContain('Hot session');
-    expect(mounted.container.querySelector('[data-testid=app-started-count]')?.textContent, 'cap').toBe('App-started: 2 of 4');
+    expect(mounted.container.querySelector('[data-testid=app-started-count]')?.textContent, 'cap').toBe('Started by Agide: 2 of 4 allowed');
     expect(mounted.container.querySelector('[data-testid=profile-rate]')?.textContent, 'estimate in dollars').toContain('~$0.30/min');
     expect(mounted.container.textContent, 'estimate label').toContain('estimates at list price');
   });

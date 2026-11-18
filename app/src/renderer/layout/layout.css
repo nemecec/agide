@@ -47,7 +47,7 @@
 }
 
 .layout-error {
-  color: #b00020;
+  color: var(--danger);
 }
 
 .placeholder-pane {
@@ -78,4 +78,18 @@
 
 .pane-frame > .profile-rail {
   width: 100%;
+}
+
+.layout-bar select {
+  font: inherit;
+  padding: 3px 24px 3px 8px;
+  min-height: 24px;
+  color: inherit;
+  background-color: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.layout-notice button {
+  margin-right: 6px;
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { TaskStartResult } from '../../core/tasks/types';
 import type { TreeNode } from '../../core/tree/types';
+import type { PermissionOptions } from '../../core/permissions/options';
 import { api } from '../api';
 import { buildStartInput, detectKind, KIND_LABEL, type ModeChoice, type TaskForm } from './task/taskForm';
 import './task/task.css';
@@ -31,11 +32,18 @@ export function NewTaskDialog({ parentFolderId, onClose }: { readonly parentFold
   const [previewOpen, setPreviewOpen] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
+  const [profileMode, setProfileMode] = useState<string | undefined>();
   const kind = detectKind(form.source);
   const set = <K extends keyof TaskForm>(key: K, value: TaskForm[K]): void => setForm((current) => ({ ...current, [key]: value }));
 
   useEffect(() => {
     void api().invoke<{ nodes: TreeNode[] }>('ui_list_tree').then((result) => result.ok && setFolders(result.value.nodes.filter((node) => node.kind === 'folder')));
+    void api()
+      .invoke<PermissionOptions>('permissions_options', {})
+      .then((result) => {
+        const label = result.ok ? result.value?.modes.find((mode) => mode.id === result.value.settings.defaultMode)?.label : undefined;
+        if (label !== undefined) setProfileMode(label);
+      });
     void api().invoke<{ repositories: string[] }>('task_repositories').then((result) => result.ok && setRepositories(result.value.repositories));
   }, []);
 
@@ -71,6 +79,7 @@ export function NewTaskDialog({ parentFolderId, onClose }: { readonly parentFold
       <label>
         Source
         <textarea
+          data-autofocus
           data-testid="task-source"
           rows={3}
           value={form.source}
@@ -78,7 +87,7 @@ export function NewTaskDialog({ parentFolderId, onClose }: { readonly parentFold
           onChange={(event) => set('source', event.target.value)}
         />
       </label>
-      <p data-testid="task-kind">{kind === undefined ? 'Nothing entered' : KIND_LABEL[kind]}</p>
+      <p className="chip task-kind" data-tone="idle" data-testid="task-kind">{kind === undefined ? 'Nothing entered' : KIND_LABEL[kind]}</p>
       {kind !== undefined && kind !== 'prompt' && (
         <label>
           Instruction (optional)
@@ -87,7 +96,7 @@ export function NewTaskDialog({ parentFolderId, onClose }: { readonly parentFold
       )}
       <label>
         Repository
-        <input data-testid="task-repo" list="task-repositories" value={form.repoPath} placeholder={repoFromPreview ?? 'No repository'} onChange={(event) => set('repoPath', event.target.value)} />
+        <input data-testid="task-repo" title={form.repoPath || repoFromPreview} list="task-repositories" value={form.repoPath} placeholder={repoFromPreview ?? 'No repository'} onChange={(event) => set('repoPath', event.target.value)} />
         <datalist id="task-repositories">
           {repositories.map((path) => (
             <option key={path} value={path} />
@@ -102,7 +111,7 @@ export function NewTaskDialog({ parentFolderId, onClose }: { readonly parentFold
       )}
       <label>
         Parent folder
-        <select data-testid="task-parent" value={form.parentFolderId} onChange={(event) => set('parentFolderId', event.target.value)}>
+        <select aria-label="Parent folder" data-testid="task-parent" value={form.parentFolderId} onChange={(event) => set('parentFolderId', event.target.value)}>
           <option value="">Top level</option>
           {folders.map((folder) => (
             <option key={folder.id} value={folder.id}>
@@ -113,10 +122,10 @@ export function NewTaskDialog({ parentFolderId, onClose }: { readonly parentFold
       </label>
       <label>
         Permission mode
-        <select data-testid="task-mode" value={form.mode} onChange={(event) => set('mode', event.target.value as ModeChoice)}>
+        <select aria-label="Permission mode" data-testid="task-mode" value={form.mode} onChange={(event) => set('mode', event.target.value as ModeChoice)}>
           {MODES.map((mode) => (
             <option key={mode.value} value={mode.value}>
-              {mode.label}
+              {mode.value === 'profile' && profileMode !== undefined ? `${mode.label} (${profileMode})` : mode.label}
             </option>
           ))}
         </select>
@@ -132,16 +141,16 @@ export function NewTaskDialog({ parentFolderId, onClose }: { readonly parentFold
         )}
       </details>
       {error && (
-        <p role="alert" data-testid="task-error">
+        <p role="alert" className="dialog-error" data-testid="task-error">
           {error}
         </p>
       )}
       <div className="dialog-actions">
-        <button type="button" data-testid="task-start" disabled={busy || kind === undefined} onClick={() => void start()}>
-          {busy ? 'Starting…' : 'Start'}
-        </button>
-        <button type="button" onClick={onClose}>
+        <button type="button" data-dialog-cancel onClick={onClose}>
           Cancel
+        </button>
+        <button type="button" className="btn-primary" data-testid="task-start" disabled={busy || kind === undefined} onClick={() => void start()}>
+          {busy ? 'Starting…' : 'Start'}
         </button>
       </div>
     </div>

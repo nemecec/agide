@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ageOf, KIND_LABEL, payloadText, tomorrowMorning } from './format';
+import { ageOf, KIND_LABEL, needsAnswer, orderItems, payloadText, tomorrowMorning } from './format';
 
 const NOW = Date.parse('2026-11-17T12:00:00Z');
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
@@ -52,5 +52,28 @@ describe('payloadText', () => {
 
   it('returns nothing for a payload without tool input', () => {
     for (const payload of [undefined, null, 'text', 4, {}]) expect(payloadText(payload), `payload ${JSON.stringify(payload)}`).toBeUndefined();
+  });
+});
+
+describe('orderItems', () => {
+  const entry = (id: string, over: Partial<{ kind: string; state: string; urgency: string; createdAt: string }> = {}) => ({ id, kind: 'status', state: 'new', urgency: 'normal', createdAt: ago(HOUR), ...over });
+
+  it('puts open approvals first and then orders by urgency and creation time, newest first', () => {
+    const list = [
+      entry('old', { createdAt: ago(3 * HOUR) }),
+      entry('high', { urgency: 'high', createdAt: ago(2 * HOUR) }),
+      entry('new', { createdAt: ago(MIN) }),
+      entry('approval', { kind: 'approval', createdAt: ago(5 * HOUR) }),
+    ];
+    expect(orderItems(list).map((row) => row.id), 'order').toEqual(['approval', 'high', 'new', 'old']);
+  });
+
+  it('does not move an item when it is read, and an approval stops needing an answer once it is done or snoozed', () => {
+    const unread = [entry('a', { createdAt: ago(2 * MIN) }), entry('b', { createdAt: ago(MIN) })];
+    const read = [{ ...unread[0]!, state: 'seen' }, unread[1]!];
+    expect(orderItems(read).map((row) => row.id), 'read item keeps its place').toEqual(orderItems(unread).map((row) => row.id));
+    expect(needsAnswer(entry('x', { kind: 'approval', state: 'seen' })), 'a seen approval still needs an answer').toBe(true);
+    expect(needsAnswer(entry('x', { kind: 'approval', state: 'snoozed' })), 'a snoozed approval does not').toBe(false);
+    expect(needsAnswer(entry('x', { kind: 'approval', state: 'done' })), 'a done approval does not').toBe(false);
   });
 });

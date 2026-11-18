@@ -76,7 +76,7 @@ export function SessionPeek({ sessionId, onBack }: { sessionId: string; onBack: 
         <button type="button" onClick={onBack} data-testid="inbox-peek-back">
           Back to message
         </button>
-        <span className="inbox-peek-status" data-testid="inbox-peek-status" data-status={status}>
+        <span className="inbox-peek-status chip" data-tone={status === 'busy' ? 'busy' : status === 'waiting' ? 'waiting' : 'idle'} data-testid="inbox-peek-status" data-status={status}>
           {status === 'closed' ? 'session not found' : status}
         </span>
         <span className="inbox-peek-note">read only</span>

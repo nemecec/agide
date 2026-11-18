@@ -52,7 +52,7 @@ try {
 
   if (result.item) {
     log.mark('item in the inbox store');
-    await page.locator('.pane-tab', { hasText: /^inbox$/ }).click();
+    await page.locator('.pane-tab', { hasText: /^Inbox$/ }).click();
     await itemRow().waitFor({ timeout: 10_000 });
     result.itemVisibleInInboxPane = true;
     result.unreadText = await page.getByTestId('inbox-unread').textContent();

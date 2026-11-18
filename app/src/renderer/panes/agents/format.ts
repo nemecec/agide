@@ -20,7 +20,14 @@ export const elapsedSeconds = (view: Pick<AgentNodeView, 'startedAt' | 'endedAt'
   Math.max(0, ((view.endedAt === undefined ? now : Date.parse(view.endedAt)) - Date.parse(view.startedAt)) / 1000);
 
 /** Dollar figures are always estimates at list price (0027 section 12). */
-export const formatCost = (usd: number | undefined): string => (usd === undefined ? 'no price' : `~$${usd < 0.01 ? usd.toFixed(4) : usd.toFixed(2)}`);
+export const formatCost = (usd: number | undefined): string => {
+  if (usd === undefined) return 'no price';
+  if (usd > 0 && usd < 0.0001) return '<$0.0001';
+  return `~$${usd < 0.01 ? usd.toFixed(4) : usd.toFixed(2)}`;
+};
+
+/** A count with thousands separators, for token rates. */
+export const formatCount = (value: number): string => Math.round(value).toLocaleString('en-US');
 
 export function outcomeText(view: Pick<AgentNodeView, 'state' | 'outcome' | 'outcomeBasis'>): string {
   if (view.outcome === undefined) return view.state;

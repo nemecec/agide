@@ -136,7 +136,7 @@ function LayoutBar({ view }: { view: LayoutViewState }) {
         >
           {view.layouts.map((layout) => (
             <option key={layout.id} value={layout.id}>
-              {layout.title}
+              {layout.title.charAt(0).toUpperCase() + layout.title.slice(1)}
             </option>
           ))}
         </select>
@@ -147,20 +147,29 @@ function LayoutBar({ view }: { view: LayoutViewState }) {
 
 function Notices({ view }: { view: LayoutViewState }) {
   const [dismissed, setDismissed] = useState(0);
+  const [errorHidden, setErrorHidden] = useState(false);
+  const issueKey = JSON.stringify(view.fileIssues);
+  useEffect(() => setErrorHidden(false), [issueKey]);
   const change = view.lastChange;
   const showChange = change !== undefined && (change.source === 'mcp' || change.source === 'file') && change.revision > dismissed;
   return (
     <>
-      {view.fileIssues.length > 0 && (
+      {view.fileIssues.length > 0 && !errorHidden && (
         <div className="layout-notice layout-error" role="alert" data-testid="layout-error">
           <strong>The layout file is invalid. The previous layout stays and the file is untouched.</strong>
-          <ul>
-            {view.fileIssues.map((issue, index) => (
-              <li key={index}>
-                <code>{issue.path || '/'}</code> {issue.message}
-              </li>
-            ))}
-          </ul>
+          <details>
+            <summary>Show what is wrong</summary>
+            <ul>
+              {view.fileIssues.map((issue, index) => (
+                <li key={index}>
+                  <code>{issue.path || '/'}</code> {issue.message}
+                </li>
+              ))}
+            </ul>
+          </details>
+          <button type="button" data-testid="layout-error-dismiss" onClick={() => setErrorHidden(true)}>
+            Dismiss
+          </button>
         </div>
       )}
       {showChange && (

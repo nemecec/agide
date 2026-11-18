@@ -56,27 +56,35 @@ export function toView(record: AgentRecord, extra: { hidden: boolean; folderId?:
 }
 
 export interface SessionAgentSummary {
-  /** Agents in `running` or `waiting`. */
+  /** Agents in `running`. */
   readonly running: number;
+  /** Agents in `waiting`, counted apart from the running ones. */
   readonly waiting: number;
-  /** Agents that ended in the last minute, so agents that start and end inside the removal delay leave a trace. */
+  /** Failed agents whose node is still shown or that ended in the last minute. */
+  readonly failed: number;
+  /** Agents that ended well in the last minute, so agents that start and end inside the removal delay leave a trace. */
   readonly finishedRecently: number;
 }
 
 export const FINISHED_TALLY_MS = 60_000;
 
-/** The running count, waiting marker and finished tally a session leaf shows (0027 section 3). */
-export function summarise(views: readonly Pick<AgentNodeView, 'state' | 'endedAt'>[], now: number): SessionAgentSummary {
+/** The running count, waiting count, failed count and finished tally a session leaf shows (0027 section 3). */
+export function summarise(views: readonly (Pick<AgentNodeView, 'state' | 'endedAt'> & { readonly hidden?: boolean })[], now: number): SessionAgentSummary {
   let running = 0;
   let waiting = 0;
+  let failed = 0;
   let finishedRecently = 0;
   for (const view of views) {
-    if (view.state === 'running' || view.state === 'waiting') {
-      running += 1;
-      if (view.state === 'waiting') waiting += 1;
-    } else if (view.endedAt !== undefined && now - Date.parse(view.endedAt) <= FINISHED_TALLY_MS) finishedRecently += 1;
+    if (view.state === 'running') running += 1;
+    else if (view.state === 'waiting') waiting += 1;
+    else {
+      const recent = view.endedAt !== undefined && now - Date.parse(view.endedAt) <= FINISHED_TALLY_MS;
+      if (view.state === 'failed') {
+        if (recent || view.hidden !== true) failed += 1;
+      } else if (recent) finishedRecently += 1;
+    }
   }
-  return { running, waiting, finishedRecently };
+  return { running, waiting, failed, finishedRecently };
 }
 
 export interface HistoryFilter {

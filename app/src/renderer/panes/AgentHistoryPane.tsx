@@ -92,6 +92,7 @@ export function AgentHistoryPane({ instanceId, config }: PaneProps) {
           <tr>
             <th>Agent</th>
             <th>State</th>
+            <th>Started</th>
             <th>Duration</th>
             <th>Tokens</th>
             <th title="estimated from tokens, list price">Cost (estimate)</th>
@@ -110,6 +111,7 @@ export function AgentHistoryPane({ instanceId, config }: PaneProps) {
             >
               <td title={row.description ?? row.label}>{row.label}</td>
               <td>{outcomeText(row)}</td>
+              <td>{new Date(row.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
               <td>{formatDuration(elapsedSeconds(row, now))}</td>
               <td>{formatTokens(totalTokens(row.tokens))}</td>
               <td>{formatCost(row.costUsd)}</td>

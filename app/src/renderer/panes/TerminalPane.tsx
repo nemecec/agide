@@ -18,6 +18,8 @@ export function TerminalPane({ sessionId }: { sessionId?: string | undefined }) 
   return <SessionTerminal key={sessionId} sessionId={sessionId} />;
 }
 
+const toneOf = (status: SessionStatus): 'busy' | 'waiting' | 'idle' => (status === 'busy' ? 'busy' : status === 'waiting' ? 'waiting' : 'idle');
+
 type View = { kind: 'loading' } | { kind: 'missing' } | { kind: 'ready'; status: SessionStatus };
 
 function SessionTerminal({ sessionId }: { sessionId: string }) {
@@ -40,6 +42,11 @@ function SessionTerminal({ sessionId }: { sessionId: string }) {
     term.loadAddon(fit);
     term.open(element);
     terminal.current = term;
+    const scheme = window.matchMedia('(prefers-color-scheme: dark)');
+    const followScheme = () => {
+      term.options.theme = scheme.matches ? DARK : LIGHT;
+    };
+    scheme.addEventListener?.('change', followScheme);
 
     let live = true;
     // Output that arrives before the snapshot is part of the snapshot: events and the snapshot reply travel
@@ -95,6 +102,7 @@ function SessionTerminal({ sessionId }: { sessionId: string }) {
     return () => {
       live = false;
       cancelAnimationFrame(frame);
+      scheme.removeEventListener?.('change', followScheme);
       observer.disconnect();
       unsubscribe();
       input.dispose();
@@ -114,7 +122,7 @@ function SessionTerminal({ sessionId }: { sessionId: string }) {
       <SessionHeader sessionId={sessionId} />
       <TrustBanner sessionId={sessionId} />
       <div className="terminal-bar">
-        <span className="terminal-status" data-testid="terminal-status" data-status={view.kind === 'ready' ? view.status : view.kind}>
+        <span className="terminal-status chip" data-tone={view.kind === 'ready' ? toneOf(view.status) : 'idle'} data-testid="terminal-status" data-status={view.kind === 'ready' ? view.status : view.kind}>
           {view.kind === 'ready' ? view.status : view.kind === 'missing' ? 'session not found' : 'loading'}
         </span>
         {view.kind === 'ready' && view.status === 'exited' && (

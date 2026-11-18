@@ -32,7 +32,7 @@ export interface SrtProviderOptions {
   readonly extraDenyRead?: readonly string[];
 }
 
-export const SRT_INSTALL_FIX = 'Install it with `pnpm add -g @anthropic-ai/sandbox-runtime` and set its path in the profile isolation settings.';
+export const SRT_INSTALL_FIX = 'Install it with `pnpm add -g @anthropic-ai/sandbox-runtime` and enter its path in the field of this provider.';
 
 const SETTINGS_FILE = 'srt.json';
 

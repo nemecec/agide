@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { api } from '../api';
 import { ItemCard } from './inbox/ItemCard';
-import { ageOf, KIND_LABEL } from './inbox/format';
+import { ageOf, KIND_LABEL, needsAnswer, orderItems } from './inbox/format';
 import { SessionPeek } from './inbox/SessionPeek';
 import { useInbox, type Filter } from './inbox/useInbox';
 import type { PaneProps } from './paneTypes';
@@ -15,7 +15,9 @@ const resolveItem = (itemId: string): void => void api().invoke('inbox_resolve',
  */
 export function InboxPane({ instanceId }: PaneProps<{ viewId?: string; folderId?: string }>) {
   const [filter, setFilter] = useState<Filter>('open');
-  const { items, unread, loaded } = useInbox(filter);
+  const { items: fetched, unread, loaded } = useInbox(filter);
+  const items = useMemo(() => orderItems(fetched), [fetched]);
+  const waiting = items.filter(needsAnswer).length;
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const [peekSession, setPeekSession] = useState<string | undefined>(undefined);
   const list = useRef<HTMLUListElement>(null);
@@ -52,9 +54,14 @@ export function InboxPane({ instanceId }: PaneProps<{ viewId?: string; folderId?
         <header className="inbox-header">
           <h1>Inbox</h1>
           <span data-testid="inbox-unread" data-count={unread}>
-            {unread === 0 ? 'Nothing waits for you' : `${unread} unread`}
+            {unread === 0 ? 'No unread items' : `${unread} unread`}
           </span>
-          <div role="tablist" aria-label="Filter">
+          {waiting > 0 && (
+            <span className="inbox-waiting" data-testid="inbox-waiting">
+              {waiting} need{waiting === 1 ? 's' : ''} an answer
+            </span>
+          )}
+          <div role="tablist" aria-label="Filter" className="inbox-segments">
             {(['open', 'done'] as const).map((name) => (
               <button key={name} role="tab" type="button" aria-selected={filter === name} onClick={() => setFilter(name)} data-testid={`inbox-filter-${name}`}>
                 {name === 'open' ? 'Open' : 'Done'}
@@ -83,6 +90,7 @@ export function InboxPane({ instanceId }: PaneProps<{ viewId?: string; folderId?
                   <span className="inbox-row-top">
                     <span className="inbox-dot" aria-label={item.state === 'new' ? 'unread' : 'read'} data-unread={item.state === 'new'} />
                     <span className="inbox-row-kind">{KIND_LABEL[item.kind] ?? item.kind}</span>
+                    {needsAnswer(item) && <span className="chip inbox-needs-answer" data-tone="waiting" data-testid="inbox-needs-answer">Needs answer</span>}
                     <span className="inbox-row-where">{[item.projectName, item.sessionName].filter(Boolean).join(' / ')}</span>
                     <span className="inbox-row-age">{ageOf(item.updatedAt)}</span>
                   </span>

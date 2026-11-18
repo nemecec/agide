@@ -60,8 +60,8 @@ test('the Session layout places the tree, the surface host, the inbox and the pr
   const layout = await invoke<{ layout: { instances: Record<string, { type: string }> } }>('layout_get');
   const types = Object.values(layout.layout.instances).map((instance) => instance.type).sort();
   expect(types, 'instances of the Session preset').toEqual(['agide/inbox', 'agide/profile-rail', 'agide/surface-host', 'agide/tree']);
-  await expect(tab('inbox'), 'the inbox is a tab beside the surface').toBeVisible();
-  await expect(tab('profile-rail'), 'the rail group shows no tab header').toBeHidden();
+  await expect(tab('Inbox'), 'the inbox is a tab beside the surface').toBeVisible();
+  await expect(tab('Profile rail'), 'the rail group shows no tab header').toBeHidden();
   await expect(page.locator('[data-instance-id="rail"]'), 'the rail has its pane frame').toHaveCount(1);
 });
 
@@ -99,7 +99,7 @@ test('a layout file edit and a layout_apply over MCP change the window, and Undo
 
 test('a hook event of a session shows as an item in the inbox pane of the layout', async () => {
   const { sessionId } = await startSession('Hooks');
-  await tab('inbox').click();
+  await tab('Inbox').click();
   const inbox = page.getByTestId('inbox-pane');
   await expect(inbox, 'the inbox tab shows the inbox pane').toBeVisible();
 

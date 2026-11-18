@@ -35,7 +35,7 @@ afterEach(async () => {
 });
 
 async function mount(items: ItemRow[], unread = 0) {
-  fake = installFakeApi({ inbox_list: { items, unread }, browser_answer_approval: {}, inbox_context: {}, inbox_resolve: {}, inbox_mark_unread: {}, inbox_snooze: {}, inbox_mark_seen: {}, inbox_reopen: {} });
+  fake = installFakeApi({ inbox_list: { items, unread }, browser_answer_approval: {}, inbox_context: {}, inbox_resolve: {}, inbox_mark_unread: {}, inbox_snooze: {}, inbox_mark_seen: {}, inbox_reopen: {}, ui_focus_node: {} });
   rendered = await render(createElement(InboxPane, { instanceId: 'inbox', config: {}, inputs: {} }));
 }
 const root = () => rendered!.container;
@@ -49,13 +49,14 @@ describe('InboxPane', () => {
   it('says so when nothing is open', async () => {
     await mount([]);
     expect(root().querySelector('[data-testid="inbox-empty"]')?.textContent, 'empty message').toBe('No open items');
-    expect(root().querySelector('[data-testid="inbox-unread"]')?.textContent, 'unread line').toBe('Nothing waits for you');
+    expect(root().querySelector('[data-testid="inbox-unread"]')?.textContent, 'unread line').toBe('No unread items');
   });
 
   it('lists the items with kind, place, repeats and the unread marker', async () => {
     await mount([item('a', { state: 'new', kind: 'approval', projectName: 'Proj', sessionName: 'Sess', occurrences: 3 }), item('b')], 1);
     expect(rows(), 'two rows').toHaveLength(2);
-    expect(rows()[0]?.textContent, 'row text').toContain('ApprovalProj / Sess');
+    expect(rows()[0]?.textContent, 'row kind').toContain('Approval');
+    expect(rows()[0]?.textContent, 'row place').toContain('Proj / Sess');
     expect(rows()[0]?.textContent, 'repeat count').toContain('x3');
     expect(rows()[0]?.querySelector('[data-unread="true"]'), 'unread dot of the new item').not.toBeNull();
     expect(rows()[1]?.querySelector('[data-unread="true"]'), 'seen item has no unread dot').toBeNull();
@@ -164,6 +165,24 @@ describe('InboxPane', () => {
     await mount([item('a', { kind: 'approval', payload: { toolInput: { command: 'rm -r build' } } })]);
     await select(0);
     expect(root().querySelector('[data-testid="inbox-raw"]')?.textContent, 'raw tool input').toContain('"command": "rm -r build"');
+  });
+
+  it('keeps an open approval marked as needing an answer after it is read, and says where to answer', async () => {
+    await mount([item('a', { kind: 'approval', state: 'seen', sessionId: 's1', linkNodeId: 'leaf1' }), item('b', { state: 'new', createdAt: '2026-11-17T11:00:00.000Z' })], 1);
+    expect(rows()[0]?.getAttribute('data-kind'), 'the approval stays on top although it is read and the other item is newer').toBe('approval');
+    expect(rows()[0]?.querySelector('[data-testid="inbox-needs-answer"]'), 'needs-answer marker on a read approval').not.toBeNull();
+    expect(root().querySelector('[data-testid="inbox-waiting"]')?.textContent, 'header says one approval needs an answer').toBe('1 needs an answer');
+    await select(0);
+    expect(button('Dismiss without answering'), 'Done is named for what it does').toBeDefined();
+    expect(root().querySelector('[data-testid="inbox-done"]')?.textContent, 'the dismiss action is not called Done').toBe('Dismiss without answering');
+    await act(async () => root().querySelector<HTMLElement>('[data-testid="inbox-answer-in-session"]')?.click());
+    expect(ids('ui_focus_node'), 'the session is brought to the front').toEqual([{ nodeId: 'leaf1' }]);
+  });
+
+  it('shows the raw request of an approval collapsed when the card already describes it', async () => {
+    await mount([item('a', { kind: 'approval', details: 'Wants to run rm', payload: { toolInput: { command: 'rm -r build' } } })]);
+    await select(0);
+    expect(root().querySelector<HTMLDetailsElement>('.inbox-raw-block')?.open, 'raw request closed under the description').toBe(false);
   });
 
   it('switches to the done filter', async () => {

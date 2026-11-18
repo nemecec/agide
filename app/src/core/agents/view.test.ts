@@ -17,7 +17,7 @@ const view = (over: Partial<AgentNodeView>): AgentNodeView => ({
 });
 
 describe('summarise', () => {
-  it('counts running and waiting agents, the waiting ones separately, and agents that ended in the last minute', () => {
+  it('counts running, waiting and failed agents apart, and agents that finished in the last minute', () => {
     const summary = summarise(
       [
         view({ state: 'running' }),
@@ -28,7 +28,18 @@ describe('summarise', () => {
       ],
       NOW,
     );
-    expect(summary, 'counts').toEqual({ running: 2, waiting: 1, finishedRecently: 2 });
+    expect(summary, 'running excludes the waiting agent, the failed agent has its own count').toEqual({ running: 1, waiting: 1, failed: 1, finishedRecently: 1 });
+  });
+
+  it('keeps counting a failed agent whose node is still shown, and drops one that ended long ago and is hidden', () => {
+    const summary = summarise(
+      [
+        view({ state: 'failed', endedAt: '2026-11-17T10:00:00.000Z', hidden: false }),
+        view({ state: 'failed', endedAt: '2026-11-17T10:01:00.000Z', hidden: true }),
+      ],
+      NOW,
+    );
+    expect(summary.failed, 'only the failed agent that is still in the tree').toBe(1);
   });
 });
 
