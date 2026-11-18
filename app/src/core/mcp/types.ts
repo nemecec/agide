@@ -9,7 +9,8 @@ import type { NodeId } from '../tree/types';
  * - One bearer token per session, random, at least 32 bytes, compared in constant time. The token must belong to
  *   the session in the URL path. A wrong or missing token gets 401 and no detail.
  * - A request that carries an `Origin` header gets 403 (the CLI sends none; browsers always do).
- * - A `Host` header other than `127.0.0.1:<port>` or `localhost:<port>` gets 403 (DNS rebinding).
+ * - A `Host` header other than `127.0.0.1:<port>`, `localhost:<port>` or a value the session's grant names gets 403
+ *   (DNS rebinding).
  * - Tools are generated from the command registry: every command with `mcp: true` is one tool whose name is the
  *   command id, whose description is the command description and whose input schema is the zod schema as JSON
  *   Schema. A call runs `CommandRegistry.invoke` with `{ kind: 'mcp', sessionId, folderId }` from the grant.
@@ -31,15 +32,31 @@ export interface McpGrant {
   readonly token: string;
 }
 
+export interface McpHttpServerEntry {
+  readonly type: 'http';
+  readonly url: string;
+  readonly headers: { readonly Authorization: string };
+  /** Milliseconds; above 60,000 keeps a call open while the app waits for the user (0026 section 3, P16). */
+  readonly timeout?: number;
+}
+
 /** The JSON passed to `claude --mcp-config`. `type: 'http'` is required (P3: without it the CLI reports `url_missing_type`). */
 export interface McpConfigJson {
   readonly mcpServers: {
-    readonly app: {
-      readonly type: 'http';
-      readonly url: string;
-      readonly headers: { readonly Authorization: string };
-    };
+    readonly app: McpHttpServerEntry;
+    /** The hosted browser tools on `/mcp/<session>/browser` (0026), added by the browser module's launch contribution. */
+    readonly 'agide-browser'?: McpHttpServerEntry;
   };
+}
+
+/** Which server of the session a command's tool is listed on (0026 section 3). */
+export type McpServerName = 'app' | 'agide-browser';
+
+export const BROWSER_MCP_SERVER_NAME = 'agide-browser';
+
+export interface McpGrantOptions {
+  /** `Host` header values the session's environment sends besides the loopback names (`McpEndpoint.hostHeader`). */
+  readonly hostHeaders?: readonly string[];
 }
 
 export interface AppMcpServer {
@@ -47,7 +64,7 @@ export interface AppMcpServer {
   start(): Promise<{ port: number }>;
   stop(): Promise<void>;
   /** Issues or replaces the grant of a session. Call before launching `claude` for that session. */
-  grant(sessionId: SessionId, folderId: NodeId): McpGrant;
+  grant(sessionId: SessionId, folderId: NodeId, options?: McpGrantOptions): McpGrant;
   /** Changes the folder of an existing grant, for example after the session leaf moved. */
   rescope(sessionId: SessionId, folderId: NodeId): void;
   revoke(sessionId: SessionId): void;

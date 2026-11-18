@@ -4,12 +4,51 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { FakeProvider } from './FakeProvider';
 import { describeIsolationProviderContract } from './isolationProviderContract';
+import { ContainerProvider } from './ContainerProvider';
 import { LocalProvider } from './LocalProvider';
+import { IsolationProviders } from './providerRegistry';
+import { SrtProvider } from './SrtProvider';
+import { containerTestsUnavailable, findTestSrt, srtTestsUnavailable, TEST_IMAGE } from './testRuntimes';
 
 const FAKE_CLAUDE = join(import.meta.dirname, '..', 'session', 'fixtures', 'fake-claude.mjs');
 
 describeIsolationProviderContract('LocalProvider', (dir) => new LocalProvider({ sessionFilesDir: join(dir, 'sessions'), claudeBinary: FAKE_CLAUDE }));
 describeIsolationProviderContract('FakeProvider', (dir) => new FakeProvider({ sessionFilesDir: join(dir, 'sessions') }));
+describeIsolationProviderContract(
+  'SrtProvider',
+  (dir) => new SrtProvider({ sessionFilesDir: join(dir, 'sessions'), srtBinary: findTestSrt() ?? 'srt', settingsDir: join(dir, 'srt'), claudeBinary: FAKE_CLAUDE }),
+  srtTestsUnavailable() === undefined ? {} : { unavailable: srtTestsUnavailable() as string },
+);
+describeIsolationProviderContract(
+  'ContainerProvider',
+  (dir) =>
+    new ContainerProvider({
+      sessionFilesDir: join(dir, 'sessions'),
+      dockerBinary: 'docker',
+      image: TEST_IMAGE,
+      claudeConfigDir: join(dir, 'claude'),
+      user: `${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`,
+    }),
+  containerTestsUnavailable() === undefined ? {} : { unavailable: containerTestsUnavailable() as string },
+);
+
+describe('IsolationProviders', () => {
+  it('creates each provider once, offers local first and refuses an id without a factory', () => {
+    let created = 0;
+    const providers = new IsolationProviders(() => {
+      created += 1;
+      return new FakeProvider({ sessionFilesDir: '/nonexistent' });
+    });
+    providers.register('srt', () => new SrtProvider({ sessionFilesDir: '/nonexistent/s', srtBinary: 'srt', settingsDir: join(tmpdir(), 'isolation-registry-test') }));
+    expect(providers.get('local'), 'same instance on every call').toBe(providers.get('local'));
+    expect(created, 'local factory ran once').toBe(1);
+    expect(providers.ids(), 'local first, then registered ids').toEqual(['local', 'srt']);
+    expect(() => providers.get('openshell'), 'unknown provider').toThrow('not available');
+    const first = providers.get('srt');
+    providers.reset('srt');
+    expect(providers.get('srt'), 'a reset provider is built again from its factory').not.toBe(first);
+  });
+});
 
 const spec = (dir: string, claudeConfigDir: string | undefined) => ({
   key: { profileId: 'default' },

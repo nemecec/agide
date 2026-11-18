@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useViewSuspension } from './browser/suspension';
 
 export interface MenuEntry {
   readonly label: string;
@@ -13,6 +14,7 @@ export interface MenuState {
 
 /** A small popup menu. It closes on any click outside, on Escape and after an entry runs. */
 export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => void }) {
+  useViewSuspension(true);
   useEffect(() => {
     const close = (event: Event) => {
       if (event instanceof KeyboardEvent && event.key !== 'Escape') return;

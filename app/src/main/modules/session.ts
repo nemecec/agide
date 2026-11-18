@@ -2,16 +2,18 @@ import { mkdirSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { z } from 'zod';
 import { CommandError, requireInScope, type Caller } from '../../core/commands/index';
+import { createIsolationProviders, registerIsolationCommands, type McpEndpoint } from '../../core/isolation/index';
 import type { AppMcpServer } from '../../core/mcp/index';
+import { PermissionError, type PermissionService } from '../../core/permissions/index';
 import { profilePaths, type ProfileService } from '../../core/profile/index';
 import {
   claudeArgsFromEnv,
-  defaultPermissionModeFromEnv,
   defaultSessionCwd,
   profileLaunchSpec,
   PtySessionService,
   SessionError,
   SqliteSessionStore,
+  type LaunchContributors,
   type SessionService,
 } from '../../core/session/index';
 import type { SessionInfo } from '../../core/session/index';
@@ -30,25 +32,33 @@ const permissionMode = z.enum(['default', 'acceptEdits', 'plan', 'auto', 'bypass
  */
 export async function init(
   ctx: ModuleContext,
-  deps: { tree: TreeService; mcp: AppMcpServer; profile: ProfileService },
+  deps: { tree: TreeService; mcp: AppMcpServer; profile: ProfileService; permissions: PermissionService; launch: LaunchContributors },
 ): Promise<ModuleHandle<SessionService>> {
-  const { tree, mcp } = deps;
+  const { tree, mcp, permissions } = deps;
   const launchArgs = claudeArgsFromEnv();
   const { port } = await mcp.start();
   const appRoot = ctx.profile?.root ?? ctx.dataDir;
   const paths = profilePaths(appRoot, deps.profile.id);
+  const providers = createIsolationProviders({
+    sessionFilesDir: join(ctx.dataDir, 'sessions'),
+    dataDir: ctx.dataDir,
+    options: () => deps.profile.settings().isolation.options,
+  });
+  const providerOf = () => providers.get(deps.profile.settings().isolation.provider);
   const sessions = new PtySessionService({
     eventsDir: join(ctx.dataDir, 'session-events'),
-    sessionFilesDir: join(ctx.dataDir, 'sessions'),
+    provider: providers.get('local'),
+    selectProvider: providerOf,
     store: new SqliteSessionStore(ctx.db),
     profileId: deps.profile.id,
     profileLaunch: () => profileLaunchSpec(deps.profile.settings(), paths, process.env),
     appPort: () => port,
     denyPaths: [appRoot],
     onLaunchFailed: (session) => mcp.revoke(session.id),
-    defaultPermissionMode: defaultPermissionModeFromEnv(),
+    networkPolicy: (session) => permissions.networkPolicy(session.id),
+    contributors: () => deps.launch.list(),
     extraArgs: () => launchArgs,
-    mcpConfig: (session, endpoint) => mcpConfig(mcp, session, leafOf(session.id), endpoint.url),
+    mcpConfig: (session, endpoint) => mcpConfig(mcp, session, leafOf(session.id), endpoint),
   });
 
   // The leaf each session owns. Only that leaf drives the session: any other leaf with the same surface id is
@@ -148,9 +158,11 @@ export async function init(
           const folder = tree.get(input.folderId);
           if (folder?.kind !== 'folder') throw new CommandError('invalid_input', `${input.folderId} is not a folder`);
           requireInScope(tree, caller, folder.id);
-          if (input.permissionMode === 'bypassPermissions' && input.confirmBypassPermissions !== true) {
-            throw new CommandError('invalid_input', 'bypassPermissions needs confirmBypassPermissions: true');
-          }
+          const permissionMode = resolveMode(permissions, {
+            ...(input.permissionMode === undefined ? {} : { requested: input.permissionMode }),
+            ...(input.confirmBypassPermissions === undefined ? {} : { confirmBypassPermissions: input.confirmBypassPermissions }),
+            capabilities: providerOf().capabilities,
+          });
           const cwd = input.cwd ?? defaultSessionCwd(folder.id);
           if (isWithin(appRoot, cwd)) throw new CommandError('invalid_input', 'a session cannot run inside the data directory of the app');
           if (input.cwd === undefined) mkdirSync(cwd, { recursive: true, mode: 0o700 });
@@ -159,7 +171,7 @@ export async function init(
             cwd,
             ...(input.title === undefined ? {} : { title: input.title }),
             ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
-            ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+            permissionMode,
           });
           try {
             const leaf = tree.createLeaf({ title: session.title, parentId: folder.id, surfaceType: SURFACE_TYPE, surfaceId: session.id });
@@ -268,6 +280,8 @@ export async function init(
     }),
   ];
 
+  unregister.push(...registerIsolationCommands(ctx.commands, { providers, profile: deps.profile }));
+
   return {
     service: sessions,
     dispose: async () => {
@@ -277,16 +291,29 @@ export async function init(
   };
 }
 
+/** The mode of a new session from the permissions module; its refusals become invalid input. */
+function resolveMode(permissions: PermissionService, request: Parameters<PermissionService['resolveMode']>[0]) {
+  try {
+    return permissions.resolveMode(request);
+  } catch (error) {
+    if (error instanceof PermissionError) throw new CommandError('invalid_input', error.message);
+    throw error;
+  }
+}
+
+const LOOPBACK_HOST = /^(127\.0\.0\.1|localhost):[0-9]+$/;
+
 /**
  * Grants the session access to the app MCP server and returns the config the CLI reads from a file. A session
- * whose leaf left its folder gets no grant, because its scope would name a folder it is no longer in.
+ * whose leaf left its folder gets no grant, because its scope would name a folder it is no longer in. An
+ * environment that reaches the host under another name (a container) gets that `Host` allowed for its grant.
  */
-function mcpConfig(mcp: AppMcpServer, session: SessionInfo, leaf: TreeNode | undefined, url: string): object | undefined {
+function mcpConfig(mcp: AppMcpServer, session: SessionInfo, leaf: TreeNode | undefined, endpoint: McpEndpoint): object | undefined {
   if (leaf && leaf.parentId !== session.folderId) return undefined;
   try {
-    mcp.grant(session.id, session.folderId);
+    mcp.grant(session.id, session.folderId, LOOPBACK_HOST.test(endpoint.hostHeader) ? {} : { hostHeaders: [endpoint.hostHeader] });
     const { app } = mcp.configFor(session.id).mcpServers;
-    return { mcpServers: { app: { ...app, url } } };
+    return { mcpServers: { app: { ...app, url: endpoint.url } } };
   } catch (error) {
     console.warn(`session ${session.id} starts without the app MCP server:`, error);
     return undefined;

@@ -1,23 +1,17 @@
 import { accessSync, constants } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import { sessionUrl } from '../mcp/mcpConfig';
 import { resolveClaudeBinary } from '../session/env';
-import type { SessionId } from '../session/types';
 import { launchEnv } from './launchEnv';
+import { HostEnvironment } from './HostEnvironment';
 import { SessionFiles } from './SessionFiles';
 import {
   IsolationError,
   type AgentEnvironment,
   type ClaudeLaunch,
   type EnvironmentSpec,
-  type HookDelivery,
-  type HookTarget,
   type IsolationProvider,
-  type McpEndpoint,
   type ProviderCapabilities,
   type ProviderCheck,
   type PtyCommand,
-  type SessionFileName,
 } from './types';
 
 export interface LocalProviderOptions {
@@ -69,74 +63,20 @@ export class LocalProvider implements IsolationProvider {
   }
 }
 
-class LocalEnvironment implements AgentEnvironment {
+class LocalEnvironment extends HostEnvironment {
   readonly provider = 'local';
-  readonly paths = { toEnv: (hostPath: string) => hostPath, toHost: (envPath: string) => envPath };
-  private readonly pids = new Map<SessionId, number>();
-  private readonly sessions = new Set<SessionId>();
 
   constructor(
-    readonly id: string,
-    /** The latest spec of the key: a repeated `prepare` replaces it, so a changed profile applies to the next launch. */
-    public spec: EnvironmentSpec,
+    id: string,
+    spec: EnvironmentSpec,
     private readonly claudeBinary: string,
-    private readonly files: SessionFiles,
-  ) {}
-
-  async writeSessionFile(sessionId: SessionId, name: SessionFileName, content: string): Promise<string> {
-    const path = this.files.write(sessionId, name, content);
-    this.sessions.add(sessionId);
-    return path;
-  }
-
-  removeSessionFile(sessionId: SessionId, name: SessionFileName): Promise<void> {
-    this.files.removeFile(sessionId, name);
-    return Promise.resolve();
-  }
-
-  hookDelivery(_sessionId: SessionId, target: HookTarget): HookDelivery {
-    return { kind: 'inbox-dir', dir: target.inboxHostDir };
-  }
-
-  mcpEndpoint(sessionId: SessionId): McpEndpoint {
-    const { port } = this.spec.appEndpoint;
-    return { url: sessionUrl(port, sessionId), hostHeader: `127.0.0.1:${port}` };
+    files: SessionFiles,
+  ) {
+    super(id, spec, files);
   }
 
   async ptyCommand(launch: ClaudeLaunch): Promise<PtyCommand> {
     if (this.spec.workspace.mode !== 'bind') throw new IsolationError('unsupported', 'the local provider runs in a host directory only');
-    return { file: this.claudeBinary, args: [...launch.args], cwd: launch.cwd, env: launchEnv(this.spec.profile, this.paths.toEnv) };
-  }
-
-  attach(sessionId: SessionId, pid: number): void {
-    this.sessions.add(sessionId);
-    this.pids.set(sessionId, pid);
-  }
-
-  terminate(sessionId: SessionId, signal: 'SIGTERM' | 'SIGKILL'): Promise<void> {
-    const pid = this.pids.get(sessionId);
-    if (pid !== undefined) {
-      try {
-        process.kill(pid, signal);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
-      }
-    }
-    return Promise.resolve();
-  }
-
-  async readFile(envPath: string): Promise<Uint8Array> {
-    return readFile(envPath);
-  }
-
-  releaseSession(sessionId: SessionId): Promise<void> {
-    this.files.remove(sessionId);
-    this.pids.delete(sessionId);
-    this.sessions.delete(sessionId);
-    return Promise.resolve();
-  }
-
-  async dispose(): Promise<void> {
-    for (const sessionId of [...this.sessions]) await this.releaseSession(sessionId);
+    return { file: this.claudeBinary, args: [...launch.args], cwd: launch.cwd, env: launchEnv(this.spec.profile, this.paths.toEnv, launch.env) };
   }
 }

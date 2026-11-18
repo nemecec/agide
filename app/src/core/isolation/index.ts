@@ -1,5 +1,13 @@
 export * from './types';
 export { LocalProvider, type LocalProviderOptions } from './LocalProvider';
 export { FakeProvider, type FakeCall, type FakeProviderOptions, type FakeStep } from './FakeProvider';
+export { SrtProvider, findExecutable, type SrtProviderOptions } from './SrtProvider';
+export { buildSrtSettings, type SrtSettings } from './srtSettings';
+export { ContainerProvider, ownerIdOf, type ContainerProviderOptions } from './ContainerProvider';
+export { buildDockerRunArgs, containerName, CONTAINER_RUN_FLAGS } from './dockerArgs';
+export { IsolationProviders, type ProviderFactory } from './providerRegistry';
+export { createIsolationProviders, registerIsolationCommands, type ProviderSetup } from './defaultProviders';
 export { SessionFiles } from './SessionFiles';
 export { launchEnv } from './launchEnv';
+export type { IsolationStatus, ProviderRow } from './statusTypes';
+export { describeProvider, type CapabilityStatement } from './capabilityStatement';

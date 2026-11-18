@@ -27,7 +27,7 @@ export function decideWindowOpen(url: string): WindowOpenDecision {
   return /^https?:/.test(url) ? { action: 'deny', openExternal: url } : { action: 'deny' };
 }
 
-/** The renderer is sandboxed and isolated and has no Node. */
-export function mainWindowWebPreferences(preloadPath: string) {
-  return { preload: preloadPath, contextIsolation: true, sandbox: true, nodeIntegration: false } as const;
+/** The renderer is sandboxed and isolated and has no Node. Its DevTools, which reach `window.api`, are for development builds only. */
+export function mainWindowWebPreferences(preloadPath: string, options: { readonly devTools: boolean }) {
+  return { preload: preloadPath, contextIsolation: true, sandbox: true, nodeIntegration: false, devTools: options.devTools } as const;
 }

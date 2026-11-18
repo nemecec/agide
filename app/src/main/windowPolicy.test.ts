@@ -50,6 +50,7 @@ describe('decideWindowOpen', () => {
 
 describe('mainWindowWebPreferences', () => {
   it('sandboxes the renderer, isolates the context and gives it no Node', () => {
-    expect(mainWindowWebPreferences('/p/preload.cjs')).toEqual({ preload: '/p/preload.cjs', contextIsolation: true, sandbox: true, nodeIntegration: false });
+    expect(mainWindowWebPreferences('/p/preload.cjs', { devTools: true })).toEqual({ preload: '/p/preload.cjs', contextIsolation: true, sandbox: true, nodeIntegration: false, devTools: true });
+    expect(mainWindowWebPreferences('/p/preload.cjs', { devTools: false }).devTools, 'no DevTools in a packaged build').toBe(false);
   });
 });

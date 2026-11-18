@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { agentSettingsSchema } from '../agents/settings';
+import { permissionSettingsSchema } from '../permissions/schemas';
 import type { ProfileSettings } from './types';
 
 // The schemas mirror the interfaces in types.ts. zod types an optional key as `T | undefined`, which
@@ -45,6 +47,8 @@ export const profileSettingsSchema = z
       .strict(),
     showBadge: z.boolean(),
     shareUnread: z.boolean(),
+    permissions: permissionSettingsSchema.optional(),
+    agents: agentSettingsSchema.optional(),
   })
   .strict();
 

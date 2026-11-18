@@ -1,0 +1,6 @@
+.trust-banner {
+  padding: 4px 8px;
+  font-size: 12px;
+  background: var(--bg-alt, rgba(255, 193, 7, 0.18));
+  border-bottom: 1px solid var(--border);
+}

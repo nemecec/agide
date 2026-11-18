@@ -128,7 +128,7 @@ class FakeEnvironment implements AgentEnvironment {
     this.fake.step('ptyCommand');
     const configured = this.fake.options.command;
     if (typeof configured === 'function') return configured(launch, this.spec);
-    return configured ?? { file: 'claude', args: [...launch.args], cwd: launch.cwd, env: launchEnv(this.spec.profile, this.paths.toEnv) };
+    return configured ?? { file: 'claude', args: [...launch.args], cwd: launch.cwd, env: launchEnv(this.spec.profile, this.paths.toEnv, launch.env) };
   }
 
   attach(sessionId: SessionId, pid: number): void {

@@ -41,6 +41,11 @@ export interface Command<I extends z.ZodType = z.ZodType, O = unknown> {
   /** True exposes the command as a tool on the app MCP server. */
   readonly mcp: boolean;
   /**
+   * The session MCP server that lists the tool. Absent means `app`. Tools on `agide-browser` (0026) drop the
+   * `browser_` prefix of the command id, so `browser_navigate` is the tool `navigate`.
+   */
+  readonly mcpServer?: 'app' | 'agide-browser';
+  /**
    * The reason a command with a UI binding is not an MCP tool. The parity check accepts a UI-bound command
    * without a tool only when it has this reason, and lists the reason in `docs/parity.md`.
    */

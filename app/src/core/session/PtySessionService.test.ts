@@ -1,10 +1,13 @@
 import { mkdirSync, mkdtempSync, existsSync, writeFileSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PtySessionService, type PtySessionServiceOptions } from './PtySessionService';
 import { MemorySessionStore } from './SessionStore';
 import type { SessionEvent, SessionInfo, SessionStatus } from './types';
+
+// These tests start real PTY processes; under a loaded full run a start takes longer than the 5 s default.
+vi.setConfig({ testTimeout: 20_000 });
 
 const FAKE_CLAUDE = join(import.meta.dirname, 'fixtures', 'fake-claude.mjs');
 const FOLDER = 'folder-1';

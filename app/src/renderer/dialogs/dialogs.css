@@ -1,0 +1,19 @@
+.dialog {
+  position: fixed;
+  left: 50%;
+  top: 15%;
+  transform: translateX(-50%);
+  width: min(480px, calc(100vw - 32px));
+  max-height: 70vh;
+  overflow: auto;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  z-index: 30;
+}
+.dialog h2,
+.dialog h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}

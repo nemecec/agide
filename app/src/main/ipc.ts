@@ -6,7 +6,7 @@ import { invokeFromRenderer, isTrustedSource, listFromRenderer } from './ipcPoli
 import { isAppFrameUrl } from './window';
 
 /**
- * Generic IPC: command invocation and event broadcast. Only the main frame of an app window may invoke;
+ * Generic IPC: command invocation and event broadcast. Events go to windows that show an app page; a sign-in pop-up that shows a third-party page gets none. Only the main frame of an app window may invoke;
  * browser surfaces (`WebContentsView`) get no preload and no IPC.
  */
 export function registerIpc(commands: CommandRegistry, events: AppEventBus): () => void {
@@ -25,7 +25,7 @@ export function registerIpc(commands: CommandRegistry, events: AppEventBus): () 
 
   const unsubscribe = events.onAny((appEvent) => {
     for (const window of BrowserWindow.getAllWindows()) {
-      if (!window.isDestroyed()) window.webContents.send(IPC.event, appEvent);
+      if (!window.isDestroyed() && isAppFrameUrl(window.webContents.getURL())) window.webContents.send(IPC.event, appEvent);
     }
   });
 

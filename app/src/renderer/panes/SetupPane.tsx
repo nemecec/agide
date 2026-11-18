@@ -37,7 +37,10 @@ export function SetupPane() {
     const folder = await api().invoke<{ id: string }>('ui_create_folder', { title: 'Claude login' });
     if (!folder.ok) return setProblem(folder.error.message);
     const session = await api().invoke('session_create', { folderId: folder.value.id, cwd: status.loginDirectory, title: 'Claude login' });
-    if (!session.ok) setProblem(session.error.message);
+    if (!session.ok) {
+      setProblem(session.error.message);
+      await api().invoke('ui_remove_node', { nodeId: folder.value.id });
+    }
   };
 
   const saveGit = async (): Promise<void> => {
@@ -71,6 +74,7 @@ export function SetupPane() {
         )}
       </section>
       {status.agentAccess === 'host-user' ? <p>Agents run as your user on this computer. This profile keeps credentials and settings apart, but an agent can read what your user can read. Plain ssh and scp outside git still use your default keys.</p> : null}
+      <p data-testid="setup-permission-note">New sessions start in auto mode unless you choose another: Claude decides with its safety classifier, and outward actions such as pushes, comments and messages still ask. Change this in the profile settings.</p>
       <p>GitHub and ssh keys can be set up later in the profile settings; without a key git uses HTTPS.</p>
       {problem ? <p role="alert">{problem}</p> : null}
       <button type="button" onClick={() => setDismissed(true)}>Later</button>

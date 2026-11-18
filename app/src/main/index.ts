@@ -4,6 +4,7 @@ import { CommandRegistry } from '../core/commands/index';
 import { createAppEventBus } from '../core/events/index';
 import { writeLastProfile } from '../core/profile/index';
 import { openStore } from '../core/store/index';
+import { ElectronViews } from './browser/ElectronViews';
 import { createDesktop } from './desktop';
 import { isFocusRequest } from './focusRequest';
 import { registerIpc } from './ipc';
@@ -40,6 +41,7 @@ let modules: InitializedModules | undefined;
 let disposeIpc: (() => void) | undefined;
 let closeDb: (() => void) | undefined;
 let mainWindow: BrowserWindow | undefined;
+let browserViews: ElectronViews | undefined;
 
 function focusMainWindow(): void {
   const [window] = BrowserWindow.getAllWindows();
@@ -72,18 +74,22 @@ async function start(): Promise<void> {
     });
   }
 
+  browserViews = new ElectronViews({ mainWindow: () => mainWindow, dataDir: app.getPath('userData') });
   modules = await initModules({
     events,
     commands,
     db,
     dataDir,
     desktop,
+    browserViews,
     ...(profile ? { profile } : {}),
   });
   disposeIpc = registerIpc(commands, events);
 
   const title = boot.kind === 'profile' ? `${boot.definition.name} · ${APP_TITLE}` : undefined;
   mainWindow = createMainWindow({ show: showWindow, ...(title ? { title } : {}) });
+  // The hidden window that parks browser views must not keep the app alive after the app window closed.
+  mainWindow.once('closed', () => browserViews?.dispose());
   if (profile) {
     const remember = (): void => writeLastProfile(profile.root, profile.id);
     mainWindow.on('focus', remember);
@@ -97,6 +103,19 @@ async function start(): Promise<void> {
 
 app.on('window-all-closed', () => app.quit());
 
+// Backstop for every webContents that is neither the app window nor one the browser module built (0026 section
+// 5). Electron emits the event while a view is still being constructed, before the module can record it, so the
+// check runs one turn later.
+app.on('web-contents-created', (_event, contents) => {
+  setImmediate(() => {
+    if (contents.isDestroyed() || contents.getType() !== 'window') return;
+    if (contents === mainWindow?.webContents || browserViews?.owns(contents)) return;
+    contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    contents.on('will-navigate', (event) => event.preventDefault());
+    contents.on('will-attach-webview', (event) => event.preventDefault());
+  });
+});
+
 // Disposal is asynchronous, so the first quit is held and the app exits once the modules are disposed.
 // `app.exit` follows in place of a second `app.quit`: under Playwright a second `app.quit` does not quit.
 app.on('will-quit', (event) => {
@@ -109,6 +128,7 @@ app.on('will-quit', (event) => {
     .dispose()
     .catch((error: unknown) => console.error(error))
     .finally(() => {
+      browserViews?.dispose();
       closeDb?.();
       app.exit(0);
     });

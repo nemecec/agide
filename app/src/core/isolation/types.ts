@@ -29,6 +29,11 @@ export interface ProviderCapabilities {
   readonly hookTransports: readonly HookTransportKind[];
   /** Transcripts readable as host files (bind mount, local) or only through `readFile`. */
   readonly transcripts: 'host-files' | 'remote';
+  /**
+   * Whether the `PreToolUse` inspector command, which runs the app's executable as Node, can run where the CLI
+   * runs. Absent means it can. A provider whose CLI cannot reach that executable says `unavailable`.
+   */
+  readonly inspectorHook?: 'host-executable' | 'unavailable';
 }
 
 export type ProviderCheck = { readonly ok: true } | { readonly ok: false; readonly reason: string; readonly fix?: string };
@@ -66,7 +71,13 @@ export type NetworkPolicy =
   /** Anthropic API and OAuth hosts and the app endpoint are always added by the provider. */
   | { readonly mode: 'allowlist'; readonly allow: readonly { readonly host: string; readonly port?: number }[] };
 
-export type SessionFileName = 'mcp.json' | 'settings.json';
+/**
+ * Files the CLI or the app's hook commands read inside the environment: the MCP config, the settings file of
+ * the `http` hook transport, the permission inspector's gate file (0028) and the per-turn digest (0026).
+ */
+export type SessionFileName = 'mcp.json' | 'settings.json' | 'gate.json' | 'digest.json';
+
+export const SESSION_FILE_NAMES: readonly SessionFileName[] = ['mcp.json', 'settings.json', 'gate.json', 'digest.json'];
 
 export interface AgentEnvironment {
   readonly id: string;
@@ -126,6 +137,8 @@ export interface ClaudeLaunch {
   readonly args: readonly string[];
   readonly cols: number;
   readonly rows: number;
+  /** Variables for this launch on top of the profile environment (launch contributions). No secrets. */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 export interface PtyCommand {

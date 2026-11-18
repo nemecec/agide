@@ -58,6 +58,16 @@ beforeEach(() => {
   delete process.env['ELECTRON_RENDERER_URL'];
 });
 
+describe('createMainWindow: DevTools', () => {
+  it('turns the DevTools of the app window off in a packaged build and on in development', () => {
+    createMainWindow({ show: false });
+    expect((state.options?.['webPreferences'] as { devTools: boolean }).devTools, 'packaged').toBe(false);
+    state.packaged = false;
+    createMainWindow({ show: false });
+    expect((state.options?.['webPreferences'] as { devTools: boolean }).devTools, 'development').toBe(true);
+  });
+});
+
 describe('createMainWindow', () => {
   it('creates a sandboxed, isolated window with the preload and no Node', () => {
     createMainWindow({ show: false });

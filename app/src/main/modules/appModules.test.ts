@@ -106,12 +106,20 @@ describe('session launch', () => {
 });
 
 describe('profile setup', () => {
-  it('gives the login terminal an empty directory that holds no session file', async () => {
+  it('gives the login terminal an empty directory that holds no session file and lies outside the app root', async () => {
     const running = await start();
     const status = await value<{ loginDirectory: string }>(running, 'profile_setup_status', {});
-    expect(status.loginDirectory, 'directory for the login terminal').toBe(join(dir, 'login'));
+    expect(status.loginDirectory, 'directory for the login terminal, outside the data directory').toBe(work);
     expect(readdirSync(status.loginDirectory), 'it is empty').toEqual([]);
     expect(statSync(status.loginDirectory).mode & 0o777, 'owner only').toBe(0o700);
+  });
+
+  it('reports a login directory that session_create accepts', async () => {
+    const running = await start();
+    const status = await value<{ loginDirectory: string }>(running, 'profile_setup_status', {});
+    const created = await folder(running, 'Claude login');
+    const result = await running.commands.invoke('session_create', { folderId: created.id, cwd: status.loginDirectory, title: 'Claude login' }, ui);
+    expect(result, 'the session starts in the reported directory').toMatchObject({ ok: true });
   });
 });
 
@@ -211,11 +219,11 @@ describe('session module scope', () => {
     expect(second.services.sessions.list(), 'sessions after a restart without the leaf').toEqual([]);
   });
 
-  it('refuses bypassPermissions without an explicit confirmation', async () => {
+  it('refuses bypassPermissions on the local provider, with and without a confirmation', async () => {
     const running = await start();
     const fa = await folder(running, 'A');
     expect(await errorCode(running, 'session_create', { folderId: fa.id, permissionMode: 'bypassPermissions' }, ui), 'bypass without confirmation').toBe('invalid_input');
-    expect(await errorCode(running, 'session_create', { folderId: fa.id, permissionMode: 'bypassPermissions', confirmBypassPermissions: true }, ui), 'bypass with confirmation').toBe('ok');
+    expect(await errorCode(running, 'session_create', { folderId: fa.id, permissionMode: 'bypassPermissions', confirmBypassPermissions: true }, ui), 'bypass with confirmation on local').toBe('invalid_input');
   });
 });
 
@@ -239,3 +247,4 @@ describe('UI and MCP parity of the app registry', () => {
     }
   });
 });
+

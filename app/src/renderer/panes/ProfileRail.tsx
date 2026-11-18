@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { NewProfileForm } from './NewProfileForm';
+import { PlanUsage } from './rail/PlanUsage';
 import type { PaneProps } from './paneTypes';
 import { badgeText, initialOf } from './profileModel';
 import { useProfiles } from './useProfiles';
@@ -63,6 +64,7 @@ export function ProfileRail({ instanceId }: PaneProps) {
           </button>
         </li>
       </ul>
+      <PlanUsage />
       {problem ? <p className="profile-problem" role="alert">{problem}</p> : null}
       {creating ? (
         <NewProfileForm

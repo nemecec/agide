@@ -4,3 +4,13 @@ export { PtySessionService, type PtySessionServiceOptions } from './PtySessionSe
 export { MemorySessionStore, SqliteSessionStore, type PersistedSession, type SessionStore } from './SessionStore';
 export { claudeArgsFromEnv, defaultPermissionModeFromEnv, defaultSessionCwd, resolveClaudeBinary } from './env';
 export { profileLaunchSpec } from './profileLaunch';
+export {
+  LaunchContributors,
+  mergeContributions,
+  type HookCommandEntry,
+  type LaunchContext,
+  type LaunchContribution,
+  type LaunchContributor,
+  type MergedContribution,
+  type SettingsFragment,
+} from './launchContributions';

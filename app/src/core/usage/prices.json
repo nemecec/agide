@@ -1,0 +1,9 @@
+{
+  "date": "2026-11-17",
+  "note": "List prices in USD per million tokens by model family; not checked against the published price page for the current models. A model that matches no entry gets tokens and no cost.",
+  "models": [
+    { "family": "haiku", "pattern": "haiku", "input": 1, "output": 5, "cacheWrite5m": 1.25, "cacheWrite1h": 2, "cacheRead": 0.1 },
+    { "family": "sonnet", "pattern": "sonnet", "input": 3, "output": 15, "cacheWrite5m": 3.75, "cacheWrite1h": 6, "cacheRead": 0.3 },
+    { "family": "opus", "pattern": "opus", "input": 5, "output": 25, "cacheWrite5m": 6.25, "cacheWrite1h": 10, "cacheRead": 0.5 }
+  ]
+}

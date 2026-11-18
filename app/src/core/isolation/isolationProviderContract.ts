@@ -7,12 +7,24 @@ import type { EnvironmentSpec, IsolationProvider } from './types';
 
 const SECRET = 'token-that-must-stay-in-files';
 
+export interface ContractRunOptions {
+  /**
+   * Set while the provider is a stub: the suite is skipped and its title carries `[pending <owner>]`, so the
+   * test report shows which provider still has to pass it.
+   */
+  readonly pending?: string;
+  /** Set when the provider's third-party software is missing on this machine: the suite is skipped with the reason. */
+  readonly unavailable?: string;
+}
+
 /**
  * Behaviour every `IsolationProvider` must show on this machine. `create(dir)` returns a provider whose host
  * state lives under `dir`. Providers that need third-party software run this suite only where it is installed.
  */
-export function describeIsolationProviderContract(name: string, create: (dir: string) => IsolationProvider): void {
-  describe(`${name} (IsolationProvider contract)`, () => {
+export function describeIsolationProviderContract(name: string, create: (dir: string) => IsolationProvider, options: ContractRunOptions = {}): void {
+  const marker = options.pending === undefined ? (options.unavailable === undefined ? '' : ` [unavailable: ${options.unavailable}]`) : ` [pending ${options.pending}]`;
+  const suite = marker === '' ? describe : describe.skip;
+  suite(`${name} (IsolationProvider contract)${marker}`, () => {
     let dir: string;
     let spec: EnvironmentSpec;
 
@@ -100,6 +112,30 @@ export function describeIsolationProviderContract(name: string, create: (dir: st
       const endpoint = environment.mcpEndpoint('s1');
       expect(endpoint.url, 'per-session MCP path').toMatch(/\/mcp\/s1$/);
       expect(endpoint.url.includes(':4567') || endpoint.hostHeader.includes('4567'), 'endpoint reaches the app port').toBe(true);
+    });
+
+    it('adds the launch variables to the command environment and keeps the profile Claude directory', async () => {
+      const environment = await create(dir).prepare(spec);
+      const command = await environment.ptyCommand({
+        sessionId: 's1',
+        cwd: dir,
+        args: [],
+        cols: 80,
+        rows: 24,
+        env: { AGIDE_LAUNCH: 'yes', CLAUDE_CONFIG_DIR: '/elsewhere' },
+      });
+      expect(command.env['AGIDE_LAUNCH'], 'launch variable').toBe('yes');
+      expect(command.env['CLAUDE_CONFIG_DIR'], 'a launch variable cannot move the login').toBe(environment.paths.toEnv(join(dir, 'claude')));
+    });
+
+    it('writes and removes the gate and digest files like the other session files', async () => {
+      const environment = await create(dir).prepare(spec);
+      for (const name of ['gate.json', 'digest.json'] as const) {
+        const path = environment.paths.toHost(await environment.writeSessionFile('s1', name, '{}')) ?? '';
+        expect(statSync(path).mode & 0o777, `${name} mode`).toBe(0o600);
+        await environment.removeSessionFile('s1', name);
+        expect(() => statSync(path), `${name} removed`).toThrow();
+      }
     });
 
     it('ends an attached process on terminate', async () => {

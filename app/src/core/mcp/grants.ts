@@ -5,6 +5,7 @@ import type { NodeId } from '../tree/types';
 interface Entry {
   folderId: NodeId;
   token: string;
+  hostHeaders: readonly string[];
 }
 
 const digest = (token: string): Buffer => createHash('sha256').update(token).digest();
@@ -15,10 +16,15 @@ export class GrantStore {
   private readonly entries = new Map<SessionId, Entry>();
 
   /** Issues a fresh token for the session, replacing an earlier one. Returns the token. */
-  issue(sessionId: SessionId, folderId: NodeId): string {
+  issue(sessionId: SessionId, folderId: NodeId, hostHeaders: readonly string[] = []): string {
     const token = randomBytes(32).toString('hex');
-    this.entries.set(sessionId, { folderId, token });
+    this.entries.set(sessionId, { folderId, token, hostHeaders: [...hostHeaders] });
     return token;
+  }
+
+  /** `Host` values the session's environment uses besides the loopback names; none without a grant. */
+  hostHeaders(sessionId: SessionId): readonly string[] {
+    return this.entries.get(sessionId)?.hostHeaders ?? [];
   }
 
   rescope(sessionId: SessionId, folderId: NodeId): void {

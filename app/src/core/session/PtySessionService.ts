@@ -5,12 +5,13 @@ import { dirname, join } from 'node:path';
 import * as nodePty from 'node-pty';
 import type { Unsubscribe } from '../events/EventBus';
 import { LocalProvider } from '../isolation/LocalProvider';
-import type { AgentEnvironment, IsolationProvider, McpEndpoint, ProfileLaunchSpec } from '../isolation/types';
+import type { AgentEnvironment, IsolationProvider, McpEndpoint, NetworkPolicy, ProfileLaunchSpec } from '../isolation/types';
 import { resolveClaudeBinary } from './env';
 import { DEFAULT_PROFILE_ID, type ProfileId } from '../profile/types';
 
 import { HookInbox } from './HookInbox';
 import { buildLaunchArgs } from './launchArgs';
+import { mergeContributions, type LaunchContributor } from './launchContributions';
 import { OutputBuffer } from './OutputBuffer';
 import { MemorySessionStore, type SessionStore } from './SessionStore';
 import { statusAfterHook } from './status';
@@ -67,6 +68,15 @@ export interface PtySessionServiceOptions {
   readonly onLaunchFailed?: (session: SessionInfo) => void;
   /** Absolute paths the CLI may not read or edit, passed as permission rules in `--settings`. */
   readonly denyPaths?: readonly string[];
+  /**
+   * The provider a launch uses, read before every launch so a changed profile setting applies to the next start.
+   * Defaults to `provider`.
+   */
+  readonly selectProvider?: (session: SessionInfo) => IsolationProvider;
+  /** The network policy the provider enforces for a launch. Defaults to `unrestricted`. */
+  readonly networkPolicy?: (session: SessionInfo) => NetworkPolicy;
+  /** Modules that add settings, arguments, environment, MCP servers or session files to every launch (0029). */
+  readonly contributors?: () => readonly LaunchContributor[];
   /** Pause between typed text and the Enter key in `sendText`. */
   readonly submitDelayMs?: number;
   /** Pause between the first `SessionStart` and the typing of the create prompt. */
@@ -81,7 +91,6 @@ const DEFAULT_ROWS = 32;
 
 interface Entry {
   info: SessionInfo;
-  readonly permissionMode: PermissionMode;
   readonly output: OutputBuffer;
   cols: number;
   rows: number;
@@ -129,7 +138,6 @@ export class PtySessionService implements SessionService {
     for (const row of this.store.load()) {
       this.entries.set(row.id, {
         info: { ...row, status: 'exited' },
-        permissionMode: row.permissionMode,
         output: new OutputBuffer(),
         cols: DEFAULT_COLS,
         rows: DEFAULT_ROWS,
@@ -145,12 +153,12 @@ export class PtySessionService implements SessionService {
       title: input.title ?? 'Claude session',
       cwd: input.cwd,
       launchPath: input.launchPath ?? 'pty',
+      permissionMode: input.permissionMode ?? this.defaultPermissionMode,
       status: 'starting',
       createdAt: new Date().toISOString(),
     };
     const entry: Entry = {
       info,
-      permissionMode: input.permissionMode ?? this.defaultPermissionMode,
       output: new OutputBuffer(),
       cols: input.cols ?? DEFAULT_COLS,
       rows: input.rows ?? DEFAULT_ROWS,
@@ -171,7 +179,7 @@ export class PtySessionService implements SessionService {
       title: info.title,
       cwd: info.cwd,
       launchPath: info.launchPath,
-      permissionMode: entry.permissionMode,
+      permissionMode: info.permissionMode,
       createdAt: info.createdAt,
     });
     this.emit({ type: 'session.created', session: entry.info });
@@ -200,6 +208,17 @@ export class PtySessionService implements SessionService {
       this.emit({ type: 'session.closed', sessionId: id });
     });
     await entry.closing;
+  }
+
+  async stop(id: SessionId): Promise<void> {
+    await this.shutdownEntry(this.require(id));
+  }
+
+  setPermissionMode(id: SessionId, permissionMode: PermissionMode): void {
+    const entry = this.require(id);
+    if (entry.info.permissionMode === permissionMode) return;
+    this.setInfo(entry, (info) => ({ ...info, permissionMode }));
+    this.store.save(this.persistedOf(entry));
   }
 
   /** Ends every process and keeps the sessions, so the next start lists them as exited. For app quit. */
@@ -265,31 +284,52 @@ export class PtySessionService implements SessionService {
     let environment: AgentEnvironment | undefined;
     try {
       if (!statSync(info.cwd).isDirectory()) throw new Error(`${info.cwd} is not a directory`);
-      const check = await this.provider.check();
+      const provider = this.options.selectProvider?.(info) ?? this.provider;
+      const check = await provider.check();
       if (!check.ok) throw new Error(check.fix === undefined ? check.reason : `${check.reason}. ${check.fix}`);
-      environment = await this.provider.prepare({
+      const prepared = await provider.prepare({
         key: { profileId: this.profileId },
         profile: this.profileLaunch(),
         workspace: { mode: 'bind', hostPath: info.cwd },
-        network: { mode: 'unrestricted' },
+        network: this.options.networkPolicy?.(info) ?? { mode: 'unrestricted' },
         appEndpoint: { port: this.options.appPort?.() ?? 0 },
       });
-      this.environments.add(environment);
-      const delivery = environment.hookDelivery(info.id, { inboxHostDir: inboxDir, httpPath: `/hooks/${info.id}`, token: randomBytes(32).toString('hex') });
+      environment = prepared;
+      this.environments.add(prepared);
+      const delivery = prepared.hookDelivery(info.id, { inboxHostDir: inboxDir, httpPath: `/hooks/${info.id}`, token: randomBytes(32).toString('hex') });
       if (delivery.kind !== 'inbox-dir') throw new Error(`hook delivery ${delivery.kind} is not supported by the session service`);
-      const config = await this.options.mcpConfig?.(info, environment.mcpEndpoint(info.id));
-      const mcpConfigPath = config === undefined ? undefined : await environment.writeSessionFile(info.id, 'mcp.json', JSON.stringify(config));
+      const endpoint = prepared.mcpEndpoint(info.id);
+      const config = (await this.options.mcpConfig?.(info, endpoint)) as { mcpServers?: Record<string, object> } | undefined;
+      const contributions = [];
+      for (const contributor of this.options.contributors?.() ?? []) {
+        const contribution = await contributor.contribute({
+          session: info,
+          resume,
+          permissionMode: info.permissionMode,
+          provider: { id: provider.id, capabilities: provider.capabilities },
+          hookDir: delivery.dir,
+          toEnv: (hostPath) => prepared.paths.toEnv(hostPath),
+          mcpUrl: endpoint.url,
+          writeSessionFile: (name, content) => prepared.writeSessionFile(info.id, name, content),
+        });
+        contributions.push({ id: contributor.id, contribution });
+      }
+      const merged = mergeContributions(contributions);
+      const fullConfig = config === undefined ? undefined : { ...config, mcpServers: { ...config.mcpServers, ...merged.mcpServers } };
+      const mcpConfigPath = fullConfig === undefined ? undefined : await prepared.writeSessionFile(info.id, 'mcp.json', JSON.stringify(fullConfig));
       entry.mcpFileWritten = mcpConfigPath !== undefined;
       const args = buildLaunchArgs({
         sessionId: info.id,
         resume,
-        permissionMode: entry.permissionMode,
+        permissionMode: info.permissionMode,
         inboxDir: delivery.dir,
         mcpConfigPath,
         denyPaths: this.options.denyPaths ?? [],
-        extraArgs: (await this.options.extraArgs?.(info)) ?? [],
+        settings: merged.settings,
+        replacesBaseHooks: merged.replacesBaseHooks,
+        extraArgs: [...merged.args, ...((await this.options.extraArgs?.(info)) ?? [])],
       });
-      const command = await environment.ptyCommand({ sessionId: info.id, cwd: info.cwd, args, cols: entry.cols, rows: entry.rows });
+      const command = await prepared.ptyCommand({ sessionId: info.id, cwd: info.cwd, args, cols: entry.cols, rows: entry.rows, env: merged.env });
       const inbox = new HookInbox(inboxDir, (record) => this.onHook(entry, record));
       let proc: nodePty.IPty;
       try {
@@ -396,8 +436,8 @@ export class PtySessionService implements SessionService {
   }
 
   private persistedOf(entry: Entry) {
-    const { id, folderId, title, cwd, launchPath, createdAt } = entry.info;
-    return { id, folderId, title, cwd, launchPath, permissionMode: entry.permissionMode, createdAt };
+    const { id, folderId, title, cwd, launchPath, permissionMode, createdAt } = entry.info;
+    return { id, folderId, title, cwd, launchPath, permissionMode, createdAt };
   }
 
   private inboxDir(id: SessionId): string {

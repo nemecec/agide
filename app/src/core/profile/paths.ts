@@ -15,8 +15,6 @@ export interface ProfilePaths {
   readonly claude: string;
   /** 0600 session files (`mcp.json`, `settings.json`) per session, in 0700 directories. */
   readonly sessionFiles: string;
-  /** Empty working directory of the login terminal: it holds no session file and no database. */
-  readonly login: string;
   /** Hook inbox directories per session. */
   readonly sessionEvents: string;
   readonly layouts: string;
@@ -44,7 +42,6 @@ export function profilePaths(root: string, id: ProfileId): ProfilePaths {
     data,
     claude: join(dir, 'claude'),
     sessionFiles: join(data, 'sessions'),
-    login: join(data, 'login'),
     sessionEvents: join(data, 'session-events'),
     layouts: join(data, 'layouts'),
     tools: {

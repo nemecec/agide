@@ -46,7 +46,7 @@ export interface SurfaceInstance {
 export type ObserveMode = 'off' | 'on-demand' | 'live';
 
 export interface ObserveSnapshot {
-  readonly kind: 'summary' | 'text' | 'screenshot';
+  readonly kind: 'summary' | 'text' | 'tree' | 'screenshot';
   /** Text content or a base64 image. Third-party page content is untrusted data. */
   readonly content: string;
   readonly untrusted: boolean;

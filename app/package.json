@@ -19,11 +19,13 @@
     "coverage": "vitest run --coverage",
     "e2e": "electron-vite build && playwright test",
     "coverage:e2e": "node scripts/coverage-e2e.mjs",
+    "mutation": "node scripts/mutation-checks.mjs",
     "parity": "node scripts/parity.mjs",
     "blocks-docs": "node scripts/blocks-docs.mjs",
     "e2e:claude-mcp": "node scripts/e2e-claude-mcp.mjs",
     "e2e:real-claude": "electron-vite build && node scripts/e2e-real-claude.mjs",
     "e2e:real-claude-inbox": "electron-vite build && node scripts/e2e-real-claude-inbox.mjs",
+    "e2e:real-claude-m3": "electron-vite build && node scripts/e2e-real-claude-m3.mjs",
     "check": "pnpm typecheck && pnpm test && pnpm e2e"
   },
   "dependencies": {

@@ -1,0 +1,12 @@
+export * from './types';
+export { parseTaskSource, sourceTitle } from './parseSource';
+export { composePrompt, composeTaskSourceFile, newNonce, PROMPT_CAP, DESCRIPTION_CAP, FILE_LIST_CAP, CLAUDE_MD_CAP, type PromptInput } from './promptComposer';
+export { GhPullRequestReader } from './GhPullRequestReader';
+export { GitWorkingDirectoryManager, taskBaseDir, type GitManagerOptions } from './GitWorkingDirectoryManager';
+export { githubRepositoryOf, parseRemotes, remoteFor, slugOf } from './remotes';
+export { TaskStartStore, type StartedBy } from './TaskStartStore';
+export { TaskStartService, AGENT_START_CAP, type TaskStartDeps } from './TaskStartService';
+export { TrustAutomation, HIGHLIGHT_WAIT_MS, START_WAIT_MS, type TrustAutomationDeps } from './TrustAutomation';
+export { screenText, showsTrustDialog, trustHighlight, KEY_DOWN, KEY_ENTER } from './trustDialog';
+export { claudeJsonPath, isFolderTrusted } from './claudeTrust';
+export { execFileNoShell, ExecError, type Exec } from './exec';

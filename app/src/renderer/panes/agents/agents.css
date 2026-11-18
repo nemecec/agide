@@ -1,0 +1,168 @@
+.agents-pane {
+  height: 100%;
+  overflow: auto;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.history-filters,
+.history-settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.history-settings input {
+  width: 4em;
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.history-table th,
+.history-table td {
+  padding: 2px 6px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-table tr[data-selected='true'] {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.history-transcript {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+
+.transcript-status {
+  color: var(--muted);
+}
+
+.transcript-entry {
+  margin: 0 0 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+}
+
+.transcript-role {
+  display: inline-block;
+  min-width: 6em;
+  margin-right: 6px;
+  color: var(--muted);
+}
+
+.usage-ranking {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.usage-ranking li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 0;
+}
+
+.usage-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-plan {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.usage-note {
+  color: var(--muted);
+}
+
+.agent-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding-right: 8px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.agent-row[data-selected='true'] {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.agent-row[data-state='done'],
+.agent-row-wrap[data-hidden='true'] {
+  color: var(--muted);
+}
+
+.agent-row[data-state='failed'] .agent-mark {
+  color: #d33;
+}
+
+.agent-row[data-state='waiting'] .agent-mark {
+  color: #d90;
+}
+
+.agent-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-detail,
+.agent-elapsed,
+.agent-origin {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.agent-row-wrap {
+  display: flex;
+  align-items: center;
+}
+
+.session-decorations,
+.folder-decorations {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.agent-waiting {
+  color: #d90;
+}
+
+.heat-marker {
+  letter-spacing: -2px;
+  color: #d33;
+}
+
+.heat-marker[data-level='1'] {
+  color: #b90;
+}
+
+.heat-marker[data-level='2'] {
+  color: #d60;
+}
+
+.plan-usage {
+  margin: 6px 0 0;
+  padding: 0 2px;
+  list-style: none;
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--muted);
+  word-break: break-word;
+}

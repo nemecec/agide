@@ -1,5 +1,6 @@
 import type { PermissionMode } from './types';
-import { hookSettings } from './hooks';
+import { hookSettings, type HookEventName } from './hooks';
+import type { SettingsFragment } from './launchContributions';
 
 /** The CLI calls the prompting mode `manual`; the app contract calls it `default`. */
 export function cliPermissionMode(mode: PermissionMode): string {
@@ -17,14 +18,37 @@ export interface LaunchArgsInput {
   readonly mcpConfigPath?: string | undefined;
   /** Absolute paths the CLI may not read or edit. Rules cover the CLI's file tools; a shell command is not covered. */
   readonly denyPaths?: readonly string[];
+  /** Merged launch contributions (`mergeContributions`): hooks and rules are added to the app's own. */
+  readonly settings?: SettingsFragment;
+  /** Base hook events whose write-only app command a contribution replaces. */
+  readonly replacesBaseHooks?: readonly HookEventName[];
   /** Arguments the integrator adds, such as the app MCP server config. */
   readonly extraArgs?: readonly string[];
 }
 
 /** Claude Code settings write an absolute path with a leading double slash. */
-function denyRules(paths: readonly string[]): { permissions?: { deny: string[] } } {
-  if (paths.length === 0) return {};
-  return { permissions: { deny: paths.flatMap((path) => [`Read(/${path}/**)`, `Edit(/${path}/**)`]) } };
+function denyRules(paths: readonly string[]): string[] {
+  return paths.flatMap((path) => [`Read(/${path}/**)`, `Edit(/${path}/**)`]);
+}
+
+/** The `--settings` JSON: the app's hooks, its deny rules for the app root and the merged contributions. */
+export function launchSettings(input: Pick<LaunchArgsInput, 'inboxDir' | 'denyPaths' | 'settings' | 'replacesBaseHooks'>): Record<string, unknown> {
+  const { hooks: extraHooks, permissions: extraRules, ...rest } = input.settings ?? {};
+  const replaced = new Set(input.replacesBaseHooks ?? []);
+  const hooks: Record<string, { hooks: unknown[] }[]> = {};
+  for (const [event, entries] of Object.entries(hookSettings(input.inboxDir).hooks)) {
+    if (!replaced.has(event as HookEventName)) hooks[event] = [...entries];
+  }
+  for (const [event, list] of Object.entries(extraHooks ?? {})) {
+    if (list && list.length > 0) hooks[event] = [...(hooks[event] ?? []), { hooks: [...list] }];
+  }
+  const deny = [...denyRules(input.denyPaths ?? []), ...(extraRules?.deny ?? [])];
+  const permissions = {
+    ...(deny.length === 0 ? {} : { deny }),
+    ...(extraRules?.ask?.length ? { ask: [...extraRules.ask] } : {}),
+    ...(extraRules?.allow?.length ? { allow: [...extraRules.allow] } : {}),
+  };
+  return { ...rest, hooks, ...(Object.keys(permissions).length === 0 ? {} : { permissions }) };
 }
 
 /**
@@ -40,7 +64,7 @@ export function buildLaunchArgs(input: LaunchArgsInput): string[] {
     '--setting-sources',
     'user',
     '--settings',
-    JSON.stringify({ ...hookSettings(input.inboxDir), ...denyRules(input.denyPaths ?? []) }),
+    JSON.stringify(launchSettings(input)),
     ...(input.mcpConfigPath === undefined ? [] : ['--mcp-config', input.mcpConfigPath]),
     ...(input.extraArgs ?? []),
   ];

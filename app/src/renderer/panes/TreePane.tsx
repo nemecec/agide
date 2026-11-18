@@ -8,11 +8,19 @@ import {
   type ItemInstance,
 } from '@headless-tree/core';
 import { useTree } from '@headless-tree/react';
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { SURFACE_CLAUDE_SESSION } from '../../core/surfaces/types';
 import type { NodeId, TreeNode } from '../../core/tree/types';
 import { api } from '../api';
+import { openDialog } from '../dialogs/dialogStore';
+import { startNewSession } from '../dialogs/newSession';
 import { ContextMenu, type MenuEntry, type MenuState } from './ContextMenu';
+import { setAgentsView, useAgentsView } from './agents/agentsStore';
+import './agents/agents.css';
+import { AgentRows } from './tree/AgentRows';
+import { FolderDecorations } from './tree/FolderDecorations';
+import { createSurfaceLeaf } from './tree/createLeaf';
+import { LeafDecorations } from './tree/leafDecorations';
 import { indexTree, isWithin, ROOT_ID, type TreeIndex } from './treeModel';
 import './TreePane.css';
 
@@ -42,6 +50,7 @@ export function TreePane({ nodes, loaded, onOpen }: TreePaneProps) {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pendingRename = useRef<NodeId | null>(null);
+  const { showFinished } = useAgentsView();
 
   useEffect(() => {
     void api()
@@ -138,15 +147,24 @@ export function TreePane({ nodes, loaded, onOpen }: TreePaneProps) {
       const title = kind === 'folder' ? 'New folder' : `New ${kind.label.toLowerCase()}`;
       if (kind !== 'folder' && kind.surfaceType === SURFACE_CLAUDE_SESSION && parentId !== null) {
         // The new session opens with its terminal focused, so its leaf does not start in rename mode.
-        const session = await run<{ leafId: NodeId }>('session_create', { folderId: parentId, title: kind.label });
-        if (session) onOpen(session.leafId);
+        const session = await startNewSession(parentId, kind.label);
+        if ('leafId' in session) {
+          setError(null);
+          onOpen(session.leafId);
+        } else setError(session.error);
         return;
       }
-      const created =
-        kind === 'folder'
-          ? await run<TreeNode>('ui_create_folder', { title, ...where })
-          : await run<TreeNode>('ui_create_leaf', { title, surfaceType: kind.surfaceType, surfaceId: crypto.randomUUID(), ...where });
-      if (created) pendingRename.current = created.id;
+      if (kind === 'folder') {
+        const created = await run<TreeNode>('ui_create_folder', { title, ...where });
+        if (created) pendingRename.current = created.id;
+        return;
+      }
+      const leaf = await createSurfaceLeaf({ surfaceType: kind.surfaceType, title, parentId });
+      if ('error' in leaf) setError(leaf.error);
+      else {
+        setError(null);
+        pendingRename.current = leaf.id;
+      }
     },
     [run, tree, onOpen],
   );
@@ -166,6 +184,7 @@ export function TreePane({ nodes, loaded, onOpen }: TreePaneProps) {
     const parentId = parentFor(target);
     const entries: MenuEntry[] = [
       { label: 'New folder', run: () => void create(parentId, 'folder') },
+      { label: 'New task…', run: () => openDialog({ kind: 'new-task', parentFolderId: parentId }) },
       // A Claude session belongs to a folder: its MCP access is scoped to that folder.
       ...surfaceTypes
         .filter((type) => type.id !== SURFACE_CLAUDE_SESSION || parentId !== null)
@@ -180,6 +199,9 @@ export function TreePane({ nodes, loaded, onOpen }: TreePaneProps) {
         { label: 'Rename', run: () => target.startRenaming() },
         { label: 'Delete', run: () => void remove(target) },
       );
+    } else {
+      entries.push({ label: 'Profile settings…', run: () => openDialog({ kind: 'settings' }) });
+      entries.push({ label: showFinished ? 'Hide finished agents' : 'Show finished agents', run: () => setAgentsView({ showFinished: !showFinished }) });
     }
     setMenu({ x: event.clientX, y: event.clientY, entries });
   };
@@ -201,9 +223,9 @@ export function TreePane({ nodes, loaded, onOpen }: TreePaneProps) {
           const node = item.getItemData();
           const folder = node.kind === 'folder';
           return (
+            <Fragment key={item.getId()}>
             <div
               {...item.getProps()}
-              key={item.getId()}
               className="tree-item"
               data-selected={item.isSelected()}
               data-focused={item.isFocused()}
@@ -225,7 +247,11 @@ export function TreePane({ nodes, loaded, onOpen }: TreePaneProps) {
                 <span className="tree-title">{node.title}</span>
               )}
               {node.kind === 'leaf' && <span className="tree-type">{typeLabel(surfaceTypes, node.surfaceType)}</span>}
+              {node.kind === 'folder' && <FolderDecorations folderId={node.id} />}
+              {node.kind === 'leaf' && <LeafDecorations surfaceType={node.surfaceType} surfaceId={node.surfaceId} />}
             </div>
+            {node.kind === 'leaf' && node.surfaceType === SURFACE_CLAUDE_SESSION && <AgentRows sessionId={node.surfaceId} level={item.getItemMeta().level} />}
+            </Fragment>
           );
         })}
         <div style={tree.getDragLineStyle()} className="tree-dragline" />

@@ -35,7 +35,7 @@ afterEach(async () => {
 });
 
 async function mount(items: ItemRow[], unread = 0) {
-  fake = installFakeApi({ inbox_list: { items, unread }, inbox_context: {}, inbox_resolve: {}, inbox_mark_unread: {}, inbox_snooze: {}, inbox_mark_seen: {}, inbox_reopen: {} });
+  fake = installFakeApi({ inbox_list: { items, unread }, browser_answer_approval: {}, inbox_context: {}, inbox_resolve: {}, inbox_mark_unread: {}, inbox_snooze: {}, inbox_mark_seen: {}, inbox_reopen: {} });
   rendered = await render(createElement(InboxPane, { instanceId: 'inbox', config: {}, inputs: {} }));
 }
 const root = () => rendered!.container;
@@ -101,6 +101,20 @@ describe('InboxPane', () => {
     expect(ids('inbox_resolve'), 'resolve').toEqual([{ itemId: 'a', resolution: 'dismissed' }]);
     expect(ids('inbox_mark_unread'), 'mark unread').toEqual([{ itemId: 'a' }]);
     expect(ids('inbox_snooze'), 'snooze for an hour').toEqual([{ itemId: 'a', until: '2026-11-17T11:00:00.000Z' }]);
+  });
+
+  it('answers a browser approval from its card and leaves other items without those buttons', async () => {
+    await mount([item('b', { kind: 'approval', origin: 'browser:approval', payload: { approvalId: 'req-1' } }), item('c')]);
+    fake.invoke.mockClear();
+    await select(0);
+    await act(async () => button('Deny')?.click());
+    await act(async () => button('Allow once')?.click());
+    expect(ids('browser_answer_approval'), 'answers sent with the request id').toEqual([
+      { id: 'req-1', answer: 'deny' },
+      { id: 'req-1', answer: 'once' },
+    ]);
+    await select(1);
+    expect(button('Deny'), 'no answer buttons on another item').toBeUndefined();
   });
 
   it('ignores shortcut keys without a selected item', async () => {

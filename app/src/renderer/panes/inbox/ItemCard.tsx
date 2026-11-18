@@ -40,6 +40,7 @@ export function ItemCard({ item, canPeek, peeking, onPeek }: { item: ItemRow; ca
   const raw = item.kind === 'approval' ? payloadText(item.payload) : undefined;
   const snooze = (until: Date) => act('inbox_snooze', { itemId: item.id, until: until.toISOString() });
   const url = item.linkAnchor && 'url' in item.linkAnchor ? item.linkAnchor.url : undefined;
+  const browserApprovalId = item.origin === 'browser:approval' ? (item.payload as { approvalId?: unknown } | undefined)?.approvalId : undefined;
 
   return (
     <article className="inbox-card" data-testid="inbox-card" data-item-id={item.id} data-state={item.state}>
@@ -108,6 +109,16 @@ export function ItemCard({ item, canPeek, peeking, onPeek }: { item: ItemRow; ca
           </button>
         ) : (
           <>
+            {typeof browserApprovalId === 'string' && (
+              <>
+                <button type="button" onClick={() => act('browser_answer_approval', { id: browserApprovalId, answer: 'deny' })} data-testid="inbox-browser-deny">
+                  Deny
+                </button>
+                <button type="button" onClick={() => act('browser_answer_approval', { id: browserApprovalId, answer: 'once' })} data-testid="inbox-browser-allow-once">
+                  Allow once
+                </button>
+              </>
+            )}
             <button type="button" onClick={() => act('inbox_resolve', { itemId: item.id, resolution: 'dismissed' })} data-testid="inbox-done">
               Done
             </button>

@@ -25,6 +25,13 @@ export interface HookItemMapperDeps {
 }
 
 type Payload = Record<string, unknown>;
+
+/** What the inspector said about a call that asks. */
+interface GateInfo {
+  readonly classId: string;
+  readonly mode?: string;
+  readonly audience?: string;
+}
 const text = (value: unknown): string | undefined => (typeof value === 'string' && value.length > 0 ? value : undefined);
 
 /**
@@ -34,6 +41,8 @@ const text = (value: unknown): string | undefined => (typeof value === 'string' 
 export class HookItemMapper {
   private readonly turnStart = new Map<SessionId, number>();
   private readonly lastMessage = new Map<SessionId, string>();
+  /** What the permission inspector decided for calls that ask, by request key, until the dialog shows up. */
+  private readonly gateAsks = new Map<string, GateInfo>();
 
   constructor(private readonly deps: HookItemMapperDeps) {}
 
@@ -48,6 +57,8 @@ export class HookItemMapper {
         return this.stopFailed(sessionId, payload);
       case 'PermissionRequest':
         return this.permissionRequested(sessionId, payload);
+      case 'PreToolUse':
+        return this.gateDecided(sessionId, payload);
       case 'PostToolUse':
         return this.toolRan(sessionId, payload);
       case 'Notification':
@@ -60,6 +71,7 @@ export class HookItemMapper {
   forget(sessionId: SessionId): void {
     this.turnStart.delete(sessionId);
     this.lastMessage.delete(sessionId);
+    for (const key of [...this.gateAsks.keys()]) if (key.startsWith(`${sessionId}:`)) this.gateAsks.delete(key);
   }
 
   private promptSubmitted(sessionId: SessionId, payload: Payload): void {
@@ -104,17 +116,57 @@ export class HookItemMapper {
     });
   }
 
+  /** The inspector's record of a `PreToolUse` call (0028 section 4). */
+  private gateDecided(sessionId: SessionId, payload: Payload): void {
+    const gate = payload['agide_gate'];
+    if (gate === null || typeof gate !== 'object') return;
+    const record = gate as Payload;
+    const classId = text(record['classId']);
+    const tool = text(payload['tool_name']) ?? 'a tool';
+    const input = payload['tool_input'];
+    const decision = text(record['decision']);
+    const audience = text(record['audience']);
+    if (decision === 'ask' && classId !== undefined) {
+      this.gateAsks.set(`${sessionId}:${requestHash(tool, input)}`, { classId, ...(text(record['mode']) === undefined ? {} : { mode: text(record['mode'])! }), ...(audience === undefined ? {} : { audience }) });
+    } else if (decision === 'deny' && classId !== undefined) {
+      const headline = inputHeadline(input);
+      this.post(sessionId, {
+        kind: 'status',
+        origin: 'gate:deny',
+        message: messageFrom(headline ? `Blocked ${classId}: ${headline}` : `Blocked ${classId}`),
+        ...(text(record['reason']) === undefined ? {} : { details: detailsFrom(text(record['reason'])!) }),
+        textAuthor: 'agent',
+        payload: { classId, toolName: tool, ...(audience === undefined ? {} : { audience }) },
+        dedupeKey: `gate:${sessionId}:${classId}`,
+      });
+    } else if (decision === 'none' && text(record['mode']) === 'notify' && classId !== undefined) {
+      this.post(sessionId, {
+        kind: 'status',
+        urgency: 'low',
+        origin: 'gate:notify',
+        message: messageFrom(audience === undefined ? `Ran ${classId}` : `Ran ${classId} for ${audience}`),
+        textAuthor: 'agent',
+        payload: { classId, toolName: tool },
+        dedupeKey: `gate:notify:${sessionId}:${classId}`,
+      });
+    }
+  }
+
   private permissionRequested(sessionId: SessionId, payload: Payload): void {
     const tool = text(payload['tool_name']) ?? 'a tool';
     const input = payload['tool_input'];
     const headline = inputHeadline(input);
+    const key = `${sessionId}:${requestHash(tool, input)}`;
+    const gate = this.gateAsks.get(key);
+    this.gateAsks.delete(key);
+    const gateTitle = gate === undefined ? undefined : `Approve: ${gate.classId}${gate.audience === undefined ? '' : ` to ${gate.audience}`}`;
     this.post(sessionId, {
       kind: 'approval',
       origin: 'hook:PermissionRequest',
-      message: messageFrom(headline ? `Wants to run ${tool}: ${headline}` : `Wants to run ${tool}`),
+      message: messageFrom(gateTitle ?? (headline ? `Wants to run ${tool}: ${headline}` : `Wants to run ${tool}`)),
       ...(input === undefined ? {} : { details: detailsFrom(JSON.stringify(input, null, 2)) }),
       textAuthor: 'agent',
-      payload: { toolName: tool, ...(input === undefined ? {} : { toolInput: input }) },
+      payload: { toolName: tool, ...(input === undefined ? {} : { toolInput: input }), ...(gate === undefined ? {} : { gate }) },
       dedupeKey: `perm:${sessionId}:${requestHash(tool, input)}`,
     });
   }
@@ -122,7 +174,25 @@ export class HookItemMapper {
   private toolRan(sessionId: SessionId, payload: Payload): void {
     const tool = text(payload['tool_name']);
     if (tool === undefined) return;
+    this.gateAsks.delete(`${sessionId}:${requestHash(tool, payload['tool_input'])}`);
+    this.sandboxBlocked(sessionId, payload);
     this.deps.inbox.resolveByDedupeKey(`perm:${sessionId}:${requestHash(tool, payload['tool_input'])}`, 'superseded');
+  }
+
+  /** A sandboxed command that reached a host off the allowlist leaves `<sandbox_violations>` in its result. */
+  private sandboxBlocked(sessionId: SessionId, payload: Payload): void {
+    const response = payload['tool_response'];
+    const body = typeof response === 'string' ? response : response === undefined ? '' : JSON.stringify(response);
+    const match = /deny network-outbound ([^\s:"\\]+)/.exec(body);
+    if (!body.includes('<sandbox_violations>') || match === null) return;
+    this.post(sessionId, {
+      kind: 'status',
+      origin: 'gate:sandbox',
+      message: messageFrom(`Sandbox blocked ${match[1]}`),
+      textAuthor: 'agent',
+      payload: { host: match[1] },
+      dedupeKey: `gate:sandbox:${sessionId}:${match[1]}`,
+    });
   }
 
   private notified(sessionId: SessionId, payload: Payload): void {

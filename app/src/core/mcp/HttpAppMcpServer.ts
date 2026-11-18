@@ -11,7 +11,7 @@ import { GrantStore } from './grants';
 import { mcpConfigFor, sessionUrl } from './mcpConfig';
 import { guardRequest } from './requestGuard';
 import { callTool, toolsFrom } from './tools';
-import { APP_MCP_SERVER_NAME, type AppMcpServer, type McpConfigJson, type McpGrant } from './types';
+import { APP_MCP_SERVER_NAME, type AppMcpServer, type McpConfigJson, type McpGrant, type McpGrantOptions, type McpServerName } from './types';
 
 const MAX_BODY_BYTES = 1_000_000;
 
@@ -62,9 +62,9 @@ export class HttpAppMcpServer implements AppMcpServer {
     await new Promise<void>((resolve) => http.close(() => resolve()));
   }
 
-  grant(sessionId: SessionId, folderId: NodeId): McpGrant {
+  grant(sessionId: SessionId, folderId: NodeId, options: McpGrantOptions = {}): McpGrant {
     if (!this.http) throw new Error('the app MCP server is not listening; call start() before grant()');
-    const token = this.grants.issue(sessionId, folderId);
+    const token = this.grants.issue(sessionId, folderId, options.hostHeaders);
     return { sessionId, folderId, url: sessionUrl(this.port, sessionId), token };
   }
 
@@ -90,7 +90,7 @@ export class HttpAppMcpServer implements AppMcpServer {
   }
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const guard = guardRequest(req, this.port);
+    const guard = guardRequest(req, this.port, (sessionId) => this.grants.hostHeaders(sessionId));
     if (!guard.ok) return reply(res, guard.status, { error: guard.reason });
     const auth = this.grants.authenticate(guard.sessionId, guard.token);
     if (!auth) return reply(res, 401, { error: 'unauthorized' });
@@ -110,14 +110,14 @@ export class HttpAppMcpServer implements AppMcpServer {
       return reply(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'request body is not valid JSON' } });
     }
     const caller: Caller = { kind: 'mcp', sessionId: guard.sessionId, folderId: auth.folderId };
-    await this.serve(req, res, body, caller);
+    await this.serve(req, res, body, caller, guard.server);
   }
 
-  private async serve(req: IncomingMessage, res: ServerResponse, body: unknown, caller: Caller & { kind: 'mcp' }): Promise<void> {
-    const server = new Server({ name: APP_MCP_SERVER_NAME, version: '0.1.0' }, { capabilities: { tools: {} } });
-    server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: toolsFrom(this.registry) }));
+  private async serve(req: IncomingMessage, res: ServerResponse, body: unknown, caller: Caller & { kind: 'mcp' }, which: McpServerName): Promise<void> {
+    const server = new Server({ name: which === 'app' ? APP_MCP_SERVER_NAME : which, version: '0.1.0' }, { capabilities: { tools: {} } });
+    server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: toolsFrom(this.registry, which) }));
     server.setRequestHandler(CallToolRequestSchema, (request) =>
-      callTool(this.registry, request.params.name, request.params.arguments, caller),
+      callTool(this.registry, request.params.name, request.params.arguments, caller, which),
     );
     const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
     const transports = this.open.get(caller.sessionId) ?? new Set<OpenTransport>();

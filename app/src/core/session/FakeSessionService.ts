@@ -5,6 +5,7 @@ import {
   type SessionCreateInput,
   type SessionEvent,
   type SessionId,
+  type PermissionMode,
   type SessionInfo,
   type SessionService,
   type SessionStatus,
@@ -28,6 +29,7 @@ export class FakeSessionService implements SessionService {
       title: input.title ?? 'Claude session',
       cwd: input.cwd,
       launchPath: input.launchPath ?? 'pty',
+      permissionMode: input.permissionMode ?? 'default',
       status: 'idle',
       createdAt: new Date().toISOString(),
     };
@@ -47,6 +49,14 @@ export class FakeSessionService implements SessionService {
     this.require(id);
     this.sessions.delete(id);
     this.emit({ type: 'session.closed', sessionId: id });
+  }
+
+  async stop(id: SessionId): Promise<void> {
+    if (this.require(id).status !== 'exited') this.exit(id, 0);
+  }
+
+  setPermissionMode(id: SessionId, permissionMode: PermissionMode): void {
+    this.sessions.set(id, { ...this.require(id), permissionMode });
   }
 
   sendText(id: SessionId, text: string): void {

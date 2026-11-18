@@ -5,7 +5,41 @@ A command with a UI binding must be an MCP tool unless it declares `mcpExempt` w
 
 | Command | UI binding | MCP tool | Status |
 |---|---|---|---|
+| `agents_dismiss` | none | no | ok |
+| `agents_history` | none | no | ok |
+| `agents_hold` | none | no | ok |
+| `agents_list` | none | no | ok |
+| `agents_settings_set` | none | no | ok |
+| `agents_transcript` | none | no | ok |
 | `blocks_list` | none | yes | ok |
+| `browser_access_log` | none | no | ok |
+| `browser_answer_approval` | none | no | ok |
+| `browser_browser_batch` | none | no | ok |
+| `browser_clear_site_data` | none | no | ok |
+| `browser_computer` | none | no | ok |
+| `browser_devtools` | none | no | ok |
+| `browser_find` | none | no | ok |
+| `browser_form_input` | none | no | ok |
+| `browser_get_page_text` | none | no | ok |
+| `browser_javascript_tool` | none | no | ok |
+| `browser_list_connected_browsers` | none | no | ok |
+| `browser_nav` | none | no | ok |
+| `browser_navigate` | none | no | ok |
+| `browser_new_tab` | none | no | ok |
+| `browser_open_in_chrome` | none | yes | ok |
+| `browser_read_console_messages` | none | no | ok |
+| `browser_read_network_requests` | none | no | ok |
+| `browser_read_page` | none | no | ok |
+| `browser_select_browser` | none | no | ok |
+| `browser_stop_agent` | none | no | ok |
+| `browser_switch_browser` | none | no | ok |
+| `browser_tab_state` | none | no | ok |
+| `browser_tabs_close_mcp` | none | no | ok |
+| `browser_tabs_context_mcp` | none | no | ok |
+| `browser_tabs_create_mcp` | none | no | ok |
+| `browser_view_place` | none | no | ok |
+| `browser_views_resume` | none | no | ok |
+| `browser_views_suspend` | none | no | ok |
 | `inbox_context` | none | no | ok |
 | `inbox_list` | none | yes | ok |
 | `inbox_mark_seen` | none | no | ok |
@@ -17,11 +51,15 @@ A command with a UI binding must be an MCP tool unless it declares `mcpExempt` w
 | `inbox_set_session_summary` | none | no | ok |
 | `inbox_set_viewing` | none | no | ok |
 | `inbox_snooze` | none | no | ok |
+| `isolation_set_provider` | none | no | ok |
+| `isolation_status` | none | no | ok |
 | `layout_apply` | none | yes | ok |
 | `layout_get` | none | yes | ok |
 | `layout_switch` | menu app | yes | ok |
 | `layout_undo` | key CmdOrCtrl+Z | yes | ok |
 | `layout_validate` | none | yes | ok |
+| `permissions_options` | none | no | ok |
+| `permissions_set` | none | no | ok |
 | `profile_create` | menu app | no | exempt: Agents do not manage profiles: 0017 allows no action across profiles. |
 | `profile_list` | none | no | ok |
 | `profile_open` | menu app | no | exempt: Agents do not manage profiles: 0017 allows no action across profiles. |
@@ -39,9 +77,15 @@ A command with a UI binding must be an MCP tool unless it declares `mcpExempt` w
 | `session_resume` | none | no | ok |
 | `session_send_text` | none | yes | ok |
 | `session_write` | none | no | ok |
+| `surface_highlight` | none | yes | ok |
 | `surfaces_list` | none | yes | ok |
+| `surfaces_observe` | none | yes | ok |
 | `task_create` | none | yes | ok |
 | `task_list` | none | yes | ok |
+| `task_preview` | none | no | ok |
+| `task_repositories` | none | no | ok |
+| `task_start` | menu tree-node, key CmdOrCtrl+Shift+N | yes | ok |
+| `task_trust_state` | none | no | ok |
 | `task_update` | none | yes | ok |
 | `ui_capture_window` | menu app | yes | ok |
 | `ui_create_folder` | menu tree-background | yes | ok |
@@ -54,3 +98,8 @@ A command with a UI binding must be an MCP tool unless it declares `mcpExempt` w
 | `ui_open_to_side` | menu tree-node | yes | ok |
 | `ui_remove_node` | menu tree-node, key CmdOrCtrl+Backspace | yes | ok |
 | `ui_rename_node` | menu tree-node, key F2 | yes | ok |
+| `ui_set_observation` | none | no | ok |
+| `usage_alert_action` | none | no | ok |
+| `usage_pause` | none | no | ok |
+| `usage_state` | none | no | ok |
+| `usage_stop` | none | no | ok |

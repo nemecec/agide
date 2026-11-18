@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { join } from 'node:path';
 import { CommandError } from '../../core/commands/index';
 import {
   checkClaudeLogin,
@@ -18,7 +17,7 @@ import {
   type ProfileService,
   type ProfileStore,
 } from '../../core/profile/index';
-import { resolveClaudeBinary } from '../../core/session/index';
+import { defaultSessionCwd, resolveClaudeBinary } from '../../core/session/index';
 import type { ModuleContext, ModuleHandle } from '../context';
 import { profileHost } from '../profileHost';
 
@@ -182,7 +181,8 @@ export async function init(ctx: ModuleContext): Promise<ModuleHandle<ProfileServ
       run: async () => {
         const settings = service.settings();
         const paths = root ? profilePaths(root, id) : undefined;
-        const loginDirectory = paths ? paths.login : join(ctx.dataDir, 'login');
+        // Outside the app root, because a session cannot run inside it.
+        const loginDirectory = defaultSessionCwd(`login-${id}`);
         ensureDir(loginDirectory);
         let login: { signedIn: boolean; authMethod?: string } = { signedIn: false };
         if (paths) {

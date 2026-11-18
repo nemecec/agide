@@ -1,0 +1,25 @@
+.browser-pane { display: flex; flex-direction: column; height: 100%; background: var(--bg); }
+.browser-chrome { display: flex; align-items: center; gap: 4px; padding: 4px 6px; border-bottom: 1px solid var(--border); background: var(--pane-bg); position: relative; z-index: 2; }
+.chrome-button { border: 1px solid transparent; background: transparent; color: inherit; border-radius: 4px; padding: 2px 6px; cursor: pointer; font: inherit; }
+.chrome-button:hover:not(:disabled) { background: color-mix(in srgb, currentColor 12%, transparent); }
+.chrome-button:disabled { opacity: 0.4; cursor: default; }
+.service-badge { font-size: 11px; padding: 1px 6px; border-radius: 8px; border: 1px solid var(--border); text-transform: capitalize; }
+.address-form { flex: 1; min-width: 0; display: flex; }
+.address-form input { flex: 1; min-width: 0; font: inherit; padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: inherit; }
+.address-display { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; cursor: text; }
+.address-display .host { font-weight: 700; }
+.address-display .dim { opacity: 0.6; }
+.address-error { color: #b00020; font-size: 12px; padding: 0 8px; }
+.browser-slot { flex: 1; min-height: 0; position: relative; margin: 2px; }
+.browser-slot.acting { outline: 2px solid #ff6b00; outline-offset: 0; }
+.browser-still { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+.browser-banner { padding: 4px 8px; font-size: 12px; background: color-mix(in srgb, #ff6b00 15%, var(--pane-bg)); border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
+.approval-bar { padding: 6px 8px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, #ff6b00 18%, var(--pane-bg)); display: flex; flex-direction: column; gap: 6px; font-size: 12px; position: relative; z-index: 2; }
+.approval-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+.observation-control { position: relative; display: inline-flex; }
+.observation-popover { position: absolute; right: 0; top: 100%; z-index: 20; min-width: 240px; padding: 8px; border: 1px solid var(--border); background: var(--pane-bg); border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.25); font-size: 12px; }
+.observation-option { display: block; padding: 2px 0; }
+.observation-log { margin: 6px 0 0; padding-left: 16px; max-height: 140px; overflow: auto; }
+.browser-menu { position: absolute; right: 6px; top: 100%; z-index: 20; border: 1px solid var(--border); background: var(--pane-bg); border-radius: 6px; padding: 4px; display: flex; flex-direction: column; }
+.browser-placeholder { padding: 16px; color: #b00020; }
+.tree-observation { display: inline-flex; margin-left: 6px; vertical-align: middle; opacity: 0.8; }

@@ -21,7 +21,7 @@ export function createMainWindow(options: { show: boolean; title?: string }): Br
     width: 1280,
     height: 800,
     show: false,
-    webPreferences: mainWindowWebPreferences(join(import.meta.dirname, '../preload/index.cjs')),
+    webPreferences: mainWindowWebPreferences(join(import.meta.dirname, '../preload/index.cjs'), { devTools: !app.isPackaged }),
   });
 
   // The page title would replace the profile name in the window title.

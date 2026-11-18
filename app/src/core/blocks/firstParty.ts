@@ -7,6 +7,10 @@ export const PANE_TYPES = {
   placeholder: 'agide/placeholder',
   inbox: 'agide/inbox',
   profileRail: 'agide/profile-rail',
+  usageRanking: 'agide/usage-ranking',
+  agentHistory: 'agide/agent-history',
+  transcriptViewer: 'agide/transcript-viewer',
+  observationLog: 'agide/observation-log',
 } as const;
 
 export type FirstPartyPaneType = (typeof PANE_TYPES)[keyof typeof PANE_TYPES];
@@ -41,5 +45,37 @@ export const FIRST_PARTY_MANIFEST = {
       size: { minWidth: 280, preferredWidth: 400 },
     },
     { type: PANE_TYPES.profileRail, title: 'Profiles', tier: 'builtin', configVersion: 1, size: { minWidth: 48, preferredWidth: 56 } },
+    {
+      type: PANE_TYPES.usageRanking,
+      title: 'Usage',
+      tier: 'builtin',
+      configVersion: 1,
+      configSchema: { type: 'object', properties: { folderId: { type: 'string' } } },
+      size: { minWidth: 240, preferredWidth: 320 },
+    },
+    {
+      type: PANE_TYPES.agentHistory,
+      title: 'Agent history',
+      tier: 'builtin',
+      configVersion: 1,
+      configSchema: { type: 'object', properties: { folderId: { type: 'string' } } },
+      size: { minWidth: 280, preferredWidth: 400 },
+    },
+    {
+      type: PANE_TYPES.transcriptViewer,
+      title: 'Transcript',
+      tier: 'builtin',
+      configVersion: 1,
+      configSchema: { type: 'object', properties: { agentId: { type: 'string' } } },
+      size: { minWidth: 320, preferredWidth: 560 },
+    },
+    {
+      type: PANE_TYPES.observationLog,
+      title: 'Observation log',
+      tier: 'builtin',
+      configVersion: 1,
+      configSchema: { type: 'object', properties: { folderId: { type: 'string' } } },
+      size: { minWidth: 280, preferredWidth: 400 },
+    },
   ],
 } as const;

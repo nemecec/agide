@@ -6,7 +6,7 @@ import { IPC } from '../shared/ipc';
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown;
 const handlers = new Map<string, Handler>();
-const windows: { isDestroyed: () => boolean; webContents: { send: ReturnType<typeof vi.fn> } }[] = [];
+const windows: { isDestroyed: () => boolean; webContents: { send: ReturnType<typeof vi.fn>; getURL: () => string } }[] = [];
 const known = new Set<unknown>();
 
 vi.mock('electron', () => ({
@@ -96,17 +96,27 @@ describe('registerIpc', () => {
 
   it('broadcasts bus events to every live window and skips destroyed ones', () => {
     const { events } = setup();
-    const live = { isDestroyed: () => false, webContents: { send: vi.fn() } };
-    const dead = { isDestroyed: () => true, webContents: { send: vi.fn() } };
+    const live = { isDestroyed: () => false, webContents: { send: vi.fn(), getURL: () => PAGE } };
+    const dead = { isDestroyed: () => true, webContents: { send: vi.fn(), getURL: () => PAGE } };
     windows.push(live, dead);
     events.emit({ type: 'tree.changed' } as never);
     expect(live.webContents.send, 'live window').toHaveBeenCalledWith(IPC.event, { type: 'tree.changed' });
     expect(dead.webContents.send, 'destroyed window').not.toHaveBeenCalled();
   });
 
+  it('does not send events to a window that shows a third-party page, such as a sign-in pop-up', () => {
+    const { events } = setup();
+    const app = { isDestroyed: () => false, webContents: { send: vi.fn(), getURL: () => PAGE } };
+    const popup = { isDestroyed: () => false, webContents: { send: vi.fn(), getURL: () => 'https://accounts.example/signin' } };
+    windows.push(app, popup);
+    events.emit({ type: 'tree.changed' } as never);
+    expect(app.webContents.send, 'app window').toHaveBeenCalled();
+    expect(popup.webContents.send, 'pop-up window').not.toHaveBeenCalled();
+  });
+
   it('removes its handlers and stops broadcasting when disposed', () => {
     const { events, dispose } = setup();
-    const live = { isDestroyed: () => false, webContents: { send: vi.fn() } };
+    const live = { isDestroyed: () => false, webContents: { send: vi.fn(), getURL: () => PAGE } };
     windows.push(live);
     dispose();
     events.emit({ type: 'tree.changed' } as never);

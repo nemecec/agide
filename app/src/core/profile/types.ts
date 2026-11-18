@@ -1,4 +1,6 @@
 import type { Unsubscribe } from '../events/EventBus';
+import type { AgentSettingsInput } from '../agents/settings';
+import type { PermissionSettings } from '../permissions/types';
 
 /**
  * Profiles (0017, design 0022 sections 1 to 4). One Electron process runs one profile. Only the definition
@@ -52,6 +54,10 @@ export interface ProfileSettings {
   readonly showBadge: boolean;
   /** Whether the unread count goes into the registry for other profiles' rails. */
   readonly shareUnread: boolean;
+  /** Permission model of the profile (0028). Absent reads as `defaultPermissionSettings` from `core/permissions`. */
+  readonly permissions?: PermissionSettings;
+  /** Agent removal delays, the app-started cap and usage thresholds (0027). Absent keys read as the defaults. */
+  readonly agents?: AgentSettingsInput;
 }
 
 export interface NewProfileInput {

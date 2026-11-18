@@ -25,6 +25,8 @@ export interface SessionInfo {
   readonly title: string;
   readonly cwd: string;
   readonly launchPath: LaunchPath;
+  /** The mode passed with `--permission-mode` at the latest launch; `setPermissionMode` changes it for the next one. */
+  readonly permissionMode: PermissionMode;
   readonly status: SessionStatus;
   readonly createdAt: string;
   readonly exitCode?: number | null;
@@ -80,6 +82,10 @@ export interface SessionService {
   resume(id: SessionId): Promise<SessionInfo>;
   /** Ends the process if it runs and forgets the session. Emits `session.closed`. */
   close(id: SessionId): Promise<void>;
+  /** Ends the process (SIGTERM, then SIGKILL after the kill timeout) and keeps the session as `exited`, so it can be resumed. */
+  stop(id: SessionId): Promise<void>;
+  /** Stores the mode the next launch passes, for example the mode the CLI reported after a Shift+Tab switch. */
+  setPermissionMode(id: SessionId, mode: PermissionMode): void;
   /** Types `text` as a prompt and submits it. */
   sendText(id: SessionId, text: string): void;
   /** Passes raw terminal input (keystrokes, paste) to the PTY unchanged. */

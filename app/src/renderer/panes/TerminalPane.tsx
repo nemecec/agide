@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { SessionInfo, SessionStatus } from '../../core/session/types';
 import { api } from '../api';
 import './TerminalPane.css';
+import { SessionHeader } from './session/SessionHeader';
+import { TrustBanner } from './session/TrustBanner';
 
 const DARK: ITheme = { background: '#1e1e1e', foreground: '#e5e5e7', cursor: '#e5e5e7' };
 const LIGHT: ITheme = { background: '#ffffff', foreground: '#1d1d1f', cursor: '#1d1d1f', selectionBackground: '#b4d5fe' };
@@ -109,6 +111,8 @@ function SessionTerminal({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="terminal-pane" data-testid="terminal-pane" onClick={() => terminal.current?.focus()}>
+      <SessionHeader sessionId={sessionId} />
+      <TrustBanner sessionId={sessionId} />
       <div className="terminal-bar">
         <span className="terminal-status" data-testid="terminal-status" data-status={view.kind === 'ready' ? view.status : view.kind}>
           {view.kind === 'ready' ? view.status : view.kind === 'missing' ? 'session not found' : 'loading'}
