@@ -20,7 +20,7 @@ Milestone 3 ran in these steps:
 7. A fix step that applied the review findings and added "Changes after review" to 0029.
 8. This record, then a cross-review of 0026 to 0030, the READMEs and the probe notes against the code, the test runs, the probe logs and the host state. Its corrections are in the text below; `docs/measurements/cross-review.md` lists them.
 
-The steps were told not to commit, push or open pull requests. All milestone 3 changes are uncommitted in the working tree; the verification found HEAD equal to `origin/main` with no agent commits.
+The steps were told not to commit, push or open pull requests. The milestone 3 changes were committed afterwards in two commits, the application code and then the records, notes and probes. The verification found HEAD equal to `origin/main` with no agent commits before that, and no agent push reached the remote.
 
 ## Decision
 
@@ -294,7 +294,7 @@ The hours are the remaining days times the unrounded rates above, as 0014 and 00
 | `cost-state` at exit for sessions the app ends; price table values; a user-level `statusLine`; plan usage of other profiles | usage |
 | No on-screen check of any milestone 3 UI: settings panel, new-session and new-task dialogs, browser views and their stacking, agent rows, usage panes; no packaged-app run (the `inspect.js` path differs there) | visible-window run |
 | 0020, 0021, 0022, 0026, 0027 and 0028 have status `proposed`; the build followed them | user |
-| Continuous integration has not run on the milestone 3 changes (they are uncommitted). The unit coverage passes on a host without srt and Docker only by 0.2 on the `src/core` functions threshold, and that host was simulated, not the runner | user; first push |
+| Continuous integration passed on the milestone 3 commits on the macOS runner, which has neither srt nor Docker. The unit coverage there passes by a margin of 0.2 on the `src/core` functions threshold, so a small drop in coverage can fail the job | user |
 | Token spend per step and user hours | measurements |
 | Host changes kept from the isolation probes: srt 0.0.83 under `/tmp/agide-srt.*` (about 19 MB, used by the srt tests through `/tmp/agide-srt-prefix.txt`, lost at reboot); the srt packages and a project link in the user's pnpm store (`~/Library/pnpm/store/v11`). The store's `projects` directory also holds links to verification copies under `/tmp` that are removed | user |
 | Claude project directories whose names contain `agide-i1` in the Claude configuration directory, and folder-trust entries for those directories and for removed `p24-` directories in the login's `.claude.json`; the integration script uses the fixed `agide-smoke-cwd` to add no new entry. The gate script leaves a Claude project directory per run, named after its removed `agide-gate-` temporary directory (runs of w-permissions and of the cross-review), with no trust entry | user (removal was denied to the agents) |
