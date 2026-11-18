@@ -255,6 +255,17 @@ Permissions and usage:
 - The inspector writes its record as a temporary file renamed to `.json`, so no temporary directory is left in the events directory, and the sweep of stale files removes a directory and continues after an entry it cannot remove.
 - `UsageEngine` counts the largest value seen per token class of a message, so a repeated line never subtracts. `modelOf` gives a subagent only the model its own transcript names; its cost is left out when there is none.
 
+## Changes after the on-screen check
+
+- No security decision changed. An approval item for a session's own permission request still cannot be answered from the inbox; its card now says so and opens the session. "Done" on an approval is renamed "Dismiss without answering" and keeps resolving the item as dismissed.
+- The tally of a session leaf separates running, waiting, failed and finished agents. `SessionAgentSummary.running` no longer includes waiting agents and gains `failed`.
+- The inbox list is ordered in the renderer: open approvals, urgency, creation time. The service order is unchanged.
+- The approval entries of `browser_tab_state` gain `sessionTitle`.
+- The tree leaf of a browser tab follows the page title until the user renames it.
+- A window capture draws the still of a view at stacking level 9, below dialogs, menus and popovers, and the tab chrome sits at level 12.
+- Dialogs sit in `DialogFrame`: backdrop, first-field focus, Tab trap, Escape presses the element marked `data-dialog-cancel`, focus returns to the opener.
+- A temporary profile shows a grey strip and a rail note instead of nothing.
+
 ## Consequences
 
 - The builders can work in disjoint files. The shared places (session launch, MCP listing, tree menu and rows, surface pane, settings, rail, terminal header) are seams with one owner per hook point.

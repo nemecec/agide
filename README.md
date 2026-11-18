@@ -2,6 +2,8 @@
 
 Agide is a desktop tool for agentic coding on macOS. A tree of folders holds Claude sessions and browser tabs today, and Slack threads and other surfaces later. The app hosts an MCP server, so an agent can do what the UI does, and the UI is meant to show what agents are doing and when they need the user.
 
+![Agide in the Pair layout: the task tree, a Claude session terminal and a browser tab, on sample data](docs/images/agide-overview.png)
+
 ## Status
 
 Early prototype. These parts work:
@@ -18,7 +20,7 @@ Early prototype. These parts work:
 - Task start from a prompt, a GitHub pull request (in a git worktree) or a Jira key.
 - Isolation providers for Anthropic's sandbox runtime (srt) and, not yet offered for real sessions, a Docker container.
 
-Layered review, the Slack surface, app-started agents on the stream-json path, the OpenShell provider and user-written blocks are designed in the decision records and not built yet. Nothing has been checked on screen; the tests run the app with a hidden window, and the milestone 3 changes are not committed yet. `docs/decisions/0014-milestone-1-results.md`, `docs/decisions/0024-milestone-2-results.md` and `docs/decisions/0030-milestone-3-results.md` list what exists and what was verified.
+Layered review, the Slack surface, app-started agents on the stream-json path, the OpenShell provider and user-written blocks are designed in the decision records and not built yet. The tests run the app with a hidden window. `pnpm visual-check` in `app/` captures the UI states on sample data; the first on-screen check, its fixes and what is still not looked at in a visible window are in `docs/decisions/0031-on-screen-check-results.md`. `docs/decisions/0014-milestone-1-results.md`, `docs/decisions/0024-milestone-2-results.md` and `docs/decisions/0030-milestone-3-results.md` list what exists and what was verified.
 
 Continuous integration runs the typecheck, the unit tests with coverage thresholds, the end-to-end tests and the UI and MCP parity check on every pull request and on every push to `main`.
 
