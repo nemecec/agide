@@ -1,9 +1,9 @@
-// README: node mcp_host.mjs --serve [--token T] [--log file.jsonl] [--state file.json]   -- localhost Streamable-HTTP MCP server (127.0.0.1, bearer token, Origin check) with ui_* tools. Also importable: startMcpHost().
+// README: node mcp_host.mjs --serve [--token T] [--log file.jsonl] [--state file.json] [--allow-host name] [--bind address]   -- localhost Streamable-HTTP MCP server (127.0.0.1, bearer token, Origin check) with ui_* tools. Also importable: startMcpHost().
 import http from 'node:http';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { appendFileSync, writeFileSync } from 'node:fs';
 
-export function startMcpHost({ token = randomBytes(24).toString('hex'), logFile, stateFile, permissionPolicy = () => ({ behavior: 'allow' }) } = {}) {
+export function startMcpHost({ token = randomBytes(24).toString('hex'), logFile, stateFile, allowedHosts = [], bindAddress = '127.0.0.1', permissionPolicy = () => ({ behavior: 'allow' }) } = {}) {
   // State owned by the host process: the "UI model" the tools mutate.
   const state = { folders: { root: { id: 'root', name: 'Tasks', parent: null } }, sessions: { s1: { id: 's1', title: 'demo session', folder: 'root' } }, openFiles: [], permissionRequests: [] };
   const calls = [];
@@ -62,7 +62,7 @@ export function startMcpHost({ token = randomBytes(24).toString('hex'), logFile,
     const origin = req.headers.origin;
     if (origin !== undefined) return bad(403, 'origin not allowed');
     const host = (req.headers.host || '').split(':')[0];
-    if (host !== '127.0.0.1' && host !== 'localhost') return bad(403, 'host not allowed');
+    if (host !== '127.0.0.1' && host !== 'localhost' && !allowedHosts.includes(host)) return bad(403, 'host not allowed');
     const m = /^Bearer (.+)$/.exec(req.headers.authorization || '');
     const a = Buffer.from(m?.[1] ?? ''), b = Buffer.from(token);
     if (!m || a.length !== b.length || !timingSafeEqual(a, b)) return bad(401, 'bad token');
@@ -97,7 +97,7 @@ export function startMcpHost({ token = randomBytes(24).toString('hex'), logFile,
   });
 
   return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(0, bindAddress, () => {
       const port = server.address().port;
       resolve({ port, token, url: `http://127.0.0.1:${port}/mcp`, state, calls, rejected, close: () => new Promise((r) => { server.closeAllConnections?.(); server.close(r); }),
         config: (extra = {}) => ({ mcpServers: { app: { type: 'http', url: `http://127.0.0.1:${port}/mcp`, headers: { Authorization: `Bearer ${token}` }, ...extra } } }) });
@@ -107,7 +107,7 @@ export function startMcpHost({ token = randomBytes(24).toString('hex'), logFile,
 
 if (process.argv[1] && process.argv[1].endsWith('mcp_host.mjs') && process.argv.includes('--serve')) {
   const arg = (n) => { const i = process.argv.indexOf(n); return i > 0 ? process.argv[i + 1] : undefined; };
-  const h = await startMcpHost({ token: arg('--token'), logFile: arg('--log'), stateFile: arg('--state') });
+  const h = await startMcpHost({ token: arg('--token'), logFile: arg('--log'), stateFile: arg('--state'), allowedHosts: arg('--allow-host') ? [arg('--allow-host')] : [], bindAddress: arg('--bind') });
   console.log(JSON.stringify({ url: h.url, token: h.token, config: h.config() }));
   process.on('SIGTERM', () => process.exit(0));
 }

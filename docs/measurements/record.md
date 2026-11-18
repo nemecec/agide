@@ -40,3 +40,25 @@ Reading the reports and the probe notes, and matching the 0021 statements agains
 - The verification step left no measurement file, so its times are approximate in 0024.
 - The coverage figures per area predate the fix step; `pnpm coverage` and `pnpm coverage:e2e` were not run again for this record.
 - No commit was made. The relayed user request asked for a commit of the README changes; the computed task for this step forbids commits, and the question is in 0024.
+
+## Milestone 3 record
+
+Start: 2026-11-18 01:07:20 UTC (date -u). End: 2026-11-18 01:16:30 UTC (date -u). Wall time about 9 minutes.
+
+### Built
+
+- `docs/decisions/0030-milestone-3-results.md`: what milestone 3 built and shows against R12, R13, R15, R16, R17 (the permission gate), R24 and S2; what the srt, container and OpenShell probes and providers show; the statements of 0004 and 0028 that change, and what the build adds to the 0029 amendments of 0010, 0011, 0019 and 0022; review findings with their fix status; tests and coverage per area; wall times per step with a token column to fill from the workflow notification; the re-estimate; open items with the host changes and leftovers; milestone 4 recommendations; questions for the user.
+- `docs/README.md`: rows for 0025 to 0030, the amendment pointers, the new commands and scripts, the milestone 3 notes and probe scripts.
+- `README.md`: status after milestone 3.
+- `app/README.md`: environment variables of the tasks, srt and browser tests; the folder-trust handling and the mode after Shift+Tab; browser consent rules; sections on task start, agents and usage, and isolation providers; module map rows.
+- Ran `pnpm typecheck` (pass) and `pnpm coverage` (131 files, 1413 tests, thresholds met) in `app/` to confirm the state and compute coverage per area from `coverage/coverage-summary.json`.
+
+### What took long
+
+Reconciling the builder reports, written while other builders were still changing files, with the state after the fix step, and placing each amendment in the right earlier record without repeating the 0029 tables.
+
+### Not done
+
+- The judged days built are a judgement; no measurement gives them.
+- The m3 and gate real-Claude scripts, `pnpm e2e`, `pnpm mutation` and `pnpm coverage:e2e` were not re-run for this record; their figures come from the fix, verification and quality reports.
+- The temporary log files of this step were removed. Leftovers of other steps are listed in 0030 and were not touched.

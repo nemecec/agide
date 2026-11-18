@@ -88,3 +88,51 @@ The `pnpm coverage:e2e` runs: one failing inbox test kept a run going for more t
 - The effect of the deny rules in a real session, and everything 0024 lists as not checked on screen.
 - The real-Claude runs wrote transcripts for `agide-smoke-cwd` to the user's Claude config, as the earlier runs did.
 - No token count is available to me.
+
+## Cross-review of milestone 3
+
+Start: 2026-11-18 01:17:07 UTC (date -u). End: 2026-11-18 01:36 UTC (date -u). Wall time about 19 minutes.
+
+Scope: 0026 to 0030, the root README, `app/README.md`, `docs/README.md`, `notes/probes-m3-permissions.md`, `notes/probes-m3-isolation.md`, the milestone 3 sections of `probes/RESULTS.md`, and their claims about `app/`, checked against the code, the test runs, the probe logs in `probes/out/`, the measurement files and the host state.
+
+### Commands run
+
+- `pnpm typecheck`: passes, at the start and after my edits.
+- `pnpm coverage`: 131 files, 1413 tests pass, thresholds met, at the start and after my edits. Per-area figures computed from `coverage/coverage-summary.json`.
+- `pnpm e2e`: 55 pass. `pnpm coverage:e2e`: 55 pass.
+- `pnpm parity` and `pnpm blocks-docs`: `docs/parity.md` and `docs/blocks.md` come out with the same checksums.
+- `pnpm mutation`: see the findings. Source checksums are identical before and after.
+- `node --experimental-strip-types scripts/real-claude-gate.mjs` and `node scripts/e2e-real-claude-m3.mjs` on Haiku, once each: both pass (the gate script 0.0040 USD per run; the m3 script reports no cost).
+- `pnpm coverage` and `pnpm e2e` with Docker off the `PATH`, and for the coverage run `AGIDE_SRT_BIN` pointing at a missing file, to stand in for the continuous integration runner.
+- srt 0.0.83 from the probe prefix with a shell script as the inner process and a settings file shaped like the provider's: writes to the protected names of a writable configuration directory.
+- Host checks: `df`, the srt prefix and its version, Docker containers, images, volumes and networks by name and creation time, OpenShell paths, the pnpm store's project links, the Claude project directory names and trust entries the records name, the temporary directories, the install link of the CLI.
+- A search of every tracked and untracked file outside the ignore rules for employer names, user directory paths, e-mail addresses, token shapes and long identifiers, and a search of the docs and the code for the words the style rules exclude.
+
+### Findings and what I changed
+
+- `pnpm mutation` failed after the fix step (50 killed, 2 skipped, exit code 1): the fix step had changed the source lines that the entries for the fragment redaction and the blocked path prefix replace. `scripts/mutation-checks.mjs` has the two entries corrected and one added for the normalised path comparison; 53 mutations are killed. 0030 said the script was not re-run; it now says what the run found.
+- `pnpm coverage` failed on a host without srt and Docker (functions of `src/core` 93.7 against 94), which is the state of the continuous integration runner. `ptyHarness.ts` and `testRuntimes.ts` in `src/core/isolation` are helpers of the srt and container tests and were measured as source. `vitest.config.ts` excludes them like the other test helpers; the run without the runtimes then passes with a margin of 0.2 on that threshold. 0030 has the figures and lists the margin and the missing run on the real runner as open.
+- The CLI updated itself from 2.1.326 to 2.1.327 at 23:52 UTC, during the quality step. The probes, the builders and the integration ran on 2.1.326; the real-Claude scripts of the verification, the fix step and this review ran on 2.1.327. 0030 now states this and lists that no probe was repeated on 2.1.327.
+- The `denyWrite` fix for srt had a unit test of the generated settings only. Under the real srt the listed names cannot be overwritten, created, renamed or linked inside the writable directory, and `.claude.json` stays writable. 0030 records the check; no test keeps it.
+- 0030: the "Not fixed" sentence said that real srt and Docker runs were not checked, while the unit suite runs both on this host; the re-estimate said the fix step "again took longer than most builder steps", which the times of neither milestone support (40 minutes against 37 to 72; 32 against 39 to 81 in milestone 2); the coverage table now holds the figures after the exclusion, with the end-to-end coverage after the fixes; the tests table says which runs the cross-review repeated; a cross-review step and row are added.
+- 0030 open items: Claude project directories left by the gate script, links in the pnpm store to removed verification copies, `agide-i1run.*`, `agide-checks-*`, `agide-app-*` and `agide-dbg-*` in the per-user temporary directory (about 25 MB), and `/tmp/verify-app.b3ZC4d`, a copy of the app with `node_modules` from the milestone 1 verification (about 965 MB). `notes/probes-m3-isolation.md` gains the `agide-i1run.*` row.
+- 0029 was stale against the build in these places: the contract suite runs srt against the real `srt`, not a fake; `terminate` under srt is implemented and tested (SIGTERM with the real srt, SIGKILL of the process group without it); bypass is offered on srt with asks turned into denials, not hidden until Q2; the recognizer also returns Slack and Notion objects; no contract suite is pending and `m3Modules.test.ts` runs the modules, not stubs (its title is corrected too).
+- `docs/measurements/integrate.md`: the milestone 3 wall time is 19 minutes by its own time stamps.
+- The search for employer names, user directory paths, e-mail addresses and tokens found nothing in tracked or untracked files. The author's name stands in `NOTICE` and in the "Decided by" lines of committed records (0030 asks the user about them). Test fixtures use made-up home paths and addresses under reserved domains. `probes/out/` is ignored by git; one report there quotes the name of a user-level hook command. The style search found no excluded word in the milestone 3 files.
+
+Supported as written: the wall times of every step and their sums, the rates and the hour ranges of the re-estimate, the estimates quoted from 0005, 0009, 0014, 0018, 0019, 0024 and 0028, the test and file totals, the per-area unit coverage within 0.1 outside the excluded files (the branch figures of `src/main` and `src/main/modules` move by up to 0.4 between runs), the probe statements of 0028, 0029, 0030 and the two notes against `p16` to `p24`, `pb1` and the reviewer re-runs in `probes/out/`, the real-Claude outcomes of the gate and m3 scripts, and the constants and rules I looked up in the code (mode resolution and the bypass conditions, the ask and sandbox settings, `denyWrite`, the container mounts and the unavailable inspector, the approval and MCP timeouts, the agent cap, removal delays, usage defaults, the status snapshot name, the task directories, the base-branch `CLAUDE.md` read, the module order, events only to app-page windows, DevTools off when packaged, no dependency added).
+
+Host state against the isolation probe notes: srt 0.0.83 in the `/tmp/agide-srt.*` prefix (19 MB) with its pointer file; no OpenShell binary, configuration, image, container, volume or network; no container with an `agide` label; Docker Desktop 4.97.0 with engine 29.9.2; the `agide-i1` project directories and trust entries and the two `p24-` entries are present as the notes say. Free disk space is 12 GiB at the end (11 GiB at the start).
+
+### What took long
+
+The mutation run and the repeated coverage runs.
+
+### Not finished
+
+- Not checked: the verification step's clean-copy runs and the review steps' own mutation runs (no file records them); the 1356-test figure; the manual probe steps without logs (the Keychain item, the OpenShell policy reload and provider placeholder); the body of 0026 and 0027 beyond their probe statements, estimates and style; the smoke, MCP and inbox real-Claude scripts after the fixes.
+- No run on the real continuous integration runner; the simulated host still had `gh` and `claude`.
+- No probe was repeated on CLI 2.1.327.
+- Everything 0030 lists as not checked on screen.
+- The removal of `/tmp/agide-xreview` (my logs and the srt check directory, under 1 MB) was denied. Each of my gate script runs left a Claude project directory named after its removed `agide-gate-` temporary directory; I did not remove them.
+- No token count is available to me.

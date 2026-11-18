@@ -68,3 +68,47 @@ Finding why the trust answer failed: the plain-text screen holds every frame sin
 - The rail width is a share of the window (about 60 px at the default width), not a fixed width; a narrow window makes it narrower.
 - The inbox tab title shows no unread count; the own count shows on the dock badge and in the rail.
 - In a run without profiles (`AGIDE_USER_DATA` only) the rail column stays empty.
+
+# integrate, milestone 3
+
+Start: 2026-11-17T23:23:53Z
+End: 2026-11-17T23:43:15Z (about 19 minutes wall time)
+
+## State at the start
+
+The builders had left the module graph in the order of 0029, and `pnpm typecheck`, `pnpm test` and `pnpm e2e` all passed. The task start already created its session through `session_create`, so it used the profile's provider and the permission mode resolution. Some seams were still open: the network policy of the permissions module was always `unrestricted`, the browser module asked about every navigation outside loopback (`allowlisted` was always false), and browser permission requests reached the tab chrome only.
+
+## What was built
+
+- `core/permissions/hosts.ts`: `hostAllowed` (moved out of the inspector; host names now compare without case) and `originAllowed` for `https` origins, with tests.
+- Permissions module: `networkPolicy` returns the profile's network allowlist. A provider that limits the whole process (srt) turns it into its allowed domains; `local` and the container ignore it.
+- Browser module: it receives the permission service (`modules.ts` passes it). An agent navigation to an `https` origin on the allowlist runs without a question. Every permission request also posts an `approval` item (origin `browser:approval`, high urgency, linked to the tab, the agent's summary in the payload only); the answer, a timeout or the removal of the tab resolves it as approved, denied or expired.
+- `e2e/milestone3.spec.ts` with `e2e/fixtures/fake-claude-m3.mjs` (records arguments, settings, the MCP config and every submitted prompt, a bracketed paste counting as one; runs hook and status line commands) and `e2e/fixtures/fake-srt.mjs`:
+  - a pull request task from the new-task dialog with a fake `gh`: worktree as the session directory, `--permission-mode auto`, the `Bash(git push *)` ask rule, the inspector `PreToolUse` hook, the status line, the digest hook, `--no-chrome`, `--add-dir`, both MCP servers, the composed prompt without the pull request text, and a `github` tab for the pull request in the task folder;
+  - a local page read and clicked over the `agide-browser` endpoint, a navigation to another origin that asks through the inbox and is denied, and observation off refusing the page tools and `surfaces_observe`;
+  - subagent hook events as an agent node, the session in the usage ranking, plan usage from the status line, the plan threshold alert in the inbox, and a denied push as a `Blocked git.push` item;
+  - srt chosen for the profile: the next launch runs `srt -s <settings> -- claude`, the settings carry a host added to the profile allowlist and `allowPty`; back on `local`, the next launch skips srt.
+- `scripts/e2e-real-claude-m3.mjs` (`pnpm e2e:real-claude-m3`).
+- README: the allowlist for navigation and for srt, the inbox item of a browser request, the new spec and script.
+
+Mutation checks: the network policy set back to `unrestricted`, the inbox post of a browser request removed, and `allowlisted` set back to false each made unit or e2e tests fail; the files were restored.
+
+## Real-Claude runs
+
+Haiku, `--max-budget-usd 0.25`, `--strict-mcp-config`, `--setting-sources user`, profile default mode (auto), working directory `<tmpdir>/agide-smoke-cwd` with a git repository for the run (emptied afterwards), a bare origin in a temporary directory, a local page on `127.0.0.1`.
+
+- Run 1: stopped before the prompt; the script waited for a session leaf in a collapsed folder. No model call.
+- Run 2: the agent used ToolSearch, then the `agide-browser` tools with no permission dialog in auto mode, then `git push origin HEAD`, which showed the TUI dialog "Rule Bash(git push *) from command line arguments overrides auto mode … Do you want to proceed? 1. Yes 2. No". Escape interrupted the turn ("Interrupted · What should Claude do instead?"), no Stop hook ran, and the script timed out waiting for an idle status.
+- Run 3 (the script now ends on the interrupted turn): pass in 20 s. Hooks: SessionStart, UserPromptSubmit, PreToolUse and PostToolUse for ToolSearch, `tabs_context_mcp`, `find`, `computer`, `get_page_text`, then PreToolUse for Bash and PermissionRequest. The click reached the page's server, the page read "saved at the button", nothing reached the origin. Access log: tree, act and text entries, all `ok` with the loopback origin. Inbox: an approval item "Approve: git.push to origin HEAD". The cost is not in the transcript (no `cost-state` row).
+- After Escape the session stayed `waiting` and the approval item stayed open: refusing in the TUI produces no hook that clears them.
+
+## What took long
+
+Writing the integration fake claude so that a bracketed paste with newlines counts as one prompt, and finding that `claude auth status` (the profile login check under `AGIDE_ROOT`) launches the fake claude as well.
+
+## Not finished
+
+- The mode reported by hook payloads is not written back with `setPermissionMode`. The payload files sit in a directory the agent can write to, so a forged payload could change the mode of the next launch; this needs a source the agent cannot write.
+- The session status and the approval item after a refusal with Escape (above).
+- The real-Claude script under srt and the probes listed in the builders' reports were not run here.
+- Empty `playwright-artifacts-*` directories from the test runs remain in the temporary directory.

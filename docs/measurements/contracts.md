@@ -28,3 +28,34 @@ End: 2026-11-17T15:58:42Z
 - No real-Claude run; nothing in this step needs one.
 - `Desktop` was run only in its quiet mode under the hidden e2e runs; real notifications and the dock badge were not shown.
 - The relayed user request asks for a commit of the README changes. This step forbids commits, so none was made; `git status` at the start showed no uncommitted README change.
+
+# Milestone 3 contracts
+
+Start: 2026-11-17T21:41:23Z
+End: 2026-11-17T22:09:49Z
+
+## Work
+
+- Read 0023, 0024, 0025, 0026, 0027, 0028, `notes/probes-m3-permissions.md`, `notes/probes-m3-isolation.md`, the milestone 3 part of `probes/RESULTS.md`, the parts of 0010, 0011, 0019 and 0022 the probes touch, and the application code.
+- Wrote 0029 with the slices, the srt and container provider designs, the probe results that change 0010, 0011, 0019 and 0022, the modules, contracts, initialization order, ownership, test strategy and choices.
+- Built the seams that keep the builders apart: launch contributions in the session service (settings fragments, replaced base hooks, arguments, environment, MCP servers and session files, merged with a single owner per key), provider selection and network policy per launch, `SessionInfo.permissionMode`, `stop` and `setPermissionMode`, the per-grant `Host` allowance on the MCP server, tools per MCP server with `Command.mcpServer`, the isolation provider registry with its w-iso entry points, the dialog host and settings panel, the tree hook points for agent rows, leaf marks, session creation and leaf creation.
+- Wrote the contracts and stubs: `core/permissions` (types, schema, defaults, mode helpers, stub builder and inspector, contract suites marked pending), `core/browser` (types, service table, recognizer for Jira and GitHub, tool schemas, in-memory observation service with its contract), `core/agents` (types, in-memory agent store with its contract), `core/tasks` (types, strict source parser, input schema), srt and container provider stubs with the contract suite marked pending, main module stubs for permissions, browser, agents and tasks, and the renderer stubs.
+- Regenerated `docs/blocks.md` for the new pane types; `docs/parity.md` is unchanged.
+
+## Commands run
+
+- `pnpm typecheck`: pass.
+- `pnpm test`: pass, with the pending suites skipped. The run before the changes failed once in `appModules.test.ts` under load and passed on the next runs (the flake listed in 0024).
+- `pnpm e2e`: pass, run after the first wiring and again after the last change.
+- `pnpm blocks-docs`, `pnpm parity`: ok.
+
+## What took long
+
+- Finding a seam for the session launch that every module can add to without editing it: the order of prepare, hook delivery, MCP grant and session files decided where contributors run.
+- Keeping the tree menu behaviour while moving session and leaf creation behind files other builders own.
+
+## Not done
+
+- No real-Claude run and no probe; nothing in this step needs one.
+- The srt and container providers, the inspector, the class table, the SQLite stores, the browser views and every UI beyond placeholders are the builders' work.
+- The dialog host and the settings panel were not seen on screen; the hidden e2e runs do not open them.

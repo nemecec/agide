@@ -100,3 +100,69 @@ Details in `notes/probes-m2.md`; evidence in `probes/out/p11_*` to `p15_*`, revi
 | P15 Elicitation | pass | The `Elicitation` hook fires with `mcp_server_name`, `message`, `mode`, `requested_schema`; a hook answer with `action` and `content` reaches the server with no dialog. The test used a stdio server because `mcp_host.mjs` has no server-initiated requests. |
 
 New scripts: `m2_lib.py`, `p11_notification_hook.py`, `p12_statusline.py`, `p13_transcript_usage.py`, `p14_waiting_permission_hook.py`, `p15_elicitation.py`, `fixtures/elicit_mcp_server.mjs`, `hooks/statusline_capture.py`, `hooks/perm_wait.py`, `hooks/elicit_answer.py`.
+
+## Browser design probe PB1 (2026-11-17)
+
+Evidence in `probes/out/pb1_server_names.json`. One `claude -p` run on Haiku, `--strict-mcp-config`, hooks disabled, an empty temporary working directory, budget cap 0.25 USD (cost 0.0035 USD).
+
+| Probe | Result | Short finding |
+|---|---|---|
+| PB1 MCP server names | pass | One HTTP MCP server registered under the names `browser`, `agide-browser`, `agide_browser`, `claude-in-chrome` and `app`. All but `claude-in-chrome` connected and listed their tools as `mcp__<name>__<tool>`. `claude-in-chrome` was dropped without an error: no `mcp_servers` entry and no tools. Used by 0026 for the server name `agide-browser`. |
+
+New script: `pb1_server_names.mjs`.
+
+## Milestone 3 isolation probes I1 to I3 (2026-11-17)
+
+Details, host changes and latency in `notes/probes-m3-isolation.md`; evidence in `probes/out/p16_*` to `p18_*`. I1 runs the real claude (Haiku, empty temporary directory, `--setting-sources user`, `--strict-mcp-config`); I2 and I3 run the fake claude from `fixtures/fake_claude.sh` because no Linux claude build is available locally. The Keychain check of I1 and the provider placeholder and live policy reload of I3 were manual steps without kept logs. A reviewer re-run of I2 is in `probes/out/m3-review/`.
+
+| Probe | Result | Short finding |
+|---|---|---|
+| I1 srt | pass | Write outside the allowed directories and a request to a non-allowed domain are denied; an allowed domain works. The real claude runs in a PTY under srt with hooks written to an allowed directory, the Keychain login works, and `mcp_host.mjs` on loopback is reachable. Needs `allowPty`, `allowLocalBinding` and a write allowance for the Claude temp directory. The Keychain stays readable from inside. srt adds about 0.2 s to a start. |
+| I2 container | pass (fake claude) | PTY, resize, Ctrl-C, SIGTERM through the docker client, events directory, host MCP through `host.docker.internal` with a bearer token, bind-mount ownership and teardown work. SIGKILL of the docker client leaves the container running. Start 0.2 to 0.35 s. Real claude unverified. |
+| I3 OpenShell | pass (fake claude) | Installs from a checksummed release without administrator rights and runs on local images with about 33 MB of OpenShell runtime images. Filesystem and per-binary network policy, host MCP through the policy, PTY through `sandbox exec --tty` and `sandbox connect`, and a credential placeholder work. Create to Ready 1 to 2 s. Real claude and the subscription login not run. |
+
+New scripts: `p16_srt.py`, `p17_container.py`, `p17_container_lib.py`, `p18_openshell.py`, `fixtures/fake_claude.sh`, `fixtures/hook_events.sh`, `hooks/srt_claude.sh`. `mcp_host.mjs` takes `--allow-host` and `--bind`.
+
+## Milestone 3 permission probes P20 to P24 (2026-11-17)
+
+Details in `notes/probes-m3-permissions.md`; evidence in `probes/out/p20_*` to `p24_*`, `ppty_*` and `p_perm_pty_report.json`. `-p` runs used the stdio permission prompt tool so that each prompt is a `can_use_tool` request; TUI runs used the `PermissionRequest` hook as the dialog signal. Same safety settings as above; every case ran in a fresh directory that the script removed. A reviewer re-run of selected cases, with a `strictAllowlist` check, is summarised in `probes/out/m3-review/perm_rerun.json`.
+
+| Probe | Result | Short finding |
+|---|---|---|
+| P20 ask rules in auto mode | pass | A `permissions.ask` rule from `--settings` still prompts under `--permission-mode auto` for a Bash pattern, an app MCP tool and a claude.ai connector tool, in `-p` and in the TUI. Unmatched calls run without a prompt. The request carries `decision_reason_rule_source: "flagSettings"` or `matched_ask_rule`. |
+| P21 PreToolUse hook | pass | Hook allow, deny, ask and `updatedInput` work in both paths. Hook deny and deny rules beat allow; a hook allow does not lift an ask rule; a rewrite applies before the prompt. Exit 2 blocks with stderr to the agent; exit 1 and a timeout hand the decision back to the mode. |
+| P22 permission modes | pass | `--permission-mode` accepts `acceptEdits`, `auto`, `bypassPermissions`, `manual`, `dontAsk`, `plan`. `auto` is available for this login. `defaultMode` works in `--settings` and the flag overrides it. The hook payload reports `default` for `manual`, otherwise the mode name. |
+| P23 sandbox settings | pass | The sandbox works under `--settings`. A non-allowed host gets a 403 and a `<sandbox_violations>` block; the TUI shows `Sandbox blocked 1 operation`. In auto mode the model can add the host through a per-command `allowed_domains` input; the auto-mode classifier approved it with no prompt, and a `PreToolUse` hook sees the input. `deniedDomains` holds, and `network.strictAllowlist` in `--settings` refuses the per-command list. Manual mode asks through a `SandboxNetworkAccess` request. Plain SSH fails inside the sandbox (no name resolution), git over SSH fails on the unreadable `known_hosts`; https git works for allowed hosts. |
+| P24 folder trust | pass | The TUI dialog appears for a directory with no trusted ancestor, `-p` never shows it. `CLAUDE_CODE_SANDBOXED=1` skips it and writes nothing; `--settings` keys and `--dangerously-skip-permissions` do not. Detect by the text `Quick safety check` or no `SessionStart`; Down then Enter answers Yes and stores trust, Enter alone exits. |
+
+### Design effects
+
+1. Auto can be the default with ask rules for outward-facing tools: rules, a `PreToolUse` hook and the network policy are separate layers, and a hook allow never loosens a rule. Bash ask rules need content (`Bash(git push *)`), since the docs say a bare `Bash` ask rule gives way to sandbox auto-allow; a hook that times out or fails lets the call through.
+2. `sandbox.network.allowedDomains` does not hold against the agent in auto mode alone. Use `network.strictAllowlist`, `deniedDomains` or a `PreToolUse` hook that checks `allowed_domains`.
+3. A host that answers `can_use_tool` also sees `SandboxNetworkAccess` requests in manual mode.
+4. For directories the app creates, `CLAUDE_CODE_SANDBOXED=1` on the TUI child avoids the dialog and the stored entry; the variable is undocumented.
+5. Payload and init report `manual` as `default`.
+
+New scripts: `p_perm_lib.mjs`, `p20_ask_rules.mjs`, `p21_pretool_hook.mjs`, `p22_modes.mjs`, `p23_sandbox.mjs`, `p23_sandbox_pty.py`, `p24_trust.py`, `p24_print_untrusted.mjs`, `p_perm_pty.py`, `hooks/pretool_decide.py`.
+
+## Milestone 3 browser first-slice checks (2026-11-17)
+
+Script `app/scripts/browser-checks.mjs`, run with the Electron 45.3.3 binary and no visible window (a `BaseWindow` with `show: false`, a local `node:http` page on 127.0.0.1).
+
+| Check | Result | Short finding |
+|---|---|---|
+| `Page.captureScreenshot` in a view of a hidden window | pass | Returns a PNG while the view is visible in the hidden window. |
+| Same after `view.setVisible(false)` | fail | No answer within 5 s. A parked view needs its own hidden window or an on-screen position, not `setVisible(false)`. |
+| `capturePage` of a view | pass | Returns the view at device pixel ratio 2 (1600 by 1120 for a 800 by 560 view). |
+| `Runtime.evaluate` with `replMode` | pass | A `const` from one call is visible to the next and top-level `await` works. |
+| `Accessibility.getFullAXTree` on a view | pass | Roles, names and `backendDOMNodeId` per node. |
+| `Overlay.highlightNode` and `highlightRect` on a view | pass | Both accepted and cleared by `hideHighlight` after `DOM.enable` and `Overlay.enable`. |
+| `Input.insertText` into a focused input | pass | The value is set. |
+| Second `debugger.attach` | throws | "Debugger is already attached to the target". The wrapper keeps one attach per webContents. |
+| `navigationHistory.restore` | pass | Two entries restored, the current one loads, back is possible. |
+| `Page.navigate` and `will-navigate` | confirmed | CDP navigation fires no `will-navigate`, so the address policy runs in the tool before the call. |
+| `web-contents-created` timing | confirmed | Fires while the `WebContentsView` constructor runs, before the module can record the id. The backstop cannot look the contents up in the registry. |
+| `capturePage` of the app window with a view child | fail (as expected) | The child view is not in the image. `ui_capture_window` composes view captures itself. |
+| `getStoragePath()` of a persistent partition | pass | Lies under `userData`. |
+
+Not run: P16 (how long the CLI keeps an MCP call open with the entry `timeout` set).
