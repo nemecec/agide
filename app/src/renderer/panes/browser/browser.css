@@ -13,6 +13,7 @@
 .browser-slot { flex: 1; min-height: 0; position: relative; margin: 2px; }
 .browser-slot.acting { outline: 2px solid #ff6b00; outline-offset: 0; }
 .browser-still { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+.browser-still-fallback { display: flex; align-items: center; justify-content: center; background: var(--pane-bg); color: var(--muted); font-size: 12px; text-align: center; padding: 8px; }
 .browser-banner { padding: 4px 8px; font-size: 12px; background: color-mix(in srgb, #ff6b00 15%, var(--pane-bg)); border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
 .approval-bar { padding: 6px 8px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, #ff6b00 18%, var(--pane-bg)); display: flex; flex-direction: column; gap: 6px; font-size: 12px; position: relative; z-index: 2; }
 .approval-buttons { display: flex; gap: 6px; flex-wrap: wrap; }

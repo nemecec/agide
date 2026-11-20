@@ -423,9 +423,9 @@ test('hides the native view behind a still of its page during a drag and shows i
   await expect.poll(async () => (await invoke<{ stills: unknown[] }>(page, 'browser_views_suspend')).ok && (await invoke(page, 'browser_views_resume')).ok, { message: 'the view is placed in the window' }).toBe(true);
 
   await page.evaluate(() => (globalThis as unknown as { document: { dispatchEvent(event: unknown): void } }).document.dispatchEvent(new (globalThis as unknown as { Event: new (type: string) => unknown }).Event('dragstart')));
-  await expect(page.locator('img.browser-still'), 'a still of the page takes the place of the view while the drag runs').toBeVisible();
+  await expect(page.locator('.browser-still'), 'a still of the page, or a placeholder when the capture is unavailable, takes the place of the view while the drag runs').toBeVisible();
   await page.evaluate(() => (globalThis as unknown as { document: { dispatchEvent(event: unknown): void } }).document.dispatchEvent(new (globalThis as unknown as { Event: new (type: string) => unknown }).Event('dragend')));
-  await expect(page.locator('img.browser-still'), 'the still is removed when the drag ends').toHaveCount(0);
+  await expect(page.locator('.browser-still'), 'the still is removed when the drag ends').toHaveCount(0);
 });
 
 test('hides the native view while a dialog is open over its slot and shows it again when the dialog closes', async () => {
@@ -448,7 +448,7 @@ test('hides the native view while a dialog is open over its slot and shows it ag
   await page.getByRole('menuitem', { name: 'New task…', exact: true }).click();
   await expect(page.getByTestId('new-task-dialog'), 'the dialog opens').toBeVisible();
   await expect.poll(shown, { message: 'the native view is hidden while the dialog is open' }).toEqual([false]);
-  await expect(page.locator('img.browser-still'), 'a still takes the place of the view').toBeVisible();
+  await expect(page.locator('.browser-still'), 'a still or a placeholder takes the place of the view').toBeVisible();
 
   await page.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.getByTestId('new-task-dialog'), 'the dialog closes').toBeHidden();

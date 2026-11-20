@@ -214,6 +214,11 @@ export function BrowserPane({ node }: { readonly node: TreeNode & { readonly kin
       )}
       <div ref={slot} className={`browser-slot${state.acting ? ' acting' : ''}`} data-testid="browser-slot" data-browser-slot={leafId}>
         {still?.dataUrl !== undefined && <img className="browser-still" alt="" src={still.dataUrl} />}
+        {still !== undefined && still.dataUrl === undefined && (
+          <div className="browser-still browser-still-fallback" data-testid="browser-still-fallback">
+            The page is hidden while panes are rearranged.
+          </div>
+        )}
       </div>
     </div>
   );
