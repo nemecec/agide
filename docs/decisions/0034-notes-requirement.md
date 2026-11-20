@@ -2,7 +2,7 @@
 
 Status: proposed (requirement stated by the user; weight and design await confirmation)
 Date: 2026-11-18
-Decided by: Neeme (idea and the inline, file and mount refinements); the design direction is an agent proposal
+Decided by: Neeme (idea and the inline, file and mount refinements; inline by default with a suggestion to save large notes to a file); the design direction is an agent proposal
 Adds: R27 notes and mounts (weight 2 proposed)
 Extends: 0002 (surfaces), 0015 (composable UI), 0016 (tasks), 0033 (reference index)
 
@@ -14,7 +14,7 @@ The user wants Markdown or plain-text notes in Agide, next to tasks, reminders a
 
 - R27 Notes and mounts. Weight 2 is proposed.
 - Notes. A note is a Markdown or plain-text document and a surface type (R12): a leaf in the tree under a project, a task or a session, or a folder's own note.
-  - Two storages behind one editor. An inline note is a row in the profile's SQLite store and is created in a moment from any node. A file note is backed by a Markdown or plain-text file. "Save to file" writes an inline note to a chosen path (the default is a notes directory in the profile's data directory) and the note becomes file-backed with its links and history kept; "Make inline" imports a file note back into the store. The editor, the links, the search and the agent tools do not depend on the storage.
+  - Two storages behind one editor. Every note starts inline (decided by the user on 2026-11-18): an inline note is a row in the profile's SQLite store and is created in a moment from any node. When a note has grown large enough, the app suggests saving it to a file. The size that triggers the suggestion is a setting (a length in characters, with a default of about one printed page); the suggestion appears once per note as a quiet banner in the editor with "Save to file" and "Not now", and "Not now" silences it for that note. A file note is backed by a Markdown or plain-text file. "Save to file" writes an inline note to a path the user picks (the dialog opens in a notes directory in the profile's data directory) and the note becomes file-backed with its links and history kept; "Make inline" imports a file note back into the store. The editor, the links, the search and the agent tools do not depend on the storage.
   - The editor shows source and rendered Markdown with the document model of R11 (an outline from the Markdown tree, structural diffs for agent edits). Plain text opens in the same editor without rendering. The editor also edits a task's description.
   - Links: a note can reference tasks, pull requests, tickets, threads and pages through the external reference index of 0033, and the reverse lookup shows the notes that mention a task. A line of the form "- [ ]" can become a task on request.
   - Search covers inline and file notes within the profile.
@@ -32,4 +32,4 @@ The user wants Markdown or plain-text notes in Agide, next to tasks, reminders a
 - A rough guess is 8 to 12 working days for the note surface with both storages and the conversions, the editor with outline and diff, search, links through the reference index, the agent tools, and mounts with the watcher, the conflict handling and the safety rules; low confidence. The editor choice (CodeMirror or Lexical, from 0020 and the libraries notes) is a design step.
 - Mounts add a node kind to the tree contract (0013): the tree needs nodes whose children come from the file system and are not stored. The tree store keeps the mount definition; the contents are read live.
 - The tasks pane (R21) is still to be built; notes and tasks share the reference index and the editor, so they are best built in the same milestone.
-- Open questions for the user: where file notes go by default (the profile's data directory, or a directory the user chooses per project); whether a mount may be read-write by default or starts read-only.
+- Settled by the user: notes start inline and the app suggests a file when a note grows large. Open question for the user: whether a mount starts read-only (the default assumed here) or read-write.
