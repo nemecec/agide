@@ -37,6 +37,10 @@ Spike to choose the base for a personal, macOS-only desktop tool for agentic cod
 | [0029](decisions/0029-milestone-3-architecture-and-contracts.md) | accepted | Milestone 3 slices, srt and container providers, probe results that amend 0010, 0011, 0019 and 0022, modules, contracts, launch contributions, ownership, init order; changes after review |
 | [0030](decisions/0030-milestone-3-results.md) | accepted | Milestone 3 results: slices against R12, R13, R15, R16, R17, R24 and S2, isolation providers, amendments to 0004, 0010, 0011, 0019, 0022 and 0028, review fixes, tests and coverage, measured effort and re-estimate, milestone 4 |
 | [0031](decisions/0031-on-screen-check-results.md) | accepted | On-screen check of the milestone 2 and 3 UI: capture sources and gaps, reviewed defects by severity, fixes with after screenshots, open questions, verification, measured effort |
+| [0032](decisions/0032-visual-design-and-themes.md) | proposed | R25 visual design and themes: tokens, themes as data, a System default that follows the OS, VS Code theme import |
+| [0033](decisions/0033-apps-background-integrations-and-routing.md) | proposed | R26 apps: GitHub, Jira, Slack, Notion and Google sources, routing with an agent fallback, the Slack app scopes and its approval status |
+| [0034](decisions/0034-notes-requirement.md) | proposed | R27 notes (inline first, file-backed on request) and live read-only mounts |
+| [0035](decisions/0035-visual-design-system.md) | proposed | The visual design brief: token values for Agide Light, Dark and System, components, chrome, icons, theme file format, VS Code import mapping, contrast tables, migration steps |
 
 0007 is accepted for the base through 0012. 0004 needs the amendments listed in 0014, 0024 and 0030; 0019 those in 0024, 0029 and 0030; 0021 those in 0024; 0010, 0011 and 0022 those in 0029 and 0030; 0028 those in 0030.
 
@@ -92,6 +96,7 @@ The greenfield app lives in `../app/` in this repository. `../app/README.md` cov
 | `probes-m3-permissions.md` | Milestone 3 probes P20 to P24: ask rules in auto mode, `PreToolUse` hook decisions and precedence, permission modes, sandbox settings and `strictAllowlist`, folder trust; reviewer re-run |
 | `probes-m3-isolation.md` | Milestone 3 probes I1 to I3: Anthropic's sandbox runtime (srt) with the real claude, Docker and OpenShell with a fake claude; host changes and what remains on the host |
 | `onscreen-check.md` | On-screen check of the milestone 2 and 3 UI: capture sources, the screens, the capture agent's defects V-01 to V-22, what the screenshots do not show, and the fixes with their after screenshots (0031) |
+| `visual-design-audit.md` | Audit for the visual design: inventory of the UI and its styles, verified Electron and CSS platform facts, library and theme licenses, VS Code theme data; `scripts/token-contrast.mjs` computes the contrast tables |
 
 The R16 to R19 notes and `surfaces-candidates.md` end with a "Review corrections" section that lists what the independent review changed.
 
