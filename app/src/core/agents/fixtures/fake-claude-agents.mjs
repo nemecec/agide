@@ -57,12 +57,14 @@ function appendLines(file, count, input) {
 
 const agentFile = (id) => join(subagentDir, `agent-${id}.jsonl`);
 process.stdout.write('fake-claude-agents ready\r\n> ');
+// Raw mode comes before SessionStart: a reader that types as soon as the session reports it has started
+// finds Enter arriving as \r, not turned into \n by the line discipline.
+process.stdin.setRawMode?.(true);
+process.stdin.setEncoding('utf8');
 runHooks('SessionStart', { source: resumed ? 'resume' : 'startup' });
 runStatusLine(0, 1);
 
 let line = '';
-process.stdin.setRawMode?.(true);
-process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk) => {
   for (const ch of chunk.replace(/\x1b\[20[01]~/g, '')) {
     if (ch !== '\r') {

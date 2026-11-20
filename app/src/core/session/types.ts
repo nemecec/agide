@@ -86,7 +86,7 @@ export interface SessionService {
   stop(id: SessionId): Promise<void>;
   /** Stores the mode the next launch passes, for example the mode the CLI reported after a Shift+Tab switch. */
   setPermissionMode(id: SessionId, mode: PermissionMode): void;
-  /** Types `text` as a prompt and submits it. */
+  /** Types `text` as a prompt and submits it. Text sent while the session is `starting` is typed once it leaves `starting`. */
   sendText(id: SessionId, text: string): void;
   /** Passes raw terminal input (keystrokes, paste) to the PTY unchanged. */
   write(id: SessionId, data: string): void;

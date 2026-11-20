@@ -99,6 +99,12 @@ interface Entry {
   inbox?: HookInbox | undefined;
   /** Resolves when the current process has ended. */
   ended?: Promise<void>;
+  /**
+   * Resolves when the current process leaves `starting`: on its first `SessionStart` or when it ends. Until then
+   * the CLI may show the folder-trust dialog or not read its terminal yet, so typed prompts wait for it.
+   */
+  started: Promise<void>;
+  markStarted?: (() => void) | undefined;
   /** First prompt, typed once after the first `SessionStart`. */
   pendingPrompt?: string | undefined;
   /** True while `mcp.json` exists; the first `SessionStart` removes it, since the CLI has read it by then. */
@@ -142,6 +148,7 @@ export class PtySessionService implements SessionService {
         cols: DEFAULT_COLS,
         rows: DEFAULT_ROWS,
         typing: Promise.resolve(),
+        started: Promise.resolve(),
       });
     }
   }
@@ -164,6 +171,7 @@ export class PtySessionService implements SessionService {
       rows: input.rows ?? DEFAULT_ROWS,
       pendingPrompt: input.prompt,
       typing: Promise.resolve(),
+      started: Promise.resolve(),
     };
     this.entries.set(info.id, entry);
     try {
@@ -230,7 +238,9 @@ export class PtySessionService implements SessionService {
   sendText(id: SessionId, text: string): void {
     const entry = this.requireRunning(id);
     const proc = entry.process;
+    const started = entry.started;
     entry.typing = entry.typing.then(async () => {
+      await started;
       if (entry.process !== proc) return;
       proc?.write(text.includes('\n') ? `\x1b[200~${text}\x1b[201~` : text);
       await sleep(this.submitDelayMs);
@@ -345,6 +355,7 @@ export class PtySessionService implements SessionService {
         throw error;
       }
       environment.attach(info.id, proc.pid);
+      entry.started = new Promise<void>((resolve) => (entry.markStarted = resolve));
       entry.inbox = inbox;
       entry.process = proc;
       entry.environment = environment;
@@ -431,6 +442,10 @@ export class PtySessionService implements SessionService {
     const previous = entry.info;
     const next = change(previous);
     entry.info = next;
+    if (next.status !== 'starting') {
+      entry.markStarted?.();
+      entry.markStarted = undefined;
+    }
     if (next.status !== previous.status) this.emit({ type: 'session.status_changed', session: next, previous: previous.status });
     return next;
   }

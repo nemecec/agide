@@ -42,12 +42,14 @@ const size = () => `size=${process.stdout.columns}x${process.stdout.rows}\r\n`;
 process.stdout.on('resize', () => process.stdout.write(size()));
 
 process.stdout.write(`fake-claude ready ${size()}> `);
+// Raw mode comes before SessionStart: a reader that types as soon as the session reports it has started
+// finds Enter arriving as \r, not turned into \n by the line discipline.
+process.stdin.setRawMode?.(true);
+process.stdin.setEncoding('utf8');
 runHooks('SessionStart', { source: resumed ? 'resume' : 'startup' });
 
 let line = '';
 let awaitingPermission = false;
-process.stdin.setRawMode?.(true);
-process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk) => {
   for (const ch of chunk.replace(/\x1b\[20[01]~/g, '')) {
     if (ch !== '\r') {

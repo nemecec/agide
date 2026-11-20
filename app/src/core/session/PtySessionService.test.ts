@@ -224,6 +224,15 @@ describe('state from hook events', () => {
     await until('both turns', () => hooks(session.id).filter((h) => h === 'Stop').length === 2);
     expect(output(session.id), 'both echoes').toMatch(/echo: one[\s\S]*echo: two/);
   });
+
+  it('types text sent while the session starts once SessionStart has arrived', async () => {
+    start();
+    const session = await service.create({ folderId: FOLDER, cwd: workdir });
+    service.sendText(session.id, 'early');
+    await until('turn end', () => hooks(session.id).includes('Stop'));
+    expect(hooks(session.id), 'hook events in order').toEqual(['SessionStart', 'UserPromptSubmit', 'Stop']);
+    expect(output(session.id), 'prompt echoed by the process').toContain('echo: early');
+  });
 });
 
 describe('exit and resume', () => {
