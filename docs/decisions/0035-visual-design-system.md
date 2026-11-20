@@ -1,6 +1,6 @@
 # 0035 Visual design system
 
-Status: proposed
+Status: accepted by the user on 2026-11-21 with the agent's defaults (the direction of this brief; System follows the macOS accent while Agide Light and Dark keep the Agide blue; the title bar shows the profile tile and a 2 px border without a tint; the two ports GitHub Dark Default and Catppuccin Mocha)
 Date: 2026-11-18
 Decided by: spike agents, pending user confirmation
 Inputs: 0032 (direction: tokens, themes as data, System default, VS Code import, Radix, one icon set, theme commands); `notes/visual-design-audit.md` (inventory, platform facts, licenses, VS Code theme data); 0031 and `notes/onscreen-check.md` (defects V-01 to V-22 and R-01 to R-30); 0020 (layout commands, revision history, parity); the screenshots of the latest full `pnpm visual-check` run and `docs/images/agide-overview.png`; `notes/scripts/token-contrast.mjs` (the contrast check written for this record)

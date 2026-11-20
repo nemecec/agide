@@ -1,6 +1,6 @@
 # 0032 Visual design and themes
 
-Status: proposed (the user asked for a better look and decided that the default matches the OS; the rest of the direction is an agent proposal)
+Status: accepted by the user on 2026-11-21 (the direction, with the System default decided on 2026-11-18); refined by 0035
 Date: 2026-11-18
 Decided by: Neeme (request); spike agents (direction)
 Adds: R25 visual design and themes (weight 2 proposed)
