@@ -47,5 +47,6 @@ Facts from the research of 2026-11-18:
 
 - A rough guess is 12 to 18 working days for the app framework with manifest and approval, the GitHub and Jira sources, the reference index, routing with the agent fallback and the Triage list, and a first Slack slice; low confidence. Notion, Google Docs and Gmail are separate slices after it.
 - Probes before the build: whether the `gh` token works for the notifications endpoints; Jira polling with an API token (rate limits, comment events through `updated` plus the comment list); the Slack registration in the user's workspace and the user-token scopes needed (the user's step); the routing agent's accuracy on recorded events; Notion comment polling on a test page.
+- Status of the Slack slice (2026-11-20): the user's workspace requires approval for the app, so the Slack app waits for the approval. `docs/slack-app-manifest.json` holds the manifest to paste when the request is made or approved; it lists the scopes of this record. The GitHub and Jira sources do not depend on Slack and go first.
 - The reference index (`external_refs`) is a small addition to the tree and inbox stores (0021).
 - Open question for the user: does the workspace allow members to install apps, or is approval required? The user checks by creating the app and pressing Install; the button states whether approval is needed.
