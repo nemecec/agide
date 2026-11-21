@@ -68,7 +68,9 @@ export function TitleBar({ view, onShowInbox }: TitleBarProps) {
             aria-disabled={onShowInbox ? undefined : true}
             onClick={onShowInbox}
           />
-          {unread > 0 ? <Badge className="title-bar-unread" count={unread} label="unread" data-testid="title-bar-unread" /> : null}
+          <span className="title-bar-unread-slot" data-testid="title-bar-unread-slot" data-capture-scoped="">
+            {unread > 0 ? <Badge count={unread} label="unread" data-testid="title-bar-unread" /> : null}
+          </span>
         </span>
         <IconButton label="Settings" icon={PANE_ICONS.settings.icon} size="lg" data-testid="title-bar-settings" onClick={() => openDialog({ kind: 'settings' })} />
       </div>

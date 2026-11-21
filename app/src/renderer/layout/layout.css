@@ -21,6 +21,7 @@
 }
 
 .pane-tab {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--agide-space-1_5);
@@ -75,6 +76,23 @@
   place-items: center;
   background: var(--agide-surface-sidebar);
   color: var(--agide-text-secondary);
+}
+
+.pane-tab[data-capture-mask]::after {
+  content: '';
+  border-radius: inherit;
+}
+
+[data-capture-scoped-mask] [data-capture-scoped]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: var(--agide-z-capture-mask);
+  background: var(--agide-surface-sidebar);
+}
+
+[data-capture-scoped-mask] [data-capture-scoped] > * {
+  visibility: hidden;
 }
 
 .pane-frame > .tree-pane,

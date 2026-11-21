@@ -7,7 +7,7 @@ export interface ViewStill {
   readonly leafId: string;
   /** CSS pixels of the app window, as the renderer reported them. */
   readonly bounds: Bounds;
-  /** `data:image/png;base64,...`; absent when the capture failed. */
+  /** `data:image/png;base64,...`; absent when the capture failed or stayed blank. */
   readonly dataUrl?: string;
 }
 
@@ -29,8 +29,14 @@ export interface BrowserViews extends TabRuntime {
   suspend(): Promise<ViewStill[]>;
   /** Shows the views `suspend` hid. */
   resume(): void;
-  /** The views that are placed in the window now, with a capture of each when `capture` is true. */
-  visibleViews(capture: boolean): Promise<ViewStill[]>;
+  /**
+   * The views that are placed in the window now, with a capture of each view `capture` selects (all of them for
+   * true, none for false, or the leaves a predicate accepts); the pixels of the others are never read. A capture
+   * that is empty or fully transparent (no frame painted yet, or no display surface for a hidden window) is
+   * tried again for up to `patienceMs`; a view that still has none is reported without `dataUrl`. Every call
+   * to the capture is bounded, so the result arrives within the patience, or a fixed cap without patience.
+   */
+  visibleViews(capture: boolean | ((leafId: string) => boolean), patienceMs?: number): Promise<ViewStill[]>;
   clearSiteData(service: ServiceId): Promise<void>;
   openDevTools(leafId: string): void;
   zoom(leafId: string, factor: number): void;

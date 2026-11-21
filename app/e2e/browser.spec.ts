@@ -118,8 +118,8 @@ async function appClient(): Promise<Client> {
 const text = (result: unknown): string => ((result as { content: { type: string; text?: string }[] }).content.find((part) => part.type === 'text')?.text ?? '');
 const call = async (client: Client, name: string, args: Record<string, unknown> = {}) => client.callTool({ name, arguments: args });
 
-/** The pixel of a PNG (8-bit RGBA or RGB, not interlaced) as [r, g, b]. */
-function pixelOf(png: Buffer, x: number, y: number): [number, number, number] {
+/** The rows of a PNG (8-bit RGBA or RGB, not interlaced) with their bytes per pixel. */
+function decodePng(png: Buffer): { channels: number; rows: Buffer[] } {
   let offset = 8;
   let width = 0;
   let height = 0;
@@ -153,8 +153,26 @@ function pixelOf(png: Buffer, x: number, y: number): [number, number, number] {
     }
     rows.push(line);
   }
-  const row = rows[y] ?? Buffer.alloc(stride);
+  return { channels, rows };
+}
+
+/** The pixel of a PNG as [r, g, b]. */
+function pixelOf(png: Buffer, x: number, y: number): [number, number, number] {
+  const { channels, rows } = decodePng(png);
+  const row = rows[y] ?? Buffer.alloc(0);
   return [row[x * channels] ?? 0, row[x * channels + 1] ?? 0, row[x * channels + 2] ?? 0];
+}
+
+/** The distinct colours of a PNG inside a rectangle of device pixels, as "r,g,b". */
+function coloursIn(png: Buffer, rect: { x: number; y: number; width: number; height: number }): Set<string> {
+  const { channels, rows } = decodePng(png);
+  const colours = new Set<string>();
+  for (let y = Math.floor(rect.y); y < Math.ceil(rect.y + rect.height); y++) {
+    const row = rows[y];
+    if (!row) continue;
+    for (let x = Math.floor(rect.x); x < Math.ceil(rect.x + rect.width); x++) colours.add(`${row[x * channels] ?? 0},${row[x * channels + 1] ?? 0},${row[x * channels + 2] ?? 0}`);
+  }
+  return colours;
 }
 
 function paeth(a: number, b: number, c: number): number {
@@ -353,16 +371,26 @@ test('refuses surfaces_observe, the tools and the window capture once the user s
     const w = globalThis as unknown as { innerWidth: number; innerHeight: number };
     return { width: w.innerWidth, height: w.innerHeight };
   });
-  const sample = async (): Promise<[number, number, number]> => {
+  const sample = async (): Promise<{ pixel: [number, number, number]; unavailable: string[] }> => {
     const capture = await call(app, 'ui_capture_window');
     const image = (capture as { content: { type: string; data?: string }[] }).content.find((part) => part.type === 'image');
     const png = Buffer.from(image?.data ?? '', 'base64');
     const scale = png.readUInt32BE(16) / windowSize.width;
-    return pixelOf(png, Math.round((slotBox.x + slotBox.width - 40) * scale), Math.round((slotBox.y + slotBox.height - 40) * scale));
+    const details = JSON.parse(text(capture)) as { unavailable?: string[] };
+    return {
+      pixel: pixelOf(png, Math.round((slotBox.x + slotBox.width - 40) * scale), Math.round((slotBox.y + slotBox.height - 40) * scale)),
+      unavailable: details.unavailable ?? [],
+    };
   };
 
-  const shown = await sample();
-  expect(shown[1] - shown[0], 'with observation on the capture shows the page (green background, not grey)').toBeGreaterThan(60);
+  let last = await sample();
+  await expect
+    .poll(async () => {
+      last = await sample();
+      return last.pixel[1] - last.pixel[0];
+    }, { message: 'with observation on the capture shows the page (green background, not grey)', timeout: 10_000 })
+    .toBeGreaterThan(60);
+  expect(last.unavailable, 'the product had a painted frame of the shared tab').toEqual([]);
 
   await page.getByTestId('observation-button').click();
   await page.getByRole('radio', { name: 'Off' }).click();
@@ -378,13 +406,180 @@ test('refuses surfaces_observe, the tools and the window capture once the user s
   expect(listed, 'listed without the URL').not.toContain('127.0.0.1');
   expect(listed, 'with the reason').toContain('observation off');
 
-  const masked = await sample();
+  const { pixel: masked } = await sample();
   expect(Math.abs(masked[0] - masked[1]) + Math.abs(masked[1] - masked[2]), 'the capture draws the grey "not shared" mask in place of the page').toBeLessThan(15);
   expect(masked[1], 'a dark grey').toBeLessThan(130);
 
   await page.getByRole('radio', { name: 'On demand' }).click();
   await expect(page.getByTestId('observation-indicator').first(), 'indicator shows on demand again').toHaveAttribute('data-mode', 'on-demand');
   expect(text(await call(app, 'surfaces_observe', { nodeId: tab, kind: 'text' })), 'readable again after the user switches it on').toContain('Fixture heading');
+});
+
+/** The ids a window capture names as masked and as unavailable, as the agent receives them. */
+async function captureDetails(app: Client): Promise<{ unavailable: string[]; masked: string[] }> {
+  const details = JSON.parse(text(await call(app, 'ui_capture_window'))) as { unavailable?: string[]; masked?: string[] };
+  return { unavailable: details.unavailable ?? [], masked: details.masked ?? [] };
+}
+
+/** A window capture as an agent receives it: the PNG, the result fields and the factor from page pixels to image pixels. */
+async function captureWindow(app: Client, page: Page): Promise<{ png: Buffer; scale: number; masked: string[]; unavailable: string[]; elapsedMs: number }> {
+  const started = Date.now();
+  const capture = await call(app, 'ui_capture_window');
+  const elapsedMs = Date.now() - started;
+  const image = (capture as { content: { type: string; data?: string }[] }).content.find((part) => part.type === 'image');
+  const png = Buffer.from(image?.data ?? '', 'base64');
+  const innerWidth = await page.evaluate(() => (globalThis as unknown as { innerWidth: number }).innerWidth);
+  const details = JSON.parse(text(capture)) as { masked?: string[]; unavailable?: string[] };
+  return { png, scale: png.readUInt32BE(16) / innerWidth, masked: details.masked ?? [], unavailable: details.unavailable ?? [], elapsedMs };
+}
+
+/** The colours a page element shows in a capture, as the set of "r,g,b" inside its rectangle, less a 2 page pixel edge that antialiasing may blend. */
+async function coloursOfElement(page: Page, selector: string, shot: { png: Buffer; scale: number }): Promise<Set<string>> {
+  const box = await page.locator(selector).first().boundingBox();
+  if (!box) throw new Error(`${selector} has no box`);
+  const edge = 2;
+  return coloursIn(shot.png, { x: (box.x + edge) * shot.scale, y: (box.y + edge) * shot.scale, width: (box.width - 2 * edge) * shot.scale, height: (box.height - 2 * edge) * shot.scale });
+}
+
+/** The colour of the pixel 3 page pixels inside the top-left corner of an element, as "r,g,b". */
+async function cornerColour(page: Page, selector: string, shot: { png: Buffer; scale: number }): Promise<string> {
+  const box = await page.locator(selector).first().boundingBox();
+  if (!box) throw new Error(`${selector} has no box`);
+  return pixelOf(shot.png, Math.round((box.x + 3) * shot.scale), Math.round((box.y + 3) * shot.scale)).join(',');
+}
+
+/** The colour of a masked pane: the corner of the task tree, which the capture always masks for an agent. */
+const maskColour = (page: Page, shot: { png: Buffer; scale: number }): Promise<string> => cornerColour(page, '[data-instance-id="tree"]', shot);
+
+/** Expects the chrome of the open tab and the dock tab of the main pane to show nothing but the mask. */
+async function expectChromeMasked(page: Page, shot: { png: Buffer; scale: number }, why: string): Promise<void> {
+  const mask = await maskColour(page, shot);
+  expect([...(await coloursOfElement(page, '[data-testid="browser-chrome"]', shot))], `${why}: the tab chrome with its title, badge and address shows only the mask colour`).toEqual([mask]);
+  expect([...(await coloursOfElement(page, '[data-pane-tab="main"]', shot))], `${why}: the dock tab of the pane shows only the mask colour`).toEqual([mask]);
+}
+
+test('names a shared tab that never loaded in the window capture result', async () => {
+  const page = await launch();
+  const folderId = await createFolder(page, 'Work');
+  const tab = await createTab(page, folderId);
+  await openLeaf(page, 'New tab');
+  await startSession(page, folderId);
+  const app = await appClient();
+
+  const { unavailable } = await captureDetails(app);
+  expect(unavailable, 'the capture names the view it could not capture').toEqual([tab]);
+});
+
+test('does not name or wait for a blank tab of another folder that sits in a masked pane', async () => {
+  const page = await launch();
+  const work = await createFolder(page, 'Work');
+  const otherFolder = await createFolder(page, 'Other');
+  await createTab(page, work);
+  const foreign = await createTab(page, otherFolder);
+  await startSession(page, work);
+  const app = await appClient();
+  const focused = await invoke(page, 'ui_focus_node', { nodeId: foreign });
+  expect(focused.ok, 'the user focuses the tab of the other folder').toBe(true);
+  await expect(page.getByTestId('browser-pane'), 'the other tab is open in the surface host').toBeVisible();
+  await expect
+    .poll(
+      async () => {
+        const user = await invoke<{ unavailable?: string[] }>(page, 'ui_capture_window', {});
+        return user.ok ? (user.value.unavailable ?? []) : [];
+      },
+      { message: 'a capture of the user lists the blank view of the other folder, so the native view is placed before the agent captures', timeout: 10_000 },
+    )
+    .toContain(foreign);
+
+  const started = Date.now();
+  const { unavailable, masked } = await captureDetails(app);
+  const elapsed = Date.now() - started;
+  expect(masked, 'the pane that shows the other folder is masked').toContain('main');
+  expect(unavailable, 'the node id of a tab outside the folder is not in the result').not.toContain(foreign);
+  expect(unavailable, 'nothing in scope is unavailable').toEqual([]);
+  expect(elapsed, 'the capture did not wait for the blank view of the other folder').toBeLessThan(1400);
+});
+
+test('masks the pane of the other folder when the user opens it while the capture waits for a blank tab of the agent', async () => {
+  const page = await launch();
+  const work = await createFolder(page, 'Work');
+  const otherFolder = await createFolder(page, 'Other');
+  await createTab(page, work);
+  const foreign = await createTab(page, otherFolder, `${origin}/`);
+  await openLeaf(page, 'New tab');
+  await expect.poll(() => tabTitleOf(page, foreign), { message: 'the tab of the other folder has loaded' }).toBe('Fixture page');
+  await startSession(page, work);
+  const app = await appClient();
+
+  const pending = captureWindow(app, page);
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const focused = await invoke(page, 'ui_focus_node', { nodeId: foreign });
+  expect(focused.ok, 'the user focuses the tab of the other folder during the wait').toBe(true);
+  await expect(page.locator('[data-pane-tab="main"]'), 'the window shows the title of the other tab').toContainText('Fixture page');
+  const shot = await pending;
+
+  expect(shot.elapsedMs, 'the capture waited for the blank tab of the agent').toBeGreaterThan(1000);
+  expect(shot.masked, 'the pane that now shows the other folder is in the applied mask').toContain('main');
+  await expectChromeMasked(page, shot, 'opened during the wait');
+  expect(shot.unavailable, 'the other tab is not named').not.toContain(foreign);
+});
+
+test('masks a surface host that is bound by value to a tab of another folder, and refuses an agent that binds it', async () => {
+  const page = await launch();
+  const work = await createFolder(page, 'Work');
+  const otherFolder = await createFolder(page, 'Other');
+  const own = await createTab(page, work, `${origin}/`);
+  const foreign = await createTab(page, otherFolder, `${origin}/`);
+  await invoke(page, 'ui_focus_node', { nodeId: own });
+  await expect(page.getByTestId('browser-pane'), 'the own tab is open in the surface host').toBeVisible();
+  await expect.poll(() => tabTitleOf(page, foreign), { message: 'the tab of the other folder has loaded' }).toBe('Fixture page');
+  await startSession(page, work);
+  const app = await appClient();
+  const bind = [{ op: 'add', path: '/instances/main/bindings/node', value: { value: foreign } }];
+  const revisionOf = async (): Promise<number> => {
+    const layout = await invoke<{ revision: number }>(page, 'layout_get', {});
+    if (!layout.ok) throw new Error(layout.error.message);
+    return layout.value.revision;
+  };
+
+  const refused = await call(app, 'layout_apply', { expectedRevision: await revisionOf(), patch: bind });
+  expect(refused.isError, 'an agent cannot bind a pane to a tab of another folder').toBe(true);
+  expect(text(refused), 'the refusal says why').toContain('not in your folder');
+  expect(await revisionOf(), 'the layout is unchanged').toBe(1);
+
+  const applied = await invoke(page, 'layout_apply', { expectedRevision: 1, patch: bind });
+  expect(applied.ok, 'the user binds the pane by value').toBe(true);
+  await expect(page.locator('[data-pane-tab="main"]'), 'the pane shows the other tab').toContainText('Fixture page');
+  const shot = await captureWindow(app, page);
+  expect(shot.masked, 'the pane bound by value to the other folder is masked').toContain('main');
+  await expectChromeMasked(page, shot, 'bound by value');
+});
+
+test('masks a pane that lists agents, usage or transcripts, which show every folder', async () => {
+  const page = await launch();
+  const work = await createFolder(page, 'Work');
+  await createFolder(page, 'Other');
+  const own = await createTab(page, work, `${origin}/`);
+  await openLeaf(page, new URL(origin).hostname);
+  await expect.poll(() => tabTitleOf(page, own), { message: 'the own tab has loaded' }).toBe('Fixture page');
+  await startSession(page, work);
+  const app = await appClient();
+  const revision = await invoke<{ revision: number }>(page, 'layout_get', {});
+  if (!revision.ok) throw new Error(revision.error.message);
+  const added = await call(app, 'layout_apply', {
+    expectedRevision: revision.value.revision,
+    patch: [
+      { op: 'add', path: '/instances/history', value: { type: 'agide/agent-history', version: '^1', configVersion: 1, config: {} } },
+      { op: 'add', path: '/arrangement/children/-', value: { size: 2, tabs: { panes: ['history'], active: 'history' } } },
+    ],
+  });
+  expect(added.isError, `the agent adds the pane: ${text(added)}`).toBeFalsy();
+  await expect(page.getByTestId('agent-history-pane'), 'the pane shows in the window').toBeVisible();
+
+  const shot = await captureWindow(app, page);
+  expect(shot.masked, 'the pane is in the mask').toContain('history');
+  expect(shot.masked, 'the surface host of the own tab is not').not.toContain('main');
+  expect(await cornerColour(page, '[data-instance-id="history"]', shot), 'the pane shows the mask colour, not its table').toBe(await maskColour(page, shot));
 });
 
 test('asks the user before an agent loads an origin outside loopback and carries out the answer', async () => {

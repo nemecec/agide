@@ -1,7 +1,7 @@
 import type { ViewStill } from './views';
 
 /**
- * Script that draws each still (or a "not shared" mask) over its slot, waits two frames and returns. The window
+ * Script that draws each still (or a mask) over its slot, waits until the images are decoded and two frames have passed, and returns. The window
  * capture takes the image after it; `removeOverlayScript` takes the elements away again. A capture of the
  * app window does not include child views (probe, 2026-11-17), so the capture composes.
  */
@@ -14,12 +14,27 @@ export const OVERLAY_ATTRIBUTE = 'data-capture-view';
  */
 export const STILL_Z_INDEX = 9;
 
+export const NOT_SHARED_LABEL = 'not shared';
+export const NOT_CAPTURED_LABEL = 'page not captured';
+
+/**
+ * Draws each item as a still, a "not shared" fill or a "page not captured" fill at its bounds. An item whose
+ * slot is not in the document when the script runs is skipped. The script returns the leaf ids it drew as
+ * "page not captured".
+ */
 export function overlayScript(items: readonly (ViewStill & { readonly shared: boolean })[]): string {
   return `(() => {
-  const items = ${JSON.stringify(items.map((item) => ({ leafId: item.leafId, bounds: item.bounds, dataUrl: item.shared ? (item.dataUrl ?? null) : null })))};
+  const items = ${JSON.stringify(items.map((item) => ({ leafId: item.leafId, bounds: item.bounds, dataUrl: item.shared ? (item.dataUrl ?? null) : null, label: item.shared ? NOT_CAPTURED_LABEL : NOT_SHARED_LABEL })))};
+  const unavailable = [];
   for (const item of items) {
-    const slot = document.querySelector('[data-browser-slot="' + CSS.escape(item.leafId) + '"]');
-    if (slot && slot.closest('[data-capture-mask]')) item.dataUrl = null;
+    const slot = [...document.querySelectorAll('[data-browser-slot]')].find((candidate) => candidate.getAttribute('data-browser-slot') === item.leafId);
+    if (!slot) continue;
+    if (slot.closest('[data-capture-mask]')) {
+      item.dataUrl = null;
+      item.label = ${JSON.stringify(NOT_SHARED_LABEL)};
+    } else if (!item.dataUrl && item.label === ${JSON.stringify(NOT_CAPTURED_LABEL)}) {
+      unavailable.push(item.leafId);
+    }
     const el = document.createElement('div');
     el.setAttribute('${OVERLAY_ATTRIBUTE}', '');
     const b = item.bounds;
@@ -31,11 +46,12 @@ export function overlayScript(items: readonly (ViewStill & { readonly shared: bo
       el.appendChild(img);
     } else {
       el.style.cssText += 'background:#555;color:#fff;font:14px system-ui;display:flex;align-items:center;justify-content:center;';
-      el.textContent = 'not shared';
+      el.textContent = item.label;
     }
     document.body.appendChild(el);
   }
-  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))));
+  const decoded = [...document.querySelectorAll('[${OVERLAY_ATTRIBUTE}] img')].map((img) => img.decode().catch(() => undefined));
+  return Promise.all(decoded).then(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(unavailable)))));
 })()`;
 }
 

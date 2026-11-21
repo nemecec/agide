@@ -13,13 +13,13 @@ import { tabIconFor, tabTitleFor } from './tabModel';
 
 const SHOWN: readonly StatusKind[] = ['busy', 'waiting', 'failed'];
 
-function TabBody({ title, type, node }: { readonly title: string; readonly type: string; readonly node: TreeNode | undefined }) {
+function TabBody({ instanceId, title, type, node }: { readonly instanceId: string; readonly title: string; readonly type: string; readonly node: TreeNode | undefined }) {
   const sessionId = node?.kind === 'leaf' && node.surfaceType === SURFACE_CLAUDE_SESSION ? node.surfaceId : undefined;
   const status = useSessionStatus(sessionId);
   const kind = status === undefined ? undefined : sessionStatusKind(status);
   const words = tabTitleFor(title, type, node);
   return (
-    <div className="pane-tab" title={words}>
+    <div className="pane-tab" title={words} data-pane-tab={instanceId}>
       <Icon icon={tabIconFor(type, node)} size="sm" className="pane-tab-icon" />
       <span className="pane-tab-title">{words}</span>
       {kind !== undefined && SHOWN.includes(kind) ? <Chip iconOnly tone={STATUS_TONES[kind]} icon={STATUS_ICONS[kind].icon} spin={kind === 'busy'} label={STATUS_ICONS[kind].label} /> : null}
@@ -27,9 +27,9 @@ function TabBody({ title, type, node }: { readonly title: string; readonly type:
   );
 }
 
-function SurfaceHostTab({ title, type, nodeId }: { readonly title: string; readonly type: string; readonly nodeId: string | undefined }) {
+function SurfaceHostTab({ instanceId, title, type, nodeId }: { readonly instanceId: string; readonly title: string; readonly type: string; readonly nodeId: string | undefined }) {
   const { nodes } = useTreeNodes();
-  return <TabBody title={title} type={type} node={nodeId === undefined ? undefined : nodes.find((candidate) => candidate.id === nodeId)} />;
+  return <TabBody instanceId={instanceId} title={title} type={type} node={nodeId === undefined ? undefined : nodes.find((candidate) => candidate.id === nodeId)} />;
 }
 
 /** The tab of a dock panel: glyph, words, and a status chip while the shown session works, waits or failed. */
@@ -38,7 +38,7 @@ export function PaneTab({ api }: IDockviewPanelHeaderProps) {
   const instance = view.layout.instances[api.id];
   const type = instance?.type ?? '';
   const title = instance ? titleOf(view.layout, api.id) : (api.title ?? '');
-  if (type !== 'agide/surface-host') return <TabBody title={title} type={type} node={undefined} />;
+  if (type !== 'agide/surface-host') return <TabBody instanceId={api.id} title={title} type={type} node={undefined} />;
   const bound = resolveInputs(instance?.bindings, context)['node'];
-  return <SurfaceHostTab title={title} type={type} nodeId={typeof bound === 'string' ? bound : undefined} />;
+  return <SurfaceHostTab instanceId={api.id} title={title} type={type} nodeId={typeof bound === 'string' ? bound : undefined} />;
 }

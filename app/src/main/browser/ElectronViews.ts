@@ -12,6 +12,24 @@ import { isAbortedLoad, isAgentDownload, nativeBounds, PARKED_BOUNDS, pickEvicti
 const MAX_LIVE = 8;
 const IDLE_DETACH_MS = 5 * 60_000;
 const LOAD_TIMEOUT_MS = 30_000;
+const CAPTURE_RETRY_MS = 100;
+const CAPTURE_CALL_CAP_MS = 2000;
+const CAPTURE_CALL_FLOOR_MS = 500;
+
+/** The image of the contents, or undefined when no frame arrives within `ms`. A late result is dropped. */
+async function capturePageWithin(contents: WebContentsView['webContents'], ms: number): Promise<Awaited<ReturnType<WebContentsView['webContents']['capturePage']>> | undefined> {
+  const capture = contents.capturePage();
+  capture.catch(() => undefined);
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), Math.max(ms, 0));
+  });
+  try {
+    return await Promise.race([capture, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 interface Entry {
   readonly leafId: string;
@@ -316,18 +334,38 @@ export class ElectronViews implements BrowserViews {
     entry.view.setBounds(PARKED_BOUNDS);
   }
 
-  async visibleViews(capture: boolean): Promise<ViewStill[]> {
+  /**
+   * PNG data URL of the view once it has a painted frame, or undefined when none arrives within `patienceMs`.
+   * Without patience one call is made, cut at the call cap. With patience a call is cut at the time left, but at
+   * least the floor, so a slow first frame of a painted view is not dropped. No call starts at or after the
+   * deadline, so a capture returns after `patienceMs` plus the floor at most.
+   */
+  private async captureStill(entry: Entry, patienceMs: number): Promise<string | undefined> {
+    const contents = entry.view.webContents;
+    const deadline = Date.now() + patienceMs;
+    for (;;) {
+      try {
+        const callMs = patienceMs === 0 ? CAPTURE_CALL_CAP_MS : Math.max(deadline - Date.now(), Math.min(CAPTURE_CALL_CAP_MS, CAPTURE_CALL_FLOOR_MS));
+        const image = await capturePageWithin(contents, callMs);
+        if (image !== undefined && !image.isEmpty() && image.toBitmap().some((byte) => byte !== 0)) return `data:image/png;base64,${image.toPNG().toString('base64')}`;
+      } catch {
+        // No display surface yet, or the contents are going away.
+      }
+      if (contents.isDestroyed() || Date.now() >= deadline) return undefined;
+      await new Promise((resolve) => setTimeout(resolve, CAPTURE_RETRY_MS));
+      if (Date.now() >= deadline) return undefined;
+    }
+  }
+
+  async visibleViews(capture: boolean | ((leafId: string) => boolean), patienceMs = 0): Promise<ViewStill[]> {
+    const wanted = typeof capture === 'function' ? capture : () => capture;
     const shown = [...this.entries.values()].filter((entry) => entry.placed && entry.bounds !== undefined);
     return Promise.all(
       shown.map(async (entry) => {
         const bounds = entry.bounds as Bounds;
-        if (!capture) return { leafId: entry.leafId, bounds };
-        try {
-          const image = await entry.view.webContents.capturePage();
-          return { leafId: entry.leafId, bounds, dataUrl: `data:image/png;base64,${image.toPNG().toString('base64')}` };
-        } catch {
-          return { leafId: entry.leafId, bounds };
-        }
+        if (!wanted(entry.leafId)) return { leafId: entry.leafId, bounds };
+        const dataUrl = await this.captureStill(entry, patienceMs);
+        return dataUrl === undefined ? { leafId: entry.leafId, bounds } : { leafId: entry.leafId, bounds, dataUrl };
       }),
     );
   }

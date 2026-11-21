@@ -1,6 +1,8 @@
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { CONTEXT_KEYS } from '../blocks/context';
-import { layoutDocumentSchema } from '../blocks/layout';
+import { PANE_TYPES } from '../blocks/firstParty';
+import { layoutDocumentSchema, type LayoutDocument } from '../blocks/layout';
 import type { BlockRegistry } from '../blocks/types';
 import type { CommandRegistry } from '../commands/CommandRegistry';
 import type { ImageResult } from '../commands/imageResult';
@@ -15,8 +17,28 @@ import { validateLayoutDocument } from './validate';
 
 export const MAIN_WINDOW = 'main';
 
-/** Takes a PNG of the window. `masked` lists the pane instances to hide first. Provided by the Electron side. */
-export type WindowCapturer = (masked: readonly string[]) => Promise<{ data: string; width: number; height: number }>;
+/** What a window capture is asked for. */
+export interface CaptureRequest {
+  /**
+   * The pane instances to hide, read from the current layout and context at each call. The capturer calls it
+   * again after it has waited for the views and after it took the pixels, so a change in between is seen.
+   */
+  readonly masked: () => readonly string[];
+  /** Set for a caller scoped to a folder: tells which tree nodes it may see; the capture reports nothing about a node it refuses. */
+  readonly inScope?: ((nodeId: string) => boolean) | undefined;
+}
+
+/** A PNG of the window with the instances that were hidden in it and the shared views that had no painted frame. */
+export interface WindowCapture {
+  readonly data: string;
+  readonly width: number;
+  readonly height: number;
+  readonly masked: readonly string[];
+  readonly unavailable?: readonly string[];
+}
+
+/** Takes a PNG of the window. Provided by the Electron side. */
+export type WindowCapturer = (request: CaptureRequest) => Promise<WindowCapture>;
 
 export interface LayoutCommandDeps {
   readonly manager: LayoutManager;
@@ -64,9 +86,28 @@ function requireWindowInScope(deps: LayoutCommandDeps, caller: Caller): void {
   }
 }
 
-function requireScopesInFolder(deps: LayoutCommandDeps, caller: Caller, layout: { instances: Record<string, { scope?: string | undefined }> }): void {
+/**
+ * Whether a value bound to the input names a node. A pane type that is not registered and the placeholder
+ * declare no inputs yet can become a type that reads one, so every value there counts as a node reference.
+ */
+function inputNamesNode(deps: LayoutCommandDeps, instance: { type: string }, input: string): boolean {
+  const paneType = deps.blocks.paneType(instance.type);
+  if (!paneType || instance.type === PANE_TYPES.placeholder) return true;
+  return paneType.pane.inputs[input]?.contextKey?.startsWith('node.') ?? false;
+}
+
+/** Node bindings that a change adds or changes, and the scope of every instance, must stay in the folder. A binding the layout already holds is not checked. */
+function requireScopesInFolder(deps: LayoutCommandDeps, caller: Caller, layout: LayoutDocument, current: LayoutDocument): void {
   if (caller.kind === 'ui') return;
   for (const [id, instance] of Object.entries(layout.instances)) {
+    for (const [name, binding] of Object.entries(instance.bindings ?? {})) {
+      if (!('value' in binding) || typeof binding.value !== 'string' || !inputNamesNode(deps, instance, name)) continue;
+      const before = current.instances[id];
+      if (before?.type === instance.type && isDeepStrictEqual(binding, before.bindings?.[name])) continue;
+      if (!deps.tree.get(binding.value) || !deps.tree.isWithin(binding.value, caller.folderId)) {
+        throw new CommandError('out_of_scope', `instance ${id}: binding ${name} names a node that is not in your folder ${caller.folderId}; bind to a node from ui_list_tree or to a context key`);
+      }
+    }
     if (instance.scope === undefined) continue;
     if (instance.scope === 'all') {
       throw new CommandError('out_of_scope', `instance ${id}: scope "all" is wider than your folder; use your folder id ${caller.folderId} or leave scope out`);
@@ -150,7 +191,7 @@ export function registerLayoutCommands(registry: CommandRegistry, deps: LayoutCo
       const layoutInput = toInput(input);
       if (caller.kind === 'mcp') {
         const checked = guarded(() => manager.validate(id, layoutInput)).report;
-        if (checked.layout) requireScopesInFolder(deps, caller, checked.layout);
+        if (checked.layout) requireScopesInFolder(deps, caller, checked.layout, guarded(() => manager.get(id)).layout);
       }
       return guarded(() => manager.apply(id, input.expectedRevision, layoutInput, caller.kind === 'ui' ? 'ui' : 'mcp'));
     },
@@ -169,7 +210,7 @@ export function registerLayoutCommands(registry: CommandRegistry, deps: LayoutCo
       const id = input.layoutId ?? manager.activeId();
       if (caller.kind === 'mcp') {
         const target = guarded(() => manager.undoTarget(id, input.toRevision));
-        if (target) requireScopesInFolder(deps, caller, target);
+        if (target) requireScopesInFolder(deps, caller, target, guarded(() => manager.get(id)).layout);
       }
       return guarded(() => manager.undo(id, input.toRevision));
     },
@@ -217,18 +258,17 @@ export function registerLayoutCommands(registry: CommandRegistry, deps: LayoutCo
     id: 'ui_capture_window',
     title: 'Capture window',
     description:
-      'Return a PNG of the app window. For an agent, the task tree and every pane bound to a node outside your folder are hidden; the result names them in "masked".',
+      'Return a PNG of the app window. For an agent, every pane except a surface host that shows a node of your folder is hidden (the task tree, the inbox, the profile rail, the agent, usage and swarm panes, and a surface host bound outside your folder); the result names the hidden instances in "masked". A browser view that had no painted page to show is drawn as a "page not captured" placeholder and named in "unavailable".',
     input: z.strictObject({}),
     ui: { menu: 'app' },
     mcp: true,
     run: async (_input, { caller }): Promise<ImageResult> => {
+      const inScope = caller.kind === 'ui' ? undefined : (nodeId: string) => tree.isWithin(nodeId, caller.folderId);
+      const masked = (): string[] =>
+        inScope === undefined ? [] : maskedInstances(manager.get().layout, context.all(MAIN_WINDOW), inScope);
+      const shot = await deps.capture({ masked, inScope });
       const view = manager.get();
-      const masked =
-        caller.kind === 'ui'
-          ? []
-          : maskedInstances(view.layout, context.all(MAIN_WINDOW) as Record<string, string | undefined>, (nodeId) => tree.isWithin(nodeId, caller.folderId));
-      const shot = await deps.capture(masked);
-      return { type: 'image', mimeType: 'image/png', data: shot.data, width: shot.width, height: shot.height, layoutId: view.layoutId, revision: view.revision, masked };
+      return { type: 'image', mimeType: 'image/png', data: shot.data, width: shot.width, height: shot.height, layoutId: view.layoutId, revision: view.revision, masked: [...shot.masked], unavailable: [...(shot.unavailable ?? [])] };
     },
   });
 }

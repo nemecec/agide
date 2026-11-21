@@ -44,6 +44,20 @@ describe('TitleBar', () => {
     expect(bar().style.getPropertyValue('--profile-mark'), 'border colour comes from the profile').toMatch(/^#[0-9a-f]{6}$/);
   });
 
+  it('puts the unread badge in a slot that the window capture masks, because it counts the inbox of every folder', async () => {
+    answers();
+    await mount();
+    const slot = bar().querySelector('[data-testid="title-bar-unread-slot"]');
+    expect(slot?.hasAttribute('data-capture-scoped'), 'the slot carries the attribute the capture masks for a scoped caller').toBe(true);
+    expect(slot?.contains(bar().querySelector('[data-testid="title-bar-unread"]')), 'the badge sits inside the slot').toBe(true);
+  });
+
+  it('renders the masked slot also when nothing is unread, so its presence does not show whether any folder has unread items', async () => {
+    answers({ inbox_list: { items: [], unread: 0 } });
+    await mount();
+    expect(bar().querySelector('[data-testid="title-bar-unread-slot"]')?.hasAttribute('data-capture-scoped'), 'the slot exists at zero').toBe(true);
+  });
+
   it('has no profile colour for a temporary profile', async () => {
     answers({ profile_list: { ...profiles, persistent: false } });
     await mount();

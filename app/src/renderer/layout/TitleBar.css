@@ -40,9 +40,13 @@
   opacity: 0.4;
 }
 
-.title-bar-unread {
+.title-bar-unread-slot {
   position: absolute;
   top: 0;
   right: -2px;
+  display: flex;
+  justify-content: flex-end;
+  width: 28px;
+  height: 16px;
   pointer-events: none;
 }

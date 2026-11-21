@@ -50,6 +50,8 @@ import { removeOverlayScript, overlayScript } from '../browser/capture';
 import { setCaptureOverlay } from '../windowCapture';
 import type { ModuleContext, ModuleHandle } from '../context';
 
+/** How long a window capture waits for a shared view to have a painted frame. */
+const CAPTURE_PATIENCE_MS = 1500;
 const OBSERVATION_RETENTION_DAYS = 30;
 const APPROVAL_TIMEOUT_MS = Number(process.env['AGIDE_BROWSER_APPROVAL_TIMEOUT_MS'] ?? 115_000);
 const MCP_TIMEOUT_MS = 150_000;
@@ -723,14 +725,14 @@ export function init(
   // The window capture draws each shared view as a still and masks the others (0026 section 6).
   setCaptureOverlay(
     views
-      ? async () => {
-          const shown = await views.visibleViews(true);
-          const items = shown.map((still) => {
-            const record = catalog.get(still.leafId);
-            const shared = record !== undefined && tools.effectiveMode(record) !== 'off' && !isChatService(record.state.service);
-            return { ...still, shared };
-          });
-          return { apply: overlayScript(items), remove: removeOverlayScript, shared: items.filter((item) => item.shared).map((item) => item.leafId) };
+      ? async ({ inScope, maskedLeafIds }) => {
+          const sharedWithCaller = (leafId: string): boolean => {
+            const record = catalog.get(leafId);
+            return record !== undefined && tools.effectiveMode(record) !== 'off' && !isChatService(record.state.service) && (inScope?.(leafId) ?? true) && !maskedLeafIds.has(leafId);
+          };
+          const shown = await views.visibleViews(sharedWithCaller, CAPTURE_PATIENCE_MS);
+          const items = shown.map((still) => ({ ...still, shared: sharedWithCaller(still.leafId) }));
+          return { apply: overlayScript(items), remove: removeOverlayScript };
         }
       : undefined,
   );

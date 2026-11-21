@@ -167,6 +167,23 @@ describe('window capture composition', () => {
     expect(script, 'a still is not drawn over everything').not.toContain('2147483647');
     expect(removeOverlayScript, 'removal').toContain('data-capture-view');
   });
+
+  it('labels a shared view without a capture "page not captured" and waits for the images to decode', () => {
+    const script = overlayScript([
+      { leafId: 'a', bounds: { x: 1, y: 2, width: 30, height: 40 }, shared: true },
+      { leafId: 'b', bounds: { x: 5, y: 6, width: 7, height: 8 }, shared: false },
+    ]);
+    expect(script, 'a shared view with no still carries the unavailable label').toContain('"label":"page not captured"');
+    expect(script, 'a view that is not shared keeps its label').toContain('"label":"not shared"');
+    expect(script, 'the script waits for decode before it counts frames').toMatch(/\.decode\(\)[\s\S]*requestAnimationFrame/);
+  });
+});
+
+describe('window capture composition of masked panes', () => {
+  it('draws the "not shared" mask, without the still, over a slot that sits in a masked pane when the script runs', () => {
+    const script = overlayScript([{ leafId: 'a', bounds: { x: 1, y: 2, width: 30, height: 40 }, dataUrl: 'data:image/png;base64,AAAA', shared: true }]);
+    expect(script, 'the slot is looked up in the live document and the still is dropped').toMatch(/closest\('\[data-capture-mask\]'\)\) \{\s*item\.dataUrl = null;\s*item\.label = "not shared";/);
+  });
 });
 
 describe('open in Chrome', () => {

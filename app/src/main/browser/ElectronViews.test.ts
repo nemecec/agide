@@ -63,8 +63,12 @@ class FakeContents extends EventEmitter {
   setZoomFactor = (factor: number) => void (this.zoom = factor);
   getZoomFactor = () => this.zoom;
   setWindowOpenHandler = (handler: unknown) => void (this.windowOpenHandler = handler);
-  capturePage = vi.fn(async () => ({ toPNG: () => Buffer.from('png') }));
+  capturePage = vi.fn(async () => paintedImage());
 }
+
+const paintedImage = () => ({ isEmpty: () => false, toBitmap: () => Buffer.from([0, 255, 0, 255]), toPNG: () => Buffer.from('png') });
+const emptyImage = () => ({ isEmpty: () => true, toBitmap: () => Buffer.alloc(0), toPNG: () => Buffer.alloc(0) });
+const transparentImage = () => ({ isEmpty: () => false, toBitmap: () => Buffer.alloc(16), toPNG: () => Buffer.from('blank') });
 
 class FakeView {
   readonly webContents = new FakeContents();
@@ -256,6 +260,134 @@ describe('ElectronViews: placement', () => {
     views[0]!.webContents.capturePage.mockRejectedValueOnce(new Error('gone'));
     const [still] = await electronViews.visibleViews(true);
     expect(still, 'no data url').toEqual({ leafId: 'a', bounds: { x: 1, y: 2, width: 30, height: 40 } });
+  });
+
+  it('reports a view without a capture when the image is empty or fully transparent and no patience is given', async () => {
+    electronViews.ensure('a', state());
+    electronViews.place('a', { x: 1, y: 2, width: 30, height: 40 }, true);
+    views[0]!.webContents.capturePage.mockResolvedValueOnce(emptyImage() as never);
+    expect((await electronViews.visibleViews(true))[0]?.dataUrl, 'an empty image is not a still').toBeUndefined();
+    views[0]!.webContents.capturePage.mockResolvedValueOnce(transparentImage() as never);
+    expect((await electronViews.visibleViews(true))[0]?.dataUrl, 'a transparent image is not a still').toBeUndefined();
+    expect(views[0]!.webContents.capturePage, 'one attempt each without patience').toHaveBeenCalledTimes(2);
+  });
+
+  it('tries again until the view has painted a frame, within the patience given', async () => {
+    electronViews.ensure('a', state());
+    electronViews.place('a', { x: 1, y: 2, width: 30, height: 40 }, true);
+    views[0]!.webContents.capturePage
+      .mockRejectedValueOnce(new Error('Current display surface not available for capture'))
+      .mockResolvedValueOnce(emptyImage() as never)
+      .mockResolvedValueOnce(transparentImage() as never);
+    const [still] = await electronViews.visibleViews(true, 2000);
+    expect(still?.dataUrl, 'the first painted frame is the still').toBe(`data:image/png;base64,${Buffer.from('png').toString('base64')}`);
+    expect(views[0]!.webContents.capturePage, 'three failed attempts then the fourth').toHaveBeenCalledTimes(4);
+  });
+
+  it('gives up on a view that stays blank once the patience has passed', async () => {
+    electronViews.ensure('a', state());
+    electronViews.place('a', { x: 1, y: 2, width: 30, height: 40 }, true);
+    views[0]!.webContents.capturePage.mockImplementation(async () => emptyImage() as never);
+    const started = Date.now();
+    const [still] = await electronViews.visibleViews(true, 250);
+    expect(still, 'reported without a still').toEqual({ leafId: 'a', bounds: { x: 1, y: 2, width: 30, height: 40 } });
+    expect(Date.now() - started, 'waited for the patience, no longer').toBeGreaterThanOrEqual(240);
+    expect(Date.now() - started, 'stopped soon after the patience').toBeLessThan(1500);
+  });
+
+  it('reads the pixels only of the views a predicate selects', async () => {
+    electronViews.ensure('a', state());
+    electronViews.ensure('b', state());
+    electronViews.place('a', { x: 1, y: 2, width: 30, height: 40 }, true);
+    electronViews.place('b', { x: 5, y: 6, width: 30, height: 40 }, true);
+    const stills = await electronViews.visibleViews((leafId) => leafId === 'a', 500);
+    expect(stills.map((still) => [still.leafId, still.dataUrl !== undefined]), 'a has a still, b has bounds only').toEqual([['a', true], ['b', false]]);
+    expect(views[0]!.webContents.capturePage, 'the selected view was captured').toHaveBeenCalledTimes(1);
+    expect(views[1]!.webContents.capturePage, 'the other view was never captured').not.toHaveBeenCalled();
+  });
+
+  it('returns within the patience when the capture never settles', async () => {
+    electronViews.ensure('a', state());
+    electronViews.place('a', { x: 1, y: 2, width: 30, height: 40 }, true);
+    views[0]!.webContents.capturePage.mockImplementation(() => new Promise(() => undefined));
+    const started = Date.now();
+    const [still] = await electronViews.visibleViews(true, 250);
+    expect(still, 'reported without a still').toEqual({ leafId: 'a', bounds: { x: 1, y: 2, width: 30, height: 40 } });
+    expect(Date.now() - started, 'the call is cut at the patience or the floor, whichever is longer').toBeLessThan(1000);
+  });
+
+  it('returns within a fixed cap when the capture never settles and no patience is given', async () => {
+    vi.useFakeTimers();
+    try {
+      electronViews.ensure('a', state());
+      electronViews.place('a', { x: 1, y: 2, width: 30, height: 40 }, true);
+      views[0]!.webContents.capturePage.mockImplementation(() => new Promise(() => undefined));
+      let settled = false;
+      const result = electronViews.visibleViews(true).then((stills) => {
+        settled = true;
+        return stills;
+      });
+      await vi.advanceTimersByTimeAsync(1900);
+      expect(settled, 'still waiting just below the cap').toBe(false);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(settled, 'returned once the cap passed').toBe(true);
+      expect((await result)[0]?.dataUrl, 'no still').toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('starts no capture once the patience has passed, even right after a retry pause', async () => {
+    vi.useFakeTimers();
+    try {
+      electronViews.ensure('a', state());
+      electronViews.place('a', { x: 1, y: 2, width: 30, height: 40 }, true);
+      views[0]!.webContents.capturePage.mockRejectedValue(new Error('Current display surface not available for capture'));
+      const result = electronViews.visibleViews(true, 250);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect((await result)[0]?.dataUrl, 'no still').toBeUndefined();
+      expect(views[0]!.webContents.capturePage, 'calls at 0, 100 and 200 ms; none after the pause that ends at 300 ms').toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('gives a call at least the floor, so a slow first frame of a painted view is still captured', async () => {
+    vi.useFakeTimers();
+    try {
+      electronViews.ensure('a', state());
+      electronViews.place('a', { x: 1, y: 2, width: 30, height: 40 }, true);
+      views[0]!.webContents.capturePage.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(paintedImage() as never), 400)));
+      const result = electronViews.visibleViews(true, 250);
+      await vi.advanceTimersByTimeAsync(450);
+      expect((await result)[0]?.dataUrl, 'the frame that took longer than the patience is the still').toBe(`data:image/png;base64,${Buffer.from('png').toString('base64')}`);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('returns within the patience plus the floor when the last call never settles', async () => {
+    vi.useFakeTimers();
+    try {
+      electronViews.ensure('a', state());
+      electronViews.place('a', { x: 1, y: 2, width: 30, height: 40 }, true);
+      views[0]!.webContents.capturePage
+        .mockRejectedValueOnce(new Error('no surface'))
+        .mockRejectedValueOnce(new Error('no surface'))
+        .mockImplementation(() => new Promise(() => undefined));
+      let settled = false;
+      const result = electronViews.visibleViews(true, 250).then((stills) => {
+        settled = true;
+        return stills;
+      });
+      await vi.advanceTimersByTimeAsync(650);
+      expect(settled, 'the third call started at 200 ms is still within its floor of 500 ms').toBe(false);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(settled, 'returned by patience 250 ms plus floor 500 ms').toBe(true);
+      expect((await result)[0]?.dataUrl, 'no still').toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('hides the placed views while suspended and shows them again on resume', async () => {

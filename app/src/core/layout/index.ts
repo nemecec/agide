@@ -6,4 +6,4 @@ export { InMemoryLayoutHistory, SqliteLayoutHistory, type LayoutHistory } from '
 export { LayoutFiles } from './LayoutFiles';
 export { LayoutManager, LayoutError, DEFAULT_LAYOUT_ID, type LayoutView, type ApplyResult } from './LayoutManager';
 export { maskedInstances } from './mask';
-export { registerLayoutCommands, MAIN_WINDOW, type WindowCapturer } from './commands';
+export { registerLayoutCommands, MAIN_WINDOW, type WindowCapturer, type CaptureRequest, type WindowCapture } from './commands';

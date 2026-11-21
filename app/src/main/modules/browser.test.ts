@@ -15,7 +15,14 @@ import { InMemoryTreeService } from '../../core/tree/index';
 import { openStore } from '../../core/store/index';
 import type { BrowserViews, ViewStill } from '../browser/views';
 import { initModules, type InitializedModules } from '../modules';
+import type { CaptureScope } from '../windowCapture';
 import * as browserModule from './browser';
+
+const overlay = vi.hoisted(() => ({ provider: undefined as undefined | ((scope: CaptureScope) => Promise<{ apply: string }>) }));
+vi.mock('../windowCapture', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../windowCapture')>()),
+  setCaptureOverlay: (provider: typeof overlay.provider) => void (overlay.provider = provider),
+}));
 
 class FakeViews implements BrowserViews {
   readonly pages = new Map<string, { cdp: FakeCdp; page: PageSession }>();
@@ -85,9 +92,7 @@ class FakeViews implements BrowserViews {
   resume(): void {
     this.suspended = false;
   }
-  async visibleViews(): Promise<ViewStill[]> {
-    return [];
-  }
+  visibleViews: BrowserViews['visibleViews'] = async () => [];
   readonly cleared: string[] = [];
   readonly devtools: string[] = [];
   async clearSiteData(service: string): Promise<void> {
@@ -151,6 +156,39 @@ async function connect(sessionId: string, folderId: string, server: 'app' | 'bro
 const textOf = (result: unknown): string => ((result as { content: { type: string; text?: string }[] }).content.find((part) => part.type === 'text')?.text ?? '');
 
 describe('browser module in the real module graph', () => {
+  it('captures and reports only the views the caller may see: not another folder, not a masked pane, not observation off, not a chat service', async () => {
+    await start();
+    const work = services().tree.createFolder({ title: 'Work' });
+    const other = services().tree.createFolder({ title: 'Other' });
+    const open = async (folderId: string, url: string) => (await services().browser.openTab({ folderId, url, createdBy: 'user' })).leafId;
+    const own = await open(work.id, 'https://example.com/');
+    const foreign = await open(other.id, 'about:blank');
+    const maskedOwn = await open(work.id, 'https://example.org/');
+    const switchedOff = await open(work.id, 'https://example.net/');
+    const chat = await open(work.id, 'https://app.slack.com/client');
+    await registry.invoke('ui_set_observation', { nodeId: switchedOff, mode: 'off' }, ui);
+    const everyLeaf = [own, foreign, maskedOwn, switchedOff, chat];
+    const captured: string[] = [];
+    views.visibleViews = async (capture) => {
+      const wanted = typeof capture === 'function' ? capture : () => capture;
+      captured.push(...everyLeaf.filter(wanted));
+      return everyLeaf.map((leafId) => ({ leafId, bounds: { x: 0, y: 0, width: 10, height: 10 } }));
+    };
+
+    const withoutPage = (script: string | undefined): string[] => {
+      const items = JSON.parse(/const items = (\[.*\]);/.exec(script ?? '')?.[1] ?? '[]') as { leafId: string; label: string }[];
+      return items.filter((item) => item.label === 'page not captured').map((item) => item.leafId);
+    };
+    const result = await overlay.provider?.({ inScope: (nodeId) => services().tree.isWithin(nodeId, work.id), maskedLeafIds: new Set([maskedOwn]) });
+    expect(captured, 'the pixels of a view are read only when the caller may see it and it is shared').toEqual([own]);
+    expect(withoutPage(result?.apply), 'only a visible shared view without a still is drawn as "page not captured"').toEqual([own]);
+
+    captured.length = 0;
+    const user = await overlay.provider?.({ maskedLeafIds: new Set() });
+    expect(captured, 'a caller without a folder scope reaches every shared view').toEqual([own, foreign, maskedOwn]);
+    expect(withoutPage(user?.apply), 'the user sees every shared view without a still drawn as "page not captured"').toEqual([own, foreign, maskedOwn]);
+  });
+
   it('creates a tab leaf from a URL, records it with its service and shows it to the user through the tab state', async () => {
     await start();
     const folder = services().tree.createFolder({ title: 'Work' });

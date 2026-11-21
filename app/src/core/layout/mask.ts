@@ -1,26 +1,36 @@
 import { PANE_TYPES } from '../blocks/firstParty';
-import type { LayoutDocument } from '../blocks/layout';
+import type { Binding, LayoutDocument } from '../blocks/layout';
 
-/** Panes that show content of every folder, or of other profiles. */
-const UNSCOPED_PANES: ReadonlySet<string> = new Set([PANE_TYPES.tree, PANE_TYPES.inbox, PANE_TYPES.profileRail]);
+/** Panes whose content is the one node they are bound to; every other pane type lists or opens content of any folder. */
+const NODE_PANES: ReadonlySet<string> = new Set([PANE_TYPES.surfaceHost, PANE_TYPES.placeholder]);
 
 /**
- * Instances a window capture hides from a caller scoped to a folder (0020 section 9): the task tree and the inbox
- * list every folder, the profile rail lists other profiles, and a pane bound to a node outside the folder shows
- * that node's content.
+ * Whether a binding makes its pane show something outside the folder. A context binding resolves through the
+ * shared context; a resolved value that is not a node id (such as the selected object) counts as outside.
+ * A value binding is fixed: a string must name a node of the folder. A data source has no
+ * resolved value to check, so it counts as outside.
+ */
+function bindsOutside(binding: Binding, context: Readonly<Record<string, unknown>>, inScope: (nodeId: string) => boolean): boolean {
+  if ('context' in binding) {
+    const value = context[binding.context];
+    return value !== undefined && (typeof value !== 'string' || !inScope(value));
+  }
+  if ('value' in binding) return typeof binding.value === 'string' && !inScope(binding.value);
+  return true;
+}
+
+/**
+ * Instances a window capture hides from a caller scoped to a folder (0020 section 9): the task tree, the inbox,
+ * the profile rail, the usage, history, transcript, observation and swarm panes and any pane of a code block
+ * show content of every folder, and a surface host bound to a node outside the folder shows that node.
  */
 export function maskedInstances(
   layout: LayoutDocument,
-  context: Readonly<Record<string, string | undefined>>,
+  context: Readonly<Record<string, unknown>>,
   inScope: (nodeId: string) => boolean,
 ): string[] {
   return Object.entries(layout.instances).flatMap(([id, instance]) => {
-    if (UNSCOPED_PANES.has(instance.type)) return [id];
-    const bound = Object.values(instance.bindings ?? {}).flatMap((binding) => {
-      if (!('context' in binding)) return [];
-      const value = context[binding.context];
-      return value === undefined ? [] : [value];
-    });
-    return bound.some((nodeId) => !inScope(nodeId)) ? [id] : [];
+    if (!NODE_PANES.has(instance.type)) return [id];
+    return Object.values(instance.bindings ?? {}).some((binding) => bindsOutside(binding, context, inScope)) ? [id] : [];
   });
 }
