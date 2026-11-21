@@ -68,7 +68,10 @@ async function launch(): Promise<Page> {
   return page;
 }
 
-const item = (page: Page, title: string) => page.getByRole('treeitem', { name: title, exact: true });
+const item = (page: Page, title: string | RegExp) => page.getByRole('treeitem', { name: title, exact: true });
+
+/** The row of a tab of the fixture page: named by the host until the page title arrives, by the title afterwards. */
+const fixtureTab = (): RegExp => new RegExp(`^(${new URL(origin).hostname.replaceAll('.', '\\.')}|Fixture page)$`);
 
 async function invoke<T>(page: Page, id: string, input?: unknown): Promise<CommandResult<T>> {
   return page.evaluate(([commandId, args]) => (globalThis as unknown as { api: RendererApi }).api.invoke(commandId as string, args) as Promise<CommandResult<never>>, [id, input] as const) as Promise<CommandResult<T>>;
@@ -183,7 +186,7 @@ function paeth(a: number, b: number, c: number): number {
   return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
 }
 
-async function openLeaf(page: Page, title: string): Promise<void> {
+async function openLeaf(page: Page, title: string | RegExp): Promise<void> {
   await item(page, title).click();
   await expect(page.getByTestId('browser-pane'), 'the tab opens in the surface host').toBeVisible();
 }
@@ -236,7 +239,7 @@ test('lets an agent read, click, type and take a screenshot over MCP, labels pag
   const page = await launch();
   const folderId = await createFolder(page, 'Work');
   const tab = await createTab(page, folderId, `${origin}/`);
-  await openLeaf(page, new URL(origin).hostname);
+  await openLeaf(page, fixtureTab());
   await expect.poll(() => tabTitleOf(page, tab), { message: 'page loaded' }).toBe('Fixture page');
   const browser = await startSession(page, folderId);
 
@@ -309,7 +312,7 @@ test('blocks navigation to a disallowed scheme from an agent call and from a pag
   const page = await launch();
   const folderId = await createFolder(page, 'Work');
   const tab = await createTab(page, folderId, `${origin}/`);
-  await openLeaf(page, new URL(origin).hostname);
+  await openLeaf(page, fixtureTab());
   await expect.poll(() => tabTitleOf(page, tab)).toBe('Fixture page');
   const browser = await startSession(page, folderId);
 
@@ -359,7 +362,7 @@ test('refuses surfaces_observe, the tools and the window capture once the user s
   const page = await launch();
   const folderId = await createFolder(page, 'Work');
   const tab = await createTab(page, folderId, `${origin}/`);
-  await openLeaf(page, new URL(origin).hostname);
+  await openLeaf(page, fixtureTab());
   await expect.poll(() => tabTitleOf(page, tab)).toBe('Fixture page');
   const browser = await startSession(page, folderId);
   const app = await appClient();
@@ -560,7 +563,7 @@ test('masks a pane that lists agents, usage or transcripts, which show every fol
   const work = await createFolder(page, 'Work');
   await createFolder(page, 'Other');
   const own = await createTab(page, work, `${origin}/`);
-  await openLeaf(page, new URL(origin).hostname);
+  await openLeaf(page, fixtureTab());
   await expect.poll(() => tabTitleOf(page, own), { message: 'the own tab has loaded' }).toBe('Fixture page');
   await startSession(page, work);
   const app = await appClient();
@@ -586,7 +589,7 @@ test('asks the user before an agent loads an origin outside loopback and carries
   const page = await launch();
   const folderId = await createFolder(page, 'Work');
   const tab = await createTab(page, folderId, `${origin}/`);
-  await openLeaf(page, new URL(origin).hostname);
+  await openLeaf(page, fixtureTab());
   await expect.poll(() => tabTitleOf(page, tab)).toBe('Fixture page');
   const browser = await startSession(page, folderId);
 
@@ -614,7 +617,7 @@ test('hides the native view behind a still of its page during a drag and shows i
   const page = await launch();
   const folderId = await createFolder(page, 'Work');
   const tab = await createTab(page, folderId, `${origin}/`);
-  await openLeaf(page, new URL(origin).hostname);
+  await openLeaf(page, fixtureTab());
   await expect.poll(() => tabTitleOf(page, tab)).toBe('Fixture page');
   await expect.poll(async () => (await invoke<{ stills: unknown[] }>(page, 'browser_views_suspend')).ok && (await invoke(page, 'browser_views_resume')).ok, { message: 'the view is placed in the window' }).toBe(true);
 
@@ -628,7 +631,7 @@ test('hides the native view while a dialog is open over its slot and shows it ag
   const page = await launch();
   const folderId = await createFolder(page, 'Work');
   const leafId = await createTab(page, folderId, `${origin}/`);
-  await openLeaf(page, new URL(origin).hostname);
+  await openLeaf(page, fixtureTab());
   const shown = (): Promise<boolean[]> =>
     running!.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0]!.contentView.children.map((child) => (child as unknown as { getVisible(): boolean }).getVisible()),
