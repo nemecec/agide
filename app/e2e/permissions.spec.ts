@@ -50,15 +50,21 @@ type Api = { invoke(id: string, input: unknown): Promise<{ ok: boolean; value?: 
 const invoke = (page: Page, id: string, input: unknown) =>
   page.evaluate(([commandId, args]) => (globalThis as unknown as { api: Api }).api.invoke(commandId as string, args), [id, input] as const);
 
+const MODE_LABELS: Record<string, string> = { plan: 'Plan first', acceptEdits: 'Accept edits', auto: 'Auto', default: 'Ask every time' };
+
 /** Creates a folder and starts a session in it through the new-session dialog. */
 async function startSession(page: Page, mode?: string, defaultMode = 'auto'): Promise<void> {
   await invoke(page, 'ui_create_folder', { title: 'Project' });
   await page.getByRole('treeitem', { name: /Project/ }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'New Claude session…', exact: true }).click();
   await expect(page.getByTestId('new-session-dialog'), 'the dialog opens').toBeVisible();
-  await expect(page.getByTestId('new-session-mode'), 'the select starts at the profile default').toHaveValue(defaultMode);
-  expect(await page.getByTestId('new-session-mode').locator('option').allTextContents(), 'bypass is not offered on the local provider').not.toContain('Bypass');
-  if (mode) await page.getByTestId('new-session-mode').selectOption(mode);
+  const select = page.getByTestId('new-session-mode');
+  await expect(select, 'the select starts at the profile default').toHaveAttribute('data-value', defaultMode);
+  await select.click();
+  expect(await page.getByRole('option').allTextContents(), 'bypass is not offered on the local provider').not.toContain('Bypass');
+  if (mode) await page.getByRole('option', { name: MODE_LABELS[mode] ?? mode, exact: true }).click();
+  else await page.keyboard.press('Escape');
+  await expect(page.getByRole('option'), 'the list is closed before the dialog is submitted').toHaveCount(0);
   await page.getByTestId('new-session-start').click();
   await expect.poll(() => lines(launches()).length, 'the session launches').toBeGreaterThan(0);
 }

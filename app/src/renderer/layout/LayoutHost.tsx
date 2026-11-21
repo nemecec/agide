@@ -1,15 +1,23 @@
 import 'dockview-react/dist/styles/dockview.css';
-import { DockviewReact, themeDark, themeLight, type DockviewApi, type IDockviewPanelHeaderProps, type IDockviewPanelProps } from 'dockview-react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
+import { DockviewReact, type DockviewApi, type IDockviewPanelProps } from 'dockview-react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type MutableRefObject } from 'react';
 import type { PaneProps } from '../panes/paneTypes';
 import { api } from '../api';
 import { PANE_COMPONENTS } from '../panes/paneComponents';
 import { PlaceholderPane } from '../panes/PlaceholderPane';
-import { ProfileStrip } from '../panes/ProfileStrip';
+import { useTheme } from '../theme/themeContext';
+import { Banner } from '../ui/Banner';
+import { Button } from '../ui/Button';
+import { Disclosure } from '../ui/Disclosure';
+import { dockTheme } from './dockTheme';
 import { toDockview } from './dockviewAdapter';
-import { arrangementToSave, engineShows, hidesHeader, resolveInputs, titleOf } from './hostModel';
+import { arrangementToSave, engineShows, fixedWidth, hidesHeader, resolveInputs, titleOf } from './hostModel';
+import { inboxInstanceId } from './inboxInstance';
 import { LayoutContext, useLayoutContext } from './LayoutContext';
+import { PaneTab } from './PaneTab';
+import { TitleBar } from './TitleBar';
 import { useLayoutState, type LayoutViewState } from './useLayoutState';
+import './dock-theme.css';
 import './layout.css';
 
 /** A pane component re-renders only when its own config or inputs change, not on every shared context update. */
@@ -46,19 +54,19 @@ function PaneBody({ params }: IDockviewPanelProps<{ instanceId: string }>) {
   );
 }
 
-const Tab = (props: IDockviewPanelHeaderProps) => <div className="pane-tab">{props.api.title}</div>;
 const COMPONENTS = { pane: PaneBody };
 
-function hideEdgeHeaders(engine: DockviewApi, view: LayoutViewState): void {
+/** Hides the header of edge groups such as the rail and holds fixed-width groups at their width. */
+function dressEdgeGroups(engine: DockviewApi, view: LayoutViewState): void {
   for (const group of engine.groups) {
-    group.header.hidden = hidesHeader(group.panels.map((panel) => view.layout.instances[panel.id]?.type ?? ''));
+    const types = group.panels.map((panel) => view.layout.instances[panel.id]?.type ?? '');
+    group.header.hidden = hidesHeader(types);
+    const width = fixedWidth(types);
+    if (width !== undefined) group.api.setConstraints({ minimumWidth: width, maximumWidth: width });
   }
 }
 
-const prefersDark = () => window.matchMedia('(prefers-color-scheme: dark)').matches;
-
-function DockEngine({ view }: { view: LayoutViewState }) {
-  const dock = useRef<DockviewApi | null>(null);
+function DockEngine({ view, dock }: { view: LayoutViewState; dock: MutableRefObject<DockviewApi | null> }) {
   const latest = useRef(view);
   latest.current = view;
   const loading = useRef(false);
@@ -72,7 +80,7 @@ function DockEngine({ view }: { view: LayoutViewState }) {
     if (engineShows(shown, current.layout, engine.panels)) return;
     loading.current = true;
     engine.fromJSON(toDockview(current.layout, (id) => titleOf(current.layout, id)));
-    hideEdgeHeaders(engine, current);
+    dressEdgeGroups(engine, current);
     setTimeout(() => {
       loading.current = false;
     }, 0);
@@ -104,44 +112,17 @@ function DockEngine({ view }: { view: LayoutViewState }) {
 
   useEffect(() => () => clearTimeout(timer.current), []);
 
-  const [dark, setDark] = useState(prefersDark);
-  useEffect(() => {
-    const query = window.matchMedia('(prefers-color-scheme: dark)');
-    const listener = () => setDark(query.matches);
-    query.addEventListener('change', listener);
-    return () => query.removeEventListener('change', listener);
-  }, []);
+  const { resolved } = useTheme();
 
   return (
     <DockviewReact
       className="dock"
       components={COMPONENTS}
-      defaultTabComponent={Tab}
+      defaultTabComponent={PaneTab}
       onReady={onReady}
-      theme={dark ? themeDark : themeLight}
+      theme={dockTheme(resolved.scheme)}
       disableFloatingGroups
     />
-  );
-}
-
-function LayoutBar({ view }: { view: LayoutViewState }) {
-  return (
-    <div className="layout-bar">
-      <label>
-        Layout{' '}
-        <select
-          aria-label="Layout"
-          value={view.activeLayoutId}
-          onChange={(event) => void api().invoke('layout_switch', { layoutId: event.target.value })}
-        >
-          {view.layouts.map((layout) => (
-            <option key={layout.id} value={layout.id}>
-              {layout.title.charAt(0).toUpperCase() + layout.title.slice(1)}
-            </option>
-          ))}
-        </select>
-      </label>
-    </div>
   );
 }
 
@@ -155,56 +136,77 @@ function Notices({ view }: { view: LayoutViewState }) {
   return (
     <>
       {view.fileIssues.length > 0 && !errorHidden && (
-        <div className="layout-notice layout-error" role="alert" data-testid="layout-error">
-          <strong>The layout file is invalid. The previous layout stays and the file is untouched.</strong>
-          <details>
-            <summary>Show what is wrong</summary>
-            <ul>
-              {view.fileIssues.map((issue, index) => (
-                <li key={index}>
-                  <code>{issue.path || '/'}</code> {issue.message}
-                </li>
-              ))}
-            </ul>
-          </details>
-          <button type="button" data-testid="layout-error-dismiss" onClick={() => setErrorHidden(true)}>
-            Dismiss
-          </button>
-        </div>
+        <Banner
+          className="layout-notice"
+          tone="danger"
+          data-testid="layout-error"
+          message={
+            <>
+              <strong>The layout file is invalid. The previous layout stays and the file is untouched.</strong>
+              <Disclosure label="Show what is wrong">
+                <ul>
+                  {view.fileIssues.map((issue, index) => (
+                    <li key={index}>
+                      <code>{issue.path || '/'}</code> {issue.message}
+                    </li>
+                  ))}
+                </ul>
+              </Disclosure>
+            </>
+          }
+          actions={
+            <Button size="sm" data-testid="layout-error-dismiss" onClick={() => setErrorHidden(true)}>
+              Dismiss
+            </Button>
+          }
+        />
       )}
       {showChange && (
-        <div className="layout-notice" role="status" data-testid="layout-change">
-          <strong>{change.source === 'mcp' ? 'An agent changed the layout' : 'The layout file changed'}</strong>
-          <ul>
-            {change.summary.map((line, index) => (
-              <li key={index}>{line}</li>
-            ))}
-          </ul>
-          <button type="button" onClick={() => void api().invoke('layout_undo', {})}>
-            Undo
-          </button>
-          <button type="button" onClick={() => setDismissed(change.revision)}>
-            Dismiss
-          </button>
-        </div>
+        <Banner
+          className="layout-notice"
+          tone="info"
+          data-testid="layout-change"
+          message={
+            <>
+              <strong>{change.source === 'mcp' ? 'An agent changed the layout' : 'The layout file changed'}</strong>
+              <ul>
+                {change.summary.map((line, index) => (
+                  <li key={index}>{line}</li>
+                ))}
+              </ul>
+            </>
+          }
+          actions={
+            <>
+              <Button size="sm" onClick={() => void api().invoke('layout_undo', {})}>
+                Undo
+              </Button>
+              <Button size="sm" variant="quiet" onClick={() => setDismissed(change.revision)}>
+                Dismiss
+              </Button>
+            </>
+          }
+        />
       )}
     </>
   );
 }
 
-/** The window: the profile strip, a layout bar, notices and the layout engine that shows the panes of the active layout. */
+/** The window: the title bar, notices and the layout engine that shows the panes of the active layout. */
 export function LayoutHost() {
   const { view, context } = useLayoutState();
   const value = useMemo(() => (view ? { view, context } : undefined), [view, context]);
+  const dock = useRef<DockviewApi | null>(null);
   if (!value) return <div className="layout-host" />;
+  const inbox = inboxInstanceId(value.view.layout);
+  const showInbox = inbox === undefined ? undefined : () => dock.current?.getPanel(inbox)?.api.setActive();
   return (
     <LayoutContext.Provider value={value}>
       <div className="layout-host" data-layout-id={value.view.layoutId} data-revision={value.view.revision}>
-        <ProfileStrip />
-        <LayoutBar view={value.view} />
+        <TitleBar view={value.view} onShowInbox={showInbox} />
         <Notices view={value.view} />
         <div className="dock-wrap">
-          <DockEngine view={value.view} />
+          <DockEngine view={value.view} dock={dock} />
         </div>
       </div>
     </LayoutContext.Provider>

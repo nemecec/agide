@@ -9,7 +9,7 @@ import {
 } from '@headless-tree/core';
 import { useTree } from '@headless-tree/react';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
-import { SURFACE_CLAUDE_SESSION } from '../../core/surfaces/types';
+import { SURFACE_BROWSER_TAB, SURFACE_CLAUDE_SESSION } from '../../core/surfaces/types';
 import type { NodeId, TreeNode } from '../../core/tree/types';
 import { api } from '../api';
 import { openDialog } from '../dialogs/dialogStore';
@@ -22,6 +22,11 @@ import { FolderDecorations } from './tree/FolderDecorations';
 import { createSurfaceLeaf } from './tree/createLeaf';
 import { LeafDecorations } from './tree/leafDecorations';
 import { indexTree, isWithin, ROOT_ID, type TreeIndex } from './treeModel';
+import { rowTooltip, surfaceKindOf } from './tree/treeIcon';
+import { EmptyState } from '../ui/EmptyState';
+import { Icon } from '../ui/Icon';
+import { Notice } from '../ui/Notice';
+import { ACTION_ICONS, CONTROL_ICONS, SURFACE_ICONS } from '../ui/icons';
 import './TreePane.css';
 
 interface SurfaceTypeInfo {
@@ -30,7 +35,10 @@ interface SurfaceTypeInfo {
 }
 
 const ROOT_ENTRY: TreeNode = { kind: 'folder', id: ROOT_ID, parentId: null, title: '', order: 0 };
-const INDENT = 16;
+const INDENT = 14;
+const ROW_INSET = 4;
+/** Disclosure slot, icon slot and the two gaps between them and the title. */
+const TITLE_OFFSET = 16 + 6 + 16 + 6;
 
 interface TreePaneProps {
   /** The nodes from `useTreeNodes`. */
@@ -183,24 +191,25 @@ export function TreePane({ nodes, loaded, onOpen }: TreePaneProps) {
     event.stopPropagation();
     const parentId = parentFor(target);
     const entries: MenuEntry[] = [
-      { label: 'New folder', run: () => void create(parentId, 'folder') },
-      { label: 'New task…', run: () => openDialog({ kind: 'new-task', parentFolderId: parentId }) },
+      { label: 'New folder', icon: ACTION_ICONS['new-folder'].icon, run: () => void create(parentId, 'folder') },
+      { label: 'New task…', icon: ACTION_ICONS['new-task'].icon, run: () => openDialog({ kind: 'new-task', parentFolderId: parentId }) },
       // A Claude session belongs to a folder: its MCP access is scoped to that folder.
       ...surfaceTypes
         .filter((type) => type.id !== SURFACE_CLAUDE_SESSION || parentId !== null)
         .map((type) => ({
           label: type.id === SURFACE_CLAUDE_SESSION ? `New ${type.label}…` : `New ${type.label}`,
+          icon: SURFACE_ICONS[type.id === SURFACE_CLAUDE_SESSION ? 'session' : type.id === SURFACE_BROWSER_TAB ? 'browser-tab' : 'note'].icon,
           run: () => void create(parentId, { surfaceType: type.id, label: type.label }),
         })),
     ];
     if (target) {
       entries.push(
-        { label: 'Open to the side', run: () => void run('ui_open_to_side', { nodeId: target.getId() }) },
-        { label: 'Rename', run: () => target.startRenaming() },
-        { label: 'Delete', separated: true, danger: true, run: () => void remove(target) },
+        { label: 'Open to the side', icon: ACTION_ICONS['open-to-side'].icon, run: () => void run('ui_open_to_side', { nodeId: target.getId() }) },
+        { label: 'Rename', icon: ACTION_ICONS.rename.icon, run: () => target.startRenaming() },
+        { label: 'Delete', icon: ACTION_ICONS.remove.icon, separated: true, danger: true, run: () => void remove(target) },
       );
     } else {
-      entries.push({ label: 'Profile settings…', run: () => openDialog({ kind: 'settings' }) });
+      entries.push({ label: 'Profile settings…', icon: ACTION_ICONS.settings.icon, run: () => openDialog({ kind: 'settings' }) });
       entries.push({ label: showFinished ? 'Hide finished agents' : 'Show finished agents', run: () => setAgentsView({ showFinished: !showFinished }) });
     }
     setMenu({ x: event.clientX, y: event.clientY, entries });
@@ -222,51 +231,54 @@ export function TreePane({ nodes, loaded, onOpen }: TreePaneProps) {
         {tree.getItems().map((item) => {
           const node = item.getItemData();
           const folder = node.kind === 'folder';
+          const level = item.getItemMeta().level;
+          const type = node.kind === 'leaf' ? typeLabel(surfaceTypes, node.surfaceType) : undefined;
           return (
             <Fragment key={item.getId()}>
-            <div
-              {...item.getProps()}
-              className="tree-item"
-              title={node.title}
-              data-selected={item.isSelected()}
-              data-focused={item.isFocused()}
-              data-drop-target={item.isDragTarget()}
-              data-kind={node.kind}
-              style={{ paddingLeft: 8 + item.getItemMeta().level * INDENT }}
-              onContextMenu={(event) => {
-                item.setFocused();
-                openMenu(event, item);
-              }}
-              onDoubleClick={() => (folder ? toggle(item) : undefined)}
-            >
-              <span className="tree-twisty" aria-hidden="true">
-                {folder ? (item.isExpanded() ? '▾' : '▸') : ''}
-              </span>
-              {item.isRenaming() ? (
-                <input {...item.getRenameInputProps()} className="tree-rename" aria-label="Rename" />
-              ) : (
-                <span className="tree-title">{node.title}</span>
-              )}
-              {node.kind === 'leaf' && <span className="tree-type">{typeLabel(surfaceTypes, node.surfaceType)}</span>}
-              {node.kind === 'folder' && <FolderDecorations folderId={node.id} />}
-              {node.kind === 'leaf' && <LeafDecorations surfaceType={node.surfaceType} surfaceId={node.surfaceId} />}
-            </div>
-            {folder && item.isExpanded() && (indexRef.current.childIds.get(node.id)?.length ?? 0) === 0 && (
-              <div className="tree-item tree-empty-folder" style={{ paddingLeft: 8 + (item.getItemMeta().level + 1) * INDENT + 16 }}>
-                (empty)
+              <div
+                {...item.getProps()}
+                className="tree-item"
+                title={rowTooltip(node.title, type)}
+                data-selected={item.isSelected()}
+                data-focused={item.isFocused()}
+                data-drop-target={item.isDragTarget()}
+                data-kind={node.kind}
+                data-expanded={folder ? item.isExpanded() : undefined}
+                style={{ paddingLeft: ROW_INSET + level * INDENT }}
+                onContextMenu={(event) => {
+                  item.setFocused();
+                  openMenu(event, item);
+                }}
+                onDoubleClick={() => (folder ? toggle(item) : undefined)}
+              >
+                <span className="tree-twisty" aria-hidden="true">
+                  {folder ? <Icon icon={CONTROL_ICONS.disclosure} size="xs" className="tree-chevron" /> : null}
+                </span>
+                <Icon icon={SURFACE_ICONS[surfaceKindOf(node, item.isExpanded())].icon} size="md" className="tree-icon" />
+                {item.isRenaming() ? (
+                  <input {...item.getRenameInputProps()} className="tree-rename" aria-label="Rename" />
+                ) : (
+                  <span className="tree-title">{node.title}</span>
+                )}
+                {node.kind === 'folder' && <FolderDecorations folderId={node.id} />}
+                {node.kind === 'leaf' && <LeafDecorations surfaceType={node.surfaceType} surfaceId={node.surfaceId} />}
               </div>
-            )}
-            {node.kind === 'leaf' && node.surfaceType === SURFACE_CLAUDE_SESSION && <AgentRows sessionId={node.surfaceId} level={item.getItemMeta().level} />}
+              {folder && item.isExpanded() && (indexRef.current.childIds.get(node.id)?.length ?? 0) === 0 && (
+                <div className="tree-item tree-empty-folder" style={{ paddingLeft: ROW_INSET + (level + 1) * INDENT + TITLE_OFFSET }}>
+                  (empty)
+                </div>
+              )}
+              {node.kind === 'leaf' && node.surfaceType === SURFACE_CLAUDE_SESSION && <AgentRows sessionId={node.surfaceId} level={level} />}
             </Fragment>
           );
         })}
         <div style={tree.getDragLineStyle()} className="tree-dragline" />
       </div>
-      {loaded && nodes.length === 0 && <p className="tree-empty">Right-click to add a folder or a surface.</p>}
+      {loaded && nodes.length === 0 && <EmptyState className="tree-empty" icon={SURFACE_ICONS.folder.icon} title="Nothing here yet" help="Right-click to add a folder or a surface." />}
       {error && (
-        <p className="tree-error" role="alert">
+        <Notice className="tree-error" tone="danger">
           {error}
-        </p>
+        </Notice>
       )}
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
     </div>

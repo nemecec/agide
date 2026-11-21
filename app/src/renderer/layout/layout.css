@@ -4,15 +4,6 @@
   height: 100%;
 }
 
-.layout-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--border);
-  background: var(--pane-bg);
-}
-
 .dock-wrap {
   flex: 1;
   min-height: 0;
@@ -26,47 +17,64 @@
   position: relative;
   height: 100%;
   overflow: hidden;
-  background: var(--bg);
+  background: var(--agide-surface-content);
 }
 
 .pane-tab {
-  padding: 0 10px;
-  font-size: 12px;
-  line-height: 26px;
+  display: flex;
+  align-items: center;
+  gap: var(--agide-space-1_5);
+  box-sizing: border-box;
+  min-width: 80px;
+  max-width: 220px;
+  padding: 0 var(--agide-space-2_5);
+  font-size: var(--agide-type-small-size);
+  font-weight: var(--agide-font-weight-medium);
+  line-height: var(--agide-type-small-line);
 }
 
-.layout-notice {
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--pane-bg);
+.pane-tab-icon {
+  flex: none;
+}
+
+.pane-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layout-notice .ui-banner-message {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .layout-notice ul {
-  margin: 4px 0;
-  padding-left: 18px;
-}
-
-.layout-error {
-  color: var(--danger);
+  margin: var(--agide-space-1) 0;
+  padding-left: var(--agide-space-4);
 }
 
 .placeholder-pane {
-  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--agide-space-1);
+  padding: var(--agide-space-3);
 }
 
 .muted {
-  color: var(--muted);
+  color: var(--agide-text-secondary);
 }
 
 [data-capture-mask]::after {
   content: 'Hidden from the agent';
   position: absolute;
   inset: 0;
-  z-index: 100;
+  z-index: var(--agide-z-capture-mask);
   display: grid;
   place-items: center;
-  background: var(--pane-bg);
-  color: var(--muted);
+  background: var(--agide-surface-sidebar);
+  color: var(--agide-text-secondary);
 }
 
 .pane-frame > .tree-pane,
@@ -78,18 +86,4 @@
 
 .pane-frame > .profile-rail {
   width: 100%;
-}
-
-.layout-bar select {
-  font: inherit;
-  padding: 3px 24px 3px 8px;
-  min-height: 24px;
-  color: inherit;
-  background-color: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-
-.layout-notice button {
-  margin-right: 6px;
 }

@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { IsolationStatus, ProviderRow } from '../../../core/isolation/statusTypes';
 import { api } from '../../api';
+import { Button } from '../../ui/Button';
+import { Card } from '../../ui/Card';
+import { Chip } from '../../ui/Chip';
+import { TextField } from '../../ui/Field';
+import { Hint } from '../../ui/Hint';
+import { TONE_ICONS } from '../../ui/icons';
+import { Notice } from '../../ui/Notice';
+import { RadioGroup, RadioItem } from '../../ui/RadioGroup';
 import './settings.css';
 
 const OPTION_FIELD: Partial<Record<string, { key: 'srtBinary' | 'containerImage'; label: string }>> = {
@@ -17,45 +25,47 @@ function Code({ text }: { readonly text: string }) {
   );
 }
 
-function ProviderChoice({
-  row,
-  selected,
-  value,
-  onValue,
-  onChoose,
-}: {
-  readonly row: ProviderRow;
-  readonly selected: boolean;
-  readonly value: string;
-  readonly onValue: (value: string) => void;
-  readonly onChoose: () => void;
-}) {
+function ProviderChoice({ row, selected, value, onValue }: { readonly row: ProviderRow; readonly selected: boolean; readonly value: string; readonly onValue: (value: string) => void }) {
   const field = OPTION_FIELD[row.id];
   const { statement } = row;
+  const open = row.check.ok && statement.isolated.length === 0;
+  const checkText = row.check.ok ? 'Ready.' : <Code text={`${row.check.reason}.${row.check.fix ? ` ${row.check.fix}` : ''}`} />;
   return (
     <li data-testid={`isolation-${row.id}`} data-available={row.check.ok}>
-      <label className="setting-check">
-        <input type="radio" name="isolation-provider" checked={selected} disabled={!row.selectable && !selected} onChange={onChoose} />
-        <strong>{statement.label}</strong>
-        {row.check.ok && statement.isolated.length === 0 ? <span className="chip" data-tone="waiting">Not isolated</span> : null}
-      </label>
-      <p className="isolation-check" data-ok={row.check.ok} data-warning={row.check.ok && statement.isolated.length === 0} data-testid={`isolation-${row.id}-check`}>
-        {row.check.ok ? 'Ready.' : <Code text={`${row.check.reason}.${row.check.fix ? ` ${row.check.fix}` : ''}`} />}
-        {row.check.ok && row.selectableReason ? ` ${row.selectableReason}` : ''}
-      </p>
-      {field ? (
-        <input aria-label={`${statement.label} ${field.label}`} placeholder={field.label} value={value} onChange={(event) => onValue(event.target.value)} />
-      ) : null}
-      {statement.isolated.length > 0 ? (
-        <>
-          <h4>Isolated</h4>
-          <ul>{statement.isolated.map((line) => <li key={line}>{line}</li>)}</ul>
-        </>
-      ) : null}
-      <h4>Not isolated</h4>
-      <ul>{statement.notIsolated.map((line) => <li key={line}>{line}</li>)}</ul>
-      <p data-testid={`isolation-${row.id}-bypass`}>Bypass mode: {statement.bypass.reason}</p>
-      {statement.notes.map((note) => <p key={note}>{note}</p>)}
+      <Card>
+        <RadioItem
+          value={row.id}
+          disabled={!row.selectable && !selected}
+          label={
+            <span className="isolation-name">
+              <strong>{statement.label}</strong>
+              {open ? <Chip tone="warning" icon={TONE_ICONS.warning.icon} label="Not isolated" /> : null}
+            </span>
+          }
+        />
+        {row.check.ok && !open ? (
+          <Hint data-testid={`isolation-${row.id}-check`}>
+            {checkText}
+            {row.selectableReason ? ` ${row.selectableReason}` : ''}
+          </Hint>
+        ) : (
+          <Notice tone={row.check.ok ? 'warning' : 'danger'} role="status" data-testid={`isolation-${row.id}-check`}>
+            {checkText}
+            {row.check.ok && row.selectableReason ? ` ${row.selectableReason}` : ''}
+          </Notice>
+        )}
+        {field ? <TextField label={field.label} aria-label={`${statement.label} ${field.label}`} placeholder={field.label} mono value={value} onChange={(event) => onValue(event.target.value)} /> : null}
+        {statement.isolated.length > 0 ? (
+          <>
+            <h4>Isolated</h4>
+            <ul>{statement.isolated.map((line) => <li key={line}>{line}</li>)}</ul>
+          </>
+        ) : null}
+        <h4>Not isolated</h4>
+        <ul>{statement.notIsolated.map((line) => <li key={line}>{line}</li>)}</ul>
+        <p data-testid={`isolation-${row.id}-bypass`}>Bypass mode: {statement.bypass.reason}</p>
+        {statement.notes.map((note) => <p key={note}>{note}</p>)}
+      </Card>
     </li>
   );
 }
@@ -91,12 +101,13 @@ export function IsolationSection() {
   };
 
   return (
-    <section data-testid="settings-isolation">
+    <section className="settings-section" data-testid="settings-isolation">
       <h3>Isolation</h3>
       {status === undefined ? (
         <p>Checking providers.</p>
       ) : (
         <>
+          <RadioGroup aria-label="Isolation provider" value={status.selected} onValueChange={(id) => void choose(id)}>
           <ul className="isolation-providers">
             {status.providers.map((row) => {
               const field = OPTION_FIELD[row.id];
@@ -107,15 +118,17 @@ export function IsolationSection() {
                   selected={status.selected === row.id}
                   value={field ? (tried[field.key] ?? status.options[field.key] ?? '') : ''}
                   onValue={(value) => field && setTried((current) => ({ ...current, [field.key]: value }))}
-                  onChoose={() => void choose(row.id)}
                 />
               );
             })}
           </ul>
-          <button type="button" onClick={() => refresh(optionsOf())}>Check again</button>
+          </RadioGroup>
+          <Button size="sm" onClick={() => refresh(optionsOf())}>
+            Check again
+          </Button>
         </>
       )}
-      {problem ? <p role="alert" className="dialog-error">{problem}</p> : null}
+      {problem ? <Notice tone="danger">{problem}</Notice> : null}
     </section>
   );
 }

@@ -10,7 +10,11 @@ export function DialogHost() {
   const dialog = useDialog();
   useViewSuspension(dialog !== null);
   if (dialog === null) return null;
-  return <DialogFrame key={dialog.kind}>{body(dialog)}</DialogFrame>;
+  return (
+    <DialogFrame key={dialog.kind} onClose={closeDialog}>
+      {body(dialog)}
+    </DialogFrame>
+  );
 }
 
 function body(dialog: NonNullable<ReturnType<typeof useDialog>>) {

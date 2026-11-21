@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { click, setValue } from '../testing/dom';
+import { chooseOption, click, setValue } from '../testing/dom';
 import { installFakeApi, type FakeApi } from '../testing/fakeApi';
 import { render, type Rendered } from '../testing/render';
+import { DialogRoot } from '../ui/Dialog';
 import { NewTaskDialog } from './NewTaskDialog';
 
 let rendered: Rendered | undefined;
@@ -28,18 +29,22 @@ async function mount(responders: Record<string, unknown> = {}, parentFolderId: s
     task_start: {},
     ...responders,
   });
-  rendered = await render(createElement(NewTaskDialog, { parentFolderId, onClose }));
+  rendered = await render(createElement(DialogRoot, { open: true, onOpenChange: () => undefined, children: createElement(NewTaskDialog, { parentFolderId, onClose }) }));
 }
-const byId = <T extends HTMLElement>(id: string): T | null => rendered!.container.querySelector<T>(`[data-testid="${id}"]`);
+const byId = <T extends HTMLElement>(id: string): T | null => document.querySelector<T>(`[data-testid="${id}"]`);
 const text = (id: string) => byId(id)?.textContent;
 
 describe('NewTaskDialog', () => {
   it('lists only folders as parents and the known repositories, and preselects the parent it was opened for', async () => {
     await mount({}, 'f1');
-    const options = [...byId<HTMLSelectElement>('task-parent')!.options].map((option) => option.textContent);
-    expect(options, 'top level and folders only').toEqual(['Top level', 'Work']);
-    expect(byId<HTMLSelectElement>('task-parent')!.value, 'preselected parent').toBe('f1');
-    expect([...rendered!.container.querySelectorAll('datalist option')].map((option) => option.getAttribute('value')), 'repositories').toEqual(['/repos/one', '/repos/two']);
+    expect(byId('task-parent')!.getAttribute('data-value'), 'preselected parent').toBe('f1');
+    expect(byId('task-parent')!.textContent, 'the trigger shows the title of the parent').toBe('Work');
+    await act(async () => {
+      byId('task-parent')!.focus();
+      byId('task-parent')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    expect([...document.querySelectorAll('[role="option"]')].map((option) => option.textContent), 'top level and folders only').toEqual(['Top level', 'Work']);
+    expect([...document.querySelectorAll('datalist option')].map((option) => option.getAttribute('value')), 'repositories').toEqual(['/repos/one', '/repos/two']);
   });
 
   it('names the kind of the source and keeps Start disabled until something is entered', async () => {
@@ -75,8 +80,8 @@ describe('NewTaskDialog', () => {
     await mount();
     await setValue(byId<HTMLTextAreaElement>('task-source')!, 'ABC-12');
     await setValue(byId<HTMLTextAreaElement>('task-instruction')!, ' be careful ');
-    await setValue(byId<HTMLSelectElement>('task-mode')!, 'plan');
-    await setValue(byId<HTMLSelectElement>('task-parent')!, 'f1');
+    await chooseOption(byId('task-mode')!, 'Plan');
+    await chooseOption(byId('task-parent')!, 'Work');
     await click(byId('task-start')!);
     expect(fake.invoke, 'task_start input').toHaveBeenCalledWith('task_start', { source: 'ABC-12', instruction: 'be careful', parentFolderId: 'f1', permissionMode: 'plan' });
     expect(onClose, 'closed').toHaveBeenCalledTimes(1);
@@ -93,7 +98,7 @@ describe('NewTaskDialog', () => {
 
   it('closes without starting when Cancel is pressed', async () => {
     await mount();
-    const cancel = [...rendered!.container.querySelectorAll('button')].find((button) => button.textContent === 'Cancel')!;
+    const cancel = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Cancel')!;
     await click(cancel);
     expect(onClose, 'closed').toHaveBeenCalledTimes(1);
     expect(fake.invoke, 'nothing started').not.toHaveBeenCalledWith('task_start', expect.anything());
@@ -101,13 +106,12 @@ describe('NewTaskDialog', () => {
 
   it('asks for the preview only while the preview is open and a source is entered, and shows the commands and the prompt', async () => {
     await mount();
-    const details = rendered!.container.querySelector('details')!;
+    const preview = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Preview')!;
     await setValue(byId<HTMLTextAreaElement>('task-source')!, 'ABC-12');
     expect(fake.invoke, 'no preview while closed').not.toHaveBeenCalledWith('task_preview', expect.anything());
-    await act(async () => {
-      details.open = true;
-      details.dispatchEvent(new Event('toggle'));
-    });
+    expect(preview.getAttribute('aria-expanded'), 'the disclosure starts closed').toBe('false');
+    await click(preview);
+    expect(preview.getAttribute('aria-expanded'), 'the disclosure opens').toBe('true');
     expect(fake.invoke, 'preview asked').toHaveBeenCalledWith('task_preview', { source: 'ABC-12' });
     expect(text('task-preview'), 'commands and prompt').toContain('git fetch origin');
     expect(text('task-preview'), 'prompt').toContain('the prompt');
@@ -115,12 +119,9 @@ describe('NewTaskDialog', () => {
 
   it('says that no commands run when the preview has none, and shows no preview when the command fails', async () => {
     await mount({ task_preview: { commands: [], prompt: 'p' } });
-    const details = rendered!.container.querySelector('details')!;
+    const preview = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Preview')!;
     await setValue(byId<HTMLTextAreaElement>('task-source')!, 'Do a thing');
-    await act(async () => {
-      details.open = true;
-      details.dispatchEvent(new Event('toggle'));
-    });
+    await click(preview);
     expect(text('task-preview'), 'no commands').toContain('No commands run before the session starts.');
     fake.respond('task_preview', { ok: false, error: { code: 'failed', message: 'x' } });
     await setValue(byId<HTMLTextAreaElement>('task-source')!, 'Do another thing');

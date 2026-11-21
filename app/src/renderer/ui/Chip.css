@@ -1,0 +1,37 @@
+.ui-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--agide-space-1);
+  box-sizing: border-box;
+  height: 18px;
+  padding: 0 var(--agide-space-1_5);
+  border-radius: var(--agide-radius-full);
+  font-family: var(--agide-font-ui);
+  font-size: var(--agide-type-caption-size);
+  line-height: var(--agide-type-caption-line);
+  font-weight: var(--agide-font-weight-medium);
+  white-space: nowrap;
+  background: var(--agide-surface-inset);
+  color: var(--agide-text-secondary);
+}
+
+.ui-chip[data-icon-only] {
+  padding: 0 var(--agide-space-1);
+}
+
+.ui-chip[data-tone='info'] {
+  background: var(--agide-info-bg);
+  color: var(--agide-info-fg);
+}
+.ui-chip[data-tone='success'] {
+  background: var(--agide-success-bg);
+  color: var(--agide-success-fg);
+}
+.ui-chip[data-tone='warning'] {
+  background: var(--agide-warning-bg);
+  color: var(--agide-warning-fg);
+}
+.ui-chip[data-tone='danger'] {
+  background: var(--agide-danger-bg);
+  color: var(--agide-danger-fg);
+}

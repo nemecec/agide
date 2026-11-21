@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PAIR_PRESET, SESSION_PRESET, type LayoutDocument } from '../../core/blocks/index';
 import { toDockview } from './dockviewAdapter';
-import { arrangementToSave, engineShows, hidesHeader, resolveInputs, titleOf } from './hostModel';
+import { arrangementToSave, engineShows, fixedWidth, hidesHeader, resolveInputs, titleOf } from './hostModel';
 
 const titles = (layout: LayoutDocument) => Object.keys(layout.instances).map((id) => ({ id, title: titleOf(layout, id) }));
 const serialize = (layout: LayoutDocument) => toDockview(layout, (id) => titleOf(layout, id));
@@ -104,5 +104,17 @@ describe('arrangementToSave', () => {
     const saved = arrangementToSave(serialize(regrouped), SESSION_PRESET);
     expect(saved, 'rearranged groups').toMatchObject({ split: 'row' });
     expect(JSON.stringify(saved), 'inbox moved beside the tree').toContain('"panes":["tree","inbox"]');
+  });
+});
+
+describe('fixedWidth', () => {
+  it('gives a group holding only the profile rail the 52 px of the rail', () => {
+    expect(fixedWidth(['agide/profile-rail']), 'rail alone').toBe(52);
+  });
+
+  it('leaves a group free when another pane shares it, and an empty group', () => {
+    expect(fixedWidth(['agide/profile-rail', 'agide/tree']), 'rail with the tree').toBeUndefined();
+    expect(fixedWidth(['agide/tree']), 'tree alone').toBeUndefined();
+    expect(fixedWidth([]), 'empty group').toBeUndefined();
   });
 });

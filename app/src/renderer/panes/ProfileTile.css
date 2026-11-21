@@ -1,0 +1,32 @@
+.profile-tile {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  background: var(--profile-tile);
+  color: var(--agide-accent-on);
+  font-size: var(--agide-type-caption-size);
+  font-weight: var(--agide-font-weight-semibold);
+  line-height: 1;
+  user-select: none;
+}
+
+.profile-tile[data-size='bar'] {
+  width: 18px;
+  height: 18px;
+  border-radius: var(--agide-radius-sm);
+}
+
+.profile-tile[data-size='rail'] {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--agide-radius-lg);
+  font-size: var(--agide-type-body-size);
+}
+
+.profile-tile[data-temporary] {
+  background: none;
+  border: 1px dashed var(--agide-border-strong);
+  color: var(--agide-text-secondary);
+}

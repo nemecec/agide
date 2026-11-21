@@ -49,7 +49,7 @@ test('a dialog takes focus, keeps Tab inside, closes on Escape and gives focus b
   await page.getByRole('menuitem', { name: 'New task…', exact: true }).click();
   await expect(page.getByTestId('new-task-dialog'), 'the dialog opens').toBeVisible();
   await expect(page.getByTestId('task-source'), 'the first field has focus on open').toBeFocused();
-  await expect(page.locator('.dialog-backdrop'), 'the backdrop is drawn behind the dialog').toBeVisible();
+  await expect(page.locator('.ui-dialog-backdrop'), 'the backdrop is drawn behind the dialog').toBeVisible();
 
   for (let step = 0; step < 14; step += 1) {
     await page.keyboard.press('Tab');
@@ -60,14 +60,14 @@ test('a dialog takes focus, keeps Tab inside, closes on Escape and gives focus b
 
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('new-task-dialog'), 'Escape closes the dialog').toBeHidden();
-  await expect(page.locator('.dialog-backdrop'), 'the backdrop goes with it').toHaveCount(0);
+  await expect(page.locator('.ui-dialog-backdrop'), 'the backdrop goes with it').toHaveCount(0);
 });
 
 test('the window always names its profile, also when the profile is temporary', async () => {
   const page = await launch();
-  const strip = page.getByTestId('profile-strip');
-  await expect(strip, 'the strip shows the profile name').toBeVisible();
-  await expect(strip, 'the strip is not empty').not.toHaveText('');
+  const identity = page.getByTestId('profile-identity');
+  await expect(identity, 'the title bar shows the profile identity').toBeVisible();
+  await expect(identity.getByTestId('profile-identity-name'), 'the identity names the profile').not.toHaveText('');
 });
 
 test('a session in the tree keeps its title when the pane is narrow', async () => {

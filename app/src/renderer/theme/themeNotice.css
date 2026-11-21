@@ -1,0 +1,17 @@
+.theme-notice {
+  position: fixed;
+  right: var(--agide-space-4);
+  bottom: var(--agide-space-4);
+  left: var(--agide-space-4);
+  z-index: var(--agide-z-tooltip);
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+.theme-notice > * {
+  width: min(520px, 100%);
+  border: 1px solid var(--agide-border-default);
+  border-radius: var(--agide-radius-lg);
+  box-shadow: var(--agide-shadow-2);
+  pointer-events: auto;
+}

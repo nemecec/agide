@@ -1,0 +1,48 @@
+.title-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--agide-space-3);
+  box-sizing: border-box;
+  height: 38px;
+  padding: 0 var(--agide-space-3) 0 80px;
+  border-bottom: 2px solid var(--profile-mark, var(--agide-border-strong));
+  background: var(--agide-surface-window);
+  color: var(--agide-text-primary);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.title-bar[data-full-screen] {
+  padding-left: var(--agide-space-3);
+}
+
+.title-bar-start,
+.title-bar-end {
+  display: flex;
+  align-items: center;
+  gap: var(--agide-space-2);
+  min-width: 0;
+}
+
+.title-bar button,
+.title-bar .usage-meter {
+  -webkit-app-region: no-drag;
+}
+
+.title-bar-inbox {
+  position: relative;
+  display: inline-flex;
+}
+
+.title-bar-inbox [aria-disabled='true'] {
+  opacity: 0.4;
+}
+
+.title-bar-unread {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  pointer-events: none;
+}

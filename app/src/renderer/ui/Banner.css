@@ -1,0 +1,42 @@
+.ui-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--agide-space-2);
+  box-sizing: border-box;
+  min-height: 32px;
+  padding: var(--agide-space-1_5) var(--agide-space-3);
+  border-bottom: 1px solid color-mix(in srgb, var(--ui-banner-fg) 25%, transparent);
+  background: var(--ui-banner-bg);
+  color: var(--agide-text-primary);
+  font-family: var(--agide-font-ui);
+  font-size: var(--agide-type-body-size);
+  line-height: var(--agide-type-body-line);
+}
+.ui-banner[data-tone='info'] {
+  --ui-banner-fg: var(--agide-info-fg);
+  --ui-banner-bg: var(--agide-info-bg);
+}
+.ui-banner[data-tone='success'] {
+  --ui-banner-fg: var(--agide-success-fg);
+  --ui-banner-bg: var(--agide-success-bg);
+}
+.ui-banner[data-tone='warning'] {
+  --ui-banner-fg: var(--agide-warning-fg);
+  --ui-banner-bg: var(--agide-warning-bg);
+}
+.ui-banner[data-tone='danger'] {
+  --ui-banner-fg: var(--agide-danger-fg);
+  --ui-banner-bg: var(--agide-danger-bg);
+}
+
+.ui-banner-icon {
+  color: var(--ui-banner-fg);
+}
+.ui-banner-message {
+  flex: 1;
+  min-width: 0;
+}
+.ui-banner-actions {
+  display: inline-flex;
+  gap: var(--agide-space-1_5);
+}

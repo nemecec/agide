@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { TrustState } from '../../../core/tasks/types';
 import { api } from '../../api';
-import './trustBanner.css';
+import { Banner } from '../../ui/Banner';
 
 const TEXT: Record<Exclude<TrustState, 'none'>, string> = {
   user_input: 'Claude asks whether to trust this folder; answer in the terminal',
@@ -27,8 +27,6 @@ export function TrustBanner({ sessionId }: { readonly sessionId: string }) {
   }, [sessionId]);
   if (state === 'none') return null;
   return (
-    <div className="trust-banner" role="status" data-testid="trust-banner" data-state={state}>
-      {TEXT[state]}
-    </div>
+    <Banner tone="warning" data-testid="trust-banner" data-state={state} message={TEXT[state]} />
   );
 }

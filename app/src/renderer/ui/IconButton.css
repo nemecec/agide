@@ -1,0 +1,54 @@
+.ui-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--agide-radius-md);
+  background: transparent;
+  color: var(--agide-text-primary);
+  cursor: default;
+}
+
+.ui-icon-button[data-size='sm'] {
+  width: 20px;
+  height: 20px;
+}
+.ui-icon-button[data-size='md'] {
+  width: 24px;
+  height: 24px;
+}
+.ui-icon-button[data-size='lg'] {
+  width: 28px;
+  height: 28px;
+}
+
+.ui-icon-button[data-variant='danger-quiet'] {
+  color: var(--agide-danger-fg);
+}
+
+.ui-icon-button:not(:disabled):hover {
+  background: var(--agide-surface-hover);
+}
+.ui-icon-button:not(:disabled):active {
+  background: var(--agide-surface-pressed);
+}
+.ui-icon-button[data-variant='danger-quiet']:not(:disabled):hover {
+  background: var(--agide-danger-bg);
+}
+
+.ui-icon-button[aria-pressed='true'] {
+  background: var(--agide-surface-hover);
+}
+
+.ui-icon-button:disabled {
+  opacity: 0.4;
+}
+
+.ui-icon-button:focus-visible {
+  outline: var(--agide-focus-width) solid var(--agide-focus-ring);
+  outline-offset: 2px;
+}

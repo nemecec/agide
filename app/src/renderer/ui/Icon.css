@@ -1,0 +1,19 @@
+.ui-icon {
+  flex: none;
+}
+
+.ui-spin {
+  animation: ui-spin 1s linear infinite;
+}
+
+@keyframes ui-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-spin {
+    animation: none;
+  }
+}

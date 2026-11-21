@@ -52,3 +52,14 @@ export function orderItems<T extends { readonly kind: string; readonly state: st
       b.createdAt.localeCompare(a.createdAt),
   );
 }
+
+/** True when the text is a JSON object or array, which the card shows as code on an inset surface. */
+export function isStructuredText(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return false;
+  try {
+    return typeof JSON.parse(trimmed) === 'object';
+  } catch {
+    return false;
+  }
+}

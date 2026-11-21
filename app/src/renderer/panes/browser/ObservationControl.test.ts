@@ -17,9 +17,9 @@ async function mount(props: { mode?: ObserveMode; forcedOff?: boolean; entries?:
   fake = installFakeApi({ browser_access_log: { entries: props.entries ?? [] }, ui_set_observation: {} });
   rendered = await render(createElement(ObservationControl, { leafId: 'leaf1', mode: props.mode ?? 'on-demand', reading: false, forcedOff: props.forcedOff ?? false }));
 }
-const q = <T extends Element>(selector: string): T | null => rendered!.container.querySelector<T>(selector);
+const q = <T extends Element>(selector: string): T | null => document.querySelector<T>(selector);
 const open = () => act(async () => q<HTMLButtonElement>('[data-testid="observation-button"]')!.click());
-const radios = () => [...rendered!.container.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+const radios = () => [...document.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
 
 describe('ObservationControl', () => {
   it('shows the indicator only and reads no log until the switch is opened', async () => {
@@ -31,7 +31,7 @@ describe('ObservationControl', () => {
   it('offers the three modes with the current one selected', async () => {
     await mount({ mode: 'live' });
     await open();
-    expect(radios().map((radio) => radio.checked), 'off, on demand, live').toEqual([false, false, true]);
+    expect(radios().map((radio) => radio.getAttribute('aria-checked') === 'true'), 'off, on demand, live').toEqual([false, false, true]);
     expect(q('[aria-expanded="true"]'), 'button reports it is open').not.toBeNull();
   });
 
@@ -64,7 +64,7 @@ describe('ObservationControl', () => {
     await mount({ entries: [{ id: 1, at: '2026-11-17T10:00:00.000Z', kind: 'read_page', outcome: 'ok' }, { id: 2, at: '2026-11-17T10:01:00.000Z', kind: 'act', outcome: 'refused_site' }] });
     await open();
     expect(fake.invoke, 'asks for eight entries of this node').toHaveBeenCalledWith('browser_access_log', { nodeId: 'leaf1', limit: 8 });
-    const lines = [...rendered!.container.querySelectorAll('.observation-log li')].map((li) => li.textContent);
+    const lines = [...document.querySelectorAll('.observation-log li')].map((li) => li.textContent);
     expect(lines.length, 'two entries').toBe(2);
     expect(lines[0], 'first entry').toContain('read_page ok');
     expect(lines[1], 'second entry').toContain('act refused_site');

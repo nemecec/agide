@@ -1,0 +1,10 @@
+export * from './accent';
+export * from './appearance';
+export { BUILTIN_THEMES, builtinTheme, isBuiltinThemeId, SYSTEM_THEME_ID } from './builtin/index';
+export * from './colour';
+export * from './contrast';
+export * from './resolve';
+export * from './scale';
+export * from './schema';
+export * from './tokens';
+export * from './vscode/aliasTable';

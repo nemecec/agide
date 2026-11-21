@@ -21,6 +21,8 @@ async function mount(value: BrowserApproval) {
 }
 const buttons = () => [...rendered!.container.querySelectorAll('button')];
 const press = (label: string) => act(async () => buttons().find((button) => button.textContent === label)!.click());
+const openMore = () => act(async () => buttons().find((button) => button.textContent === 'More')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, ctrlKey: false })));
+const menuItems = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
 
 describe('ApprovalBar', () => {
   it('names the origin, the tool and what the agent wants to do', async () => {
@@ -40,15 +42,15 @@ describe('ApprovalBar', () => {
   it('names the session that asks and states a navigation request once', async () => {
     await mount(approval({ kind: 'navigate', sessionTitle: 'Check the dashboard', tool: 'navigate', summary: 'Open https://example.test' }));
     const text = rendered!.container.textContent!;
-    expect(text, 'session named').toContain('The session "Check the dashboard" asks to open');
+    expect(text, 'session named').toContain('The session Check the dashboard asks to open');
+    expect(rendered!.container.querySelector('strong')?.textContent, 'only the session name is emphasised, the sentence is regular weight').toBe('Check the dashboard');
     expect(text.split('https://example.test').length - 1, 'the address appears once').toBe(1);
   });
 
-  it('makes Allow once the primary action and keeps the standing allowance behind a disclosure', async () => {
+  it('makes Allow once the primary action and Deny a secondary one', async () => {
     await mount(approval({ service: 'web' }));
-    expect(buttons().find((button) => button.textContent === 'Allow once')?.classList.contains('btn-primary'), 'Allow once is primary').toBe(true);
-    expect(buttons().find((button) => button.textContent === 'Deny')?.classList.contains('btn-primary'), 'Deny is not primary').toBe(false);
-    expect(buttons().find((button) => button.textContent === 'Always allow this site')?.closest('details'), 'standing allowance sits in a closed disclosure').not.toBeNull();
+    expect(buttons().find((button) => button.textContent === 'Allow once')?.getAttribute('data-variant'), 'Allow once is primary').toBe('primary');
+    expect(buttons().find((button) => button.textContent === 'Deny')?.getAttribute('data-variant'), 'Deny is secondary').toBe('secondary');
   });
 
   it('sends the chosen answer with the request id and tells the pane afterwards', async () => {
@@ -58,15 +60,22 @@ describe('ApprovalBar', () => {
     expect(answered, 'pane told').toHaveBeenCalledTimes(1);
     await press('Deny');
     expect(fake.invoke, 'deny sent').toHaveBeenLastCalledWith('browser_answer_approval', { id: 'a1', answer: 'deny' });
-    await press('Allow for this session');
-    expect(fake.invoke, 'session sent').toHaveBeenLastCalledWith('browser_answer_approval', { id: 'a1', answer: 'session' });
+    await openMore();
+    await act(async () => {
+      const item = menuItems().find((candidate) => candidate.textContent === 'Allow for this session')!;
+      item.focus();
+      item.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    expect(fake.invoke, 'session sent').toHaveBeenCalledWith('browser_answer_approval', { id: 'a1', answer: 'session' });
   });
 
   it('offers a standing allowance for a web site only, not for a service tab', async () => {
     await mount(approval({ service: 'web' }));
-    expect(buttons().map((button) => button.textContent), 'web').toContain('Always allow this site');
+    await openMore();
+    expect(menuItems().map((item) => item.textContent), 'web').toEqual(['Allow for this session', 'Always allow this site']);
     await rendered!.unmount();
     await mount(approval({ service: 'jira' }));
-    expect(buttons().map((button) => button.textContent), 'service').not.toContain('Always allow this site');
+    await openMore();
+    expect(menuItems().map((item) => item.textContent), 'service').toEqual(['Allow for this session']);
   });
 });

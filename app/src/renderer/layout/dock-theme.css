@@ -1,0 +1,79 @@
+/*
+ * The dockview theme of the app (0035 section 3.3). It starts from the first `.dockview-theme-dark` block of the
+ * 8.9.0 stylesheet, so every structural variable has a value, and sets the colours, heights and radii from tokens.
+ */
+.agide-dock {
+  --dv-paneview-active-outline-color: var(--agide-focus-ring);
+  --dv-tabs-and-actions-container-font-size: 12px;
+  --dv-tabs-and-actions-container-height: var(--agide-density-tab);
+  --dv-drag-over-background-color: color-mix(in srgb, var(--agide-accent-text) 14%, transparent);
+  --dv-drag-over-border-color: var(--agide-accent-text);
+  --dv-edge-dock-indicator-color: color-mix(in srgb, var(--agide-accent-text) 60%, transparent);
+  --dv-edge-drop-strip-size: 8px;
+  --dv-tabs-container-scrollbar-color: var(--agide-scrollbar-thumb);
+  --dv-icon-hover-background-color: var(--agide-surface-hover);
+  --dv-floating-box-shadow: var(--agide-shadow-3);
+  --dv-floating-border: 1px solid var(--agide-border-default);
+  --dv-overlay-z-index: var(--agide-z-dock-overlay);
+  --dv-tab-font-size: 12px;
+  --dv-border-radius: var(--agide-radius-md);
+  --dv-tab-margin: 0;
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--agide-accent-text);
+  --dv-active-sash-transition-duration: var(--agide-motion-fast);
+  --dv-active-sash-transition-delay: 150ms;
+  --dv-spacing-padding: 0px;
+  --dv-tab-border-radius: 0px;
+  --dv-sash-border-radius: 0px;
+  --dv-dropdown-border-radius: 0px;
+  --dv-tab-close-icon-size: inherit;
+  --dv-floating-group-border: none;
+  --dv-drag-over-border: none;
+  --dv-floating-group-dragging-opacity: 0.5;
+  --dv-floating-titlebar-height: 22px;
+  --dv-floating-titlebar-background-color: var(--dv-tabs-and-actions-container-background-color);
+  --dv-floating-titlebar-border-bottom: var(--dv-floating-border);
+  --dv-tab-group-color-grey: var(--agide-text-tertiary);
+  --dv-tab-group-color-blue: var(--agide-accent-text);
+  --dv-tab-group-color-red: var(--agide-danger-fg);
+  --dv-tab-group-color-yellow: var(--agide-warning-fg);
+  --dv-tab-group-color-green: var(--agide-success-fg);
+  --dv-tab-group-color-pink: var(--agide-terminal-magenta);
+  --dv-tab-group-color-purple: var(--agide-terminal-brightMagenta);
+  --dv-tab-group-color-cyan: var(--agide-terminal-cyan);
+  --dv-tab-group-color-orange: var(--agide-warning-fg);
+  --dv-tab-group-chip-padding: 4px 8px;
+  --dv-tab-group-chip-border-radius: 6px;
+  --dv-tab-group-chip-font-size: 11px;
+  --dv-tab-group-line-height: 2px;
+  --dv-tab-group-line-opacity: 0.6;
+
+  --dv-group-view-background-color: var(--agide-surface-content);
+  --dv-tabs-and-actions-container-background-color: var(--agide-surface-window);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--agide-surface-content);
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--agide-surface-content);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-tab-divider-color: transparent;
+  --dv-activegroup-visiblepanel-tab-color: var(--agide-text-primary);
+  --dv-activegroup-hiddenpanel-tab-color: var(--agide-text-secondary);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--agide-text-secondary);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--agide-text-secondary);
+  --dv-separator-border: var(--agide-border-default);
+  --dv-paneview-header-border-color: var(--agide-border-default);
+  --dv-transition-duration: var(--agide-motion-base);
+}
+
+.agide-dock .dv-drop-target-container .dv-drop-target-anchor.dv-drop-target-anchor-container-changed {
+  opacity: 0;
+  transition: none;
+}
+
+.agide-dock .dv-drop-target-container {
+  --dv-transition-duration: var(--agide-motion-base);
+}
+
+/* The active tab of the focused group shows which group holds focus with a line at its top edge. */
+.agide-dock .dv-groupview.dv-active-group > .dv-tabs-and-actions-container .dv-tabs-container > .dv-tab.dv-active-tab {
+  box-shadow: inset 0 2px 0 var(--agide-accent-text);
+}

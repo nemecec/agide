@@ -5,6 +5,7 @@ import { createAppEventBus } from '../core/events/index';
 import { writeLastProfile } from '../core/profile/index';
 import { openStore } from '../core/store/index';
 import { ElectronViews } from './browser/ElectronViews';
+import { wireAppearance, type AppearanceTestHook, type AppearanceWiring } from './appearanceIpc';
 import { createDesktop } from './desktop';
 import { isFocusRequest } from './focusRequest';
 import { registerIpc } from './ipc';
@@ -20,6 +21,7 @@ import { APP_TITLE, createMainWindow } from './window';
  * - `AGIDE_PROFILE`: profile to open when `--profile` is absent.
  * - `AGIDE_USER_DATA`: data directory of one unnamed profile (without `AGIDE_ROOT`); tests pass a temporary one.
  * - `AGIDE_HIDDEN=1`: never show the window (end-to-end tests).
+ * - `AGIDE_TEST_HOOKS=1`: install the test hooks for a window that is shown (the visual check).
  */
 const showWindow = process.env['AGIDE_HIDDEN'] !== '1';
 
@@ -27,6 +29,7 @@ const showWindow = process.env['AGIDE_HIDDEN'] !== '1';
 const HOOKS_KEY = '__agideTestHooks';
 interface TestHooks {
   focusRequests: unknown[];
+  appearance?: AppearanceTestHook;
 }
 
 const boot: BootResult = bootProfile({ argv: process.argv.slice(1), env: process.env, defaultRoot: join(app.getPath('appData'), 'agide') });
@@ -39,6 +42,7 @@ if (boot.kind === 'profile') {
 
 let modules: InitializedModules | undefined;
 let disposeIpc: (() => void) | undefined;
+let appearance: AppearanceWiring | undefined;
 let closeDb: (() => void) | undefined;
 let mainWindow: BrowserWindow | undefined;
 let browserViews: ElectronViews | undefined;
@@ -85,6 +89,9 @@ async function start(): Promise<void> {
     ...(profile ? { profile } : {}),
   });
   disposeIpc = registerIpc(commands, events);
+  appearance = wireAppearance(modules.services.theme);
+  const hooks = (globalThis as Record<string, unknown>)[HOOKS_KEY] as TestHooks | undefined;
+  if (hooks) hooks.appearance = appearance.hook;
 
   const title = boot.kind === 'profile' ? `${boot.definition.name} · ${APP_TITLE}` : undefined;
   mainWindow = createMainWindow({ show: showWindow, ...(title ? { title } : {}) });
@@ -124,6 +131,7 @@ app.on('will-quit', (event) => {
   const disposing = modules;
   modules = undefined;
   disposeIpc?.();
+  appearance?.dispose();
   void disposing
     .dispose()
     .catch((error: unknown) => console.error(error))
@@ -140,7 +148,7 @@ function onSecondInstance(additionalData: unknown): void {
   focusMainWindow();
 }
 
-if (!showWindow) (globalThis as Record<string, unknown>)[HOOKS_KEY] = { focusRequests: [] } satisfies TestHooks;
+if (!showWindow || process.env['AGIDE_TEST_HOOKS'] === '1') (globalThis as Record<string, unknown>)[HOOKS_KEY] = { focusRequests: [] } satisfies TestHooks;
 
 if (boot.kind === 'busy') {
   console.error('A milestone 1 instance of Agide is still running. Quit it and start again.');

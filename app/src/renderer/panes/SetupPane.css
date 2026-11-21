@@ -1,0 +1,50 @@
+.setup-popover {
+  width: 320px;
+  max-width: 320px;
+}
+
+.setup-card {
+  padding: 0;
+  box-shadow: none;
+  border: 0;
+  background: none;
+}
+
+.setup-card .ui-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--agide-space-3);
+}
+
+.setup-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--agide-space-2);
+}
+
+.setup-step-head {
+  display: flex;
+  align-items: center;
+  gap: var(--agide-space-1_5);
+}
+
+.setup-step-title {
+  margin: 0;
+  font-size: var(--agide-type-body-size);
+  font-weight: var(--agide-font-weight-medium);
+}
+
+.setup-popover .ui-popover-title {
+  font-size: var(--agide-type-title-size);
+  line-height: var(--agide-type-title-line);
+}
+
+.setup-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--agide-space-1_5);
+}
+
+.setup-footer {
+  justify-content: flex-end;
+}

@@ -38,6 +38,16 @@ export function resolveInputs(bindings: LayoutDocument['instances'][string]['bin
   return inputs;
 }
 
+/** Widths of panes that keep one width at every window size (0035 3.3: the rail is 52 px). */
+const FIXED_WIDTHS: ReadonlyMap<string, number> = new Map([['agide/profile-rail', 52]]);
+
+/** The fixed width of a group whose panes all share one, else undefined. */
+export function fixedWidth(panelTypes: readonly string[]): number | undefined {
+  const widths = new Set(panelTypes.map((type) => FIXED_WIDTHS.get(type)));
+  const [only] = widths;
+  return widths.size === 1 ? only : undefined;
+}
+
 /** True for a group that holds only headerless panes. */
 export function hidesHeader(panelTypes: readonly string[]): boolean {
   return panelTypes.length > 0 && panelTypes.every((type) => HEADERLESS_TYPES.has(type));

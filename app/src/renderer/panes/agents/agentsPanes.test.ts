@@ -3,11 +3,11 @@ import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentNodeView } from '../../../core/agents/view';
 import type { UsageState } from '../../../core/usage/types';
+import { chooseOption } from '../../testing/dom';
 import { installFakeApi } from '../../testing/fakeApi';
 import { flush, render, type Rendered } from '../../testing/render';
 import { AgentHistoryPane } from '../AgentHistoryPane';
 import { UsagePane } from '../UsagePane';
-import { PlanUsage } from '../rail/PlanUsage';
 import { AgentRows } from '../tree/AgentRows';
 import { SessionDecorations } from '../tree/SessionDecorations';
 import { setAgentsView } from './agentsStore';
@@ -55,10 +55,13 @@ describe('tree decorations', () => {
       agent({ agentKey: 'a4', state: 'failed', endedAt: iso(-10_000), hidden: false }),
     ]);
     mounted = await render(createElement(SessionDecorations, { sessionId: 's1' }));
-    expect(mounted.container.querySelector('[data-testid=agent-count]')?.textContent, 'running count leaves out the waiting agent').toBe('1 running');
-    expect(mounted.container.querySelector('[data-testid=agent-waiting]')?.textContent, 'waiting count').toBe('1 waiting');
-    expect(mounted.container.querySelector('[data-testid=agent-failed]')?.textContent, 'failed count is its own marker').toBe('1 failed');
-    expect(mounted.container.querySelector('[data-testid=agent-finished]')?.textContent, 'finished tally').toBe('1 finished');
+    const tally = (testId: string) => mounted?.container.querySelector(`[data-testid=${testId}]`);
+    expect(tally('agent-count')?.getAttribute('aria-label'), 'running count leaves out the waiting agent').toBe('1 running');
+    expect(tally('agent-waiting')?.getAttribute('aria-label'), 'waiting count').toBe('1 waiting for an approval');
+    expect(tally('agent-failed')?.getAttribute('aria-label'), 'failed count is its own marker').toBe('1 failed');
+    expect(tally('agent-finished')?.getAttribute('aria-label'), 'finished tally').toBe('1 finished in the last minute');
+    expect(tally('agent-count')?.textContent, 'the chip draws the count and not the words').toBe('1');
+    expect(tally('agent-count')?.getAttribute('title'), 'the words are in the tooltip').toBe('1 running');
   });
 
   it('shows nothing for a session without agents, and the waiting marker for a session-level approval', async () => {
@@ -84,7 +87,8 @@ describe('tree decorations', () => {
     await flush();
     const rows = [...mounted.container.querySelectorAll('[data-testid=agent-row]')];
     expect(rows.map((row) => row.getAttribute('data-state')), 'finished node listed').toEqual(['running', 'done']);
-    expect(rows[1]?.textContent, 'outcome basis labelled').toContain('outcome derived by Agide');
+    expect(rows[1]?.getAttribute('title'), 'outcome basis labelled in the tooltip').toContain('outcome derived by Agide');
+    expect(rows[1]?.textContent, 'the status word is not repeated beside the chip').not.toMatch(/done.*completed/);
   });
 
   it('keeps a selected finished node and holds it through the command', async () => {
@@ -100,22 +104,7 @@ describe('tree decorations', () => {
   });
 });
 
-describe('plan usage', () => {
-  it('shows each window with its percentage and a forecast labelled as an estimate', async () => {
-    answers([], usageState({ plan: [{ window: 'five_hour', usedPercentage: 62, resetsAt: iso(3_600_000), observedAt: iso(-1000), source: 'status-line', runsOutInMinutes: 20, runsOutBeforeReset: true }, { window: 'seven_day', usedPercentage: 30, resetsAt: iso(86_400_000), observedAt: iso(-1000), source: 'status-line' }] }));
-    mounted = await render(createElement(PlanUsage));
-    const items = [...mounted.container.querySelectorAll('li')];
-    expect(items[0]?.textContent, 'five-hour line with the run-out time').toMatch(/^5 h: 62%, may run out around \d\d:\d\d$/);
-    expect(items[0]?.getAttribute('title'), 'forecast label').toContain('estimate at the current rate');
-    expect(items[1]?.textContent, 'seven-day line').toBe('7 d: 30%');
-  });
-
-  it('says there is no plan data for a login without rate limits', async () => {
-    answers([], usageState());
-    mounted = await render(createElement(PlanUsage));
-    expect(mounted.container.textContent, 'no plan data').toBe('no plan data');
-  });
-
+describe('plan line', () => {
   it('words a passed reset and a window that resets before it runs out', () => {
     const base = { window: 'five_hour' as const, usedPercentage: 50, observedAt: iso(0), source: 'status-line' as const };
     expect(planLine({ ...base, resetsAt: iso(-1000) }, now), 'reset').toBe('5 h: reset, no data since');
@@ -157,10 +146,7 @@ describe('agent history pane', () => {
     const labels = () => [...mounted!.container.querySelectorAll('[data-testid=history-row] td:first-child')].map((cell) => cell.textContent);
     expect(labels(), 'finished only, newest end first').toEqual(['Run tests', 'Read files']);
 
-    const select = mounted.container.querySelector('[data-testid=history-state]') as HTMLSelectElement;
-    select.value = 'done';
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-    await flush();
+    await chooseOption(mounted.container.querySelector('[data-testid=history-state]')!, 'Done');
     expect(labels(), 'state filter').toEqual(['Read files']);
 
     (mounted.container.querySelector('[data-testid=history-row]') as HTMLElement).click();

@@ -72,7 +72,7 @@ test('two profiles run side by side with separate data, trees and Claude directo
 
   const titles = await Promise.all([a, b].map(({ app }) => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getTitle())));
   expect(titles, 'window titles carry the profile name').toEqual(['Default · Agide', 'Work · Agide']);
-  await expect(b.page.getByTestId('profile-strip'), 'chrome strip in the profile colour').toHaveAttribute('data-colour', '#336699');
+  await expect(b.page.getByTestId('profile-identity'), 'title bar identity in the profile colour').toHaveAttribute('data-colour', '#336699');
 });
 
 test('a second start of a profile hands over to the running process and exits', async () => {
@@ -105,11 +105,11 @@ test('clicking a running profile in the rail focuses it, and an inbox item poste
   const posted = await client.callTool({ name: 'inbox_post', arguments: { message: 'Invoice job fixed' } });
   expect(posted.isError, 'inbox_post succeeds').toBeFalsy();
 
-  await expect(b.page.getByTestId('badge-default'), 'badge of default in the work rail').toHaveText('1', { timeout: 15_000 });
+  await expect(b.page.getByTestId('badge-default').locator('[aria-hidden="true"]'), 'badge of default in the work rail').toHaveText('1', { timeout: 15_000 });
   const entry = readFileSync(registryFile(root, 'default'), 'utf8');
   expect(JSON.parse(entry), 'registry entry holds the count').toMatchObject({ unread: 1, profileId: 'default' });
   expect(entry, 'registry entry holds no item text').not.toContain('Invoice');
   expect(await a.app.evaluate(({ app }) => app.getBadgeCount()), 'dock badge of the default profile').toBe(1);
-  await expect(a.page.getByTestId('badge-default'), 'the own rail entry shows its count too').toHaveText('1');
+  await expect(a.page.getByTestId('badge-default').locator('[aria-hidden="true"]'), 'the own rail entry shows its count too').toHaveText('1');
   expect(execFileSync('stat', ['-f', '%Lp', registryFile(root, 'default')]).toString().trim(), 'registry entry mode').toBe('600');
 });

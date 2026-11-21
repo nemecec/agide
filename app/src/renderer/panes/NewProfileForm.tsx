@@ -1,14 +1,16 @@
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { api } from '../api';
+import { Button, TextField } from '../ui/index';
 
-/** Name and colour of a new profile. The creating process makes the profile and starts it. */
+/** Name and colour of a new profile, in the popover of the rail's plus tile. The creating process makes the profile and starts it. */
 export function NewProfileForm({ palette, onDone }: { palette: readonly string[]; onDone: () => void }) {
   const [name, setName] = useState('');
-  const [colour, setColour] = useState(palette[0] ?? '#5b7fa6');
+  const [colour, setColour] = useState<string | undefined>(palette[0]);
   const [problem, setProblem] = useState<string | undefined>(undefined);
 
   const submit = (event: React.FormEvent): void => {
     event.preventDefault();
+    if (colour === undefined) return;
     void api()
       .invoke('profile_create', { name, colour })
       .then((result) => {
@@ -19,10 +21,7 @@ export function NewProfileForm({ palette, onDone }: { palette: readonly string[]
 
   return (
     <form className="profile-form" data-testid="profile-form" onSubmit={submit}>
-      <label>
-        Name
-        <input data-testid="profile-name" value={name} maxLength={40} autoFocus onChange={(e) => setName(e.target.value)} />
-      </label>
+      <TextField label="Name" data-testid="profile-name" value={name} maxLength={40} autoFocus error={problem} onChange={(event) => setName(event.target.value)} />
       <div className="profile-colours" role="radiogroup" aria-label="Colour">
         {palette.map((value) => (
           <button
@@ -32,19 +31,18 @@ export function NewProfileForm({ palette, onDone }: { palette: readonly string[]
             aria-checked={value === colour}
             aria-label={value}
             className="profile-colour"
-            style={{ background: value }}
+            style={{ '--profile-swatch': value } as CSSProperties}
             onClick={() => setColour(value)}
           />
         ))}
       </div>
-      {problem ? <p role="alert">{problem}</p> : null}
       <div className="profile-form-actions">
-        <button type="submit" disabled={name.trim() === ''}>
-          Create
-        </button>
-        <button type="button" onClick={onDone}>
+        <Button type="button" variant="quiet" onClick={onDone}>
           Cancel
-        </button>
+        </Button>
+        <Button type="submit" variant="primary" disabled={name.trim() === '' || colour === undefined}>
+          Create
+        </Button>
       </div>
     </form>
   );

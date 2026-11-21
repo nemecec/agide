@@ -1,0 +1,6 @@
+.ui-hint {
+  margin: 0;
+  color: var(--agide-text-secondary);
+  font-size: var(--agide-type-small-size);
+  line-height: var(--agide-type-small-line);
+}

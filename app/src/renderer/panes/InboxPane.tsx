@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { api } from '../api';
+import { Chip } from '../ui/Chip';
+import { EmptyState } from '../ui/EmptyState';
+import { ACTION_ICONS, PANE_ICONS } from '../ui/icons';
+import { SegmentedControl } from '../ui/SegmentedControl';
 import { ItemCard } from './inbox/ItemCard';
-import { ageOf, KIND_LABEL, needsAnswer, orderItems } from './inbox/format';
+import { KindLabel } from './inbox/KindLabel';
+import { ageOf, needsAnswer, orderItems } from './inbox/format';
 import { SessionPeek } from './inbox/SessionPeek';
 import { useInbox, type Filter } from './inbox/useInbox';
 import type { PaneProps } from './paneTypes';
@@ -53,26 +58,32 @@ export function InboxPane({ instanceId }: PaneProps<{ viewId?: string; folderId?
       <div className="inbox-list-column">
         <header className="inbox-header">
           <h1>Inbox</h1>
-          <span data-testid="inbox-unread" data-count={unread}>
-            {unread === 0 ? 'No unread items' : `${unread} unread`}
-          </span>
-          {waiting > 0 && (
-            <span className="inbox-waiting" data-testid="inbox-waiting">
-              {waiting} need{waiting === 1 ? 's' : ''} an answer
+          <SegmentedControl
+            aria-label="Filter"
+            value={filter}
+            onValueChange={(value) => setFilter(value as Filter)}
+            segments={[
+              { value: 'open', label: 'Open', testId: 'inbox-filter-open' },
+              { value: 'done', label: 'Done', testId: 'inbox-filter-done' },
+            ]}
+          />
+          <p className="inbox-counts">
+            <span data-testid="inbox-unread" data-count={unread}>
+              {unread === 0 ? 'No unread items' : `${unread} unread`}
             </span>
-          )}
-          <div role="tablist" aria-label="Filter" className="inbox-segments">
-            {(['open', 'done'] as const).map((name) => (
-              <button key={name} role="tab" type="button" aria-selected={filter === name} onClick={() => setFilter(name)} data-testid={`inbox-filter-${name}`}>
-                {name === 'open' ? 'Open' : 'Done'}
-              </button>
-            ))}
-          </div>
+            {waiting > 0 && (
+              <Chip tone="warning" icon={ACTION_ICONS['needs-answer'].icon} className="inbox-waiting" data-testid="inbox-waiting" label={`${waiting} need${waiting === 1 ? 's' : ''} an answer`} />
+            )}
+          </p>
         </header>
         {loaded && items.length === 0 ? (
-          <p className="inbox-empty" data-testid="inbox-empty">
-            {filter === 'open' ? 'No open items' : 'No done items'}
-          </p>
+          <EmptyState
+            className="inbox-empty"
+            data-testid="inbox-empty"
+            icon={PANE_ICONS.inbox.icon}
+            title={filter === 'open' ? 'Nothing waits for you' : 'Nothing done yet'}
+            help={filter === 'open' ? 'New items appear here.' : 'Items you finish appear here.'}
+          />
         ) : (
           <ul className="inbox-list" ref={list} aria-label="Items">
             {items.map((item) => (
@@ -88,9 +99,9 @@ export function InboxPane({ instanceId }: PaneProps<{ viewId?: string; folderId?
                   onClick={() => setSelectedId(item.id)}
                 >
                   <span className="inbox-row-top">
-                    <span className="inbox-dot" aria-label={item.state === 'new' ? 'unread' : 'read'} data-unread={item.state === 'new'} />
-                    <span className="inbox-row-kind">{KIND_LABEL[item.kind] ?? item.kind}</span>
-                    {needsAnswer(item) && <span className="chip inbox-needs-answer" data-tone="waiting" data-testid="inbox-needs-answer">Needs answer</span>}
+                    <span className="inbox-dot" role="img" aria-label={item.state === 'new' ? 'unread' : 'read'} data-unread={item.state === 'new'} />
+                    <KindLabel kind={item.kind} />
+                    {needsAnswer(item) && <Chip tone="warning" icon={ACTION_ICONS['needs-answer'].icon} className="inbox-needs-answer" data-testid="inbox-needs-answer" label="Needs answer" />}
                     <span className="inbox-row-where">{[item.projectName, item.sessionName].filter(Boolean).join(' / ')}</span>
                     <span className="inbox-row-age">{ageOf(item.updatedAt)}</span>
                   </span>
@@ -107,8 +118,8 @@ export function InboxPane({ instanceId }: PaneProps<{ viewId?: string; folderId?
       <div className="inbox-detail-column">
         {selected ? (
           <ItemCard item={selected} canPeek={selected.sessionId !== undefined} peeking={peekSession !== undefined} onPeek={() => setPeekSession(selected.sessionId)} />
-        ) : (
-          <p className="inbox-empty">Select an item</p>
+        ) : loaded && items.length === 0 ? null : (
+          <EmptyState icon={PANE_ICONS.inbox.icon} title="Select an item" help="Its message and actions show here." />
         )}
       </div>
       {peekSession !== undefined && <SessionPeek key={peekSession} sessionId={peekSession} onBack={() => setPeekSession(undefined)} />}

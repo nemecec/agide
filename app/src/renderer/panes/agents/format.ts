@@ -34,6 +34,14 @@ export function outcomeText(view: Pick<AgentNodeView, 'state' | 'outcome' | 'out
   return `${view.outcome}${view.outcomeBasis === 'derived' ? ' (outcome derived by Agide)' : ' (reported)'}`;
 }
 
+const STATE_OUTCOME: Partial<Record<AgentNodeView['state'], AgentNodeView['outcome']>> = { done: 'completed', failed: 'failed' };
+
+/** The secondary text of a tree row: the queue or tool while the agent works, and an outcome only when the status chip does not already say it. */
+export function rowDetail(view: Pick<AgentNodeView, 'state' | 'queued' | 'lastTool' | 'outcome'>): string {
+  if (view.state === 'done' || view.state === 'failed') return view.outcome === undefined || view.outcome === STATE_OUTCOME[view.state] ? '' : view.outcome;
+  return view.queued === true ? 'queued' : (view.lastTool ?? '');
+}
+
 export function windowName(window: PlanWindowView['window']): string {
   return window === 'five_hour' ? '5 h' : '7 d';
 }

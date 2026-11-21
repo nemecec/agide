@@ -106,11 +106,11 @@ test('shows subagents as nodes under the session, counts them, removes finished 
   await type(page, sessionId, '/agent a2 Run the tests');
   await expect(rows(page), 'two agent nodes appear under the session').toHaveCount(2);
   await expect(rows(page).first(), 'the first node is labelled with the description of the Agent tool call').toContainText('Read the files');
-  await expect(page.getByTestId('agent-count'), 'the parent shows the running count').toHaveText('2 running');
+  await expect(page.getByTestId('agent-count'), 'the parent shows the running count').toHaveAttribute('aria-label', '2 running');
 
   await type(page, sessionId, '/agentstop a1');
-  await expect(page.getByTestId('agent-count'), 'the count falls when an agent ends').toHaveText('1 running');
-  await expect(page.getByTestId('agent-finished'), 'the finished tally leaves a trace').toHaveText('1 finished');
+  await expect(page.getByTestId('agent-count'), 'the count falls when an agent ends').toHaveAttribute('aria-label', '1 running');
+  await expect(page.getByTestId('agent-finished'), 'the finished tally leaves a trace').toHaveAttribute('aria-label', '1 finished in the last minute');
   await expect(page.locator('[data-testid=agent-row][data-agent=a1]'), 'the finished node leaves the tree after the delay').toHaveCount(0, { timeout: 8000 });
   await expect(rows(page), 'the running node stays').toHaveCount(1);
 

@@ -4,6 +4,14 @@ import type { TreeNode } from '../../core/tree/types';
 import type { PermissionOptions } from '../../core/permissions/options';
 import { api } from '../api';
 import { buildStartInput, detectKind, KIND_LABEL, type ModeChoice, type TaskForm } from './task/taskForm';
+import { Button } from '../ui/Button';
+import { Chip } from '../ui/Chip';
+import { DialogContent } from '../ui/Dialog';
+import { Disclosure } from '../ui/Disclosure';
+import { Field, TextArea, TextField } from '../ui/Field';
+import { Hint } from '../ui/Hint';
+import { Notice } from '../ui/Notice';
+import { Select } from '../ui/Select';
 import './task/task.css';
 
 interface Preview {
@@ -74,85 +82,85 @@ export function NewTaskDialog({ parentFolderId, onClose }: { readonly parentFold
 
   const repoFromPreview = preview?.repoPath;
   return (
-    <div className="dialog task-dialog" role="dialog" aria-label="New task" data-testid="new-task-dialog" data-parent={parentFolderId ?? ''}>
-      <h2>New task</h2>
-      <label>
-        Source
-        <textarea
-          data-autofocus
-          data-testid="task-source"
-          rows={3}
-          value={form.source}
-          placeholder="A prompt, a GitHub pull request URL, or a Jira key"
-          onChange={(event) => set('source', event.target.value)}
-        />
-      </label>
-      <p className="chip task-kind" data-tone="idle" data-testid="task-kind">{kind === undefined ? 'Nothing entered' : KIND_LABEL[kind]}</p>
-      {kind !== undefined && kind !== 'prompt' && (
-        <label>
-          Instruction (optional)
-          <textarea data-testid="task-instruction" rows={2} value={form.instruction} onChange={(event) => set('instruction', event.target.value)} />
-        </label>
-      )}
-      <label>
-        Repository
-        <input data-testid="task-repo" title={form.repoPath || repoFromPreview} list="task-repositories" value={form.repoPath} placeholder={repoFromPreview ?? 'No repository'} onChange={(event) => set('repoPath', event.target.value)} />
-        <datalist id="task-repositories">
-          {repositories.map((path) => (
-            <option key={path} value={path} />
-          ))}
-        </datalist>
-      </label>
-      {(kind === 'prompt' || kind === 'jira') && form.repoPath.trim() !== '' && (
-        <label>
-          Base
-          <input data-testid="task-base" value={form.base} placeholder="origin/HEAD" onChange={(event) => set('base', event.target.value)} />
-        </label>
-      )}
-      <label>
-        Parent folder
-        <select aria-label="Parent folder" data-testid="task-parent" value={form.parentFolderId} onChange={(event) => set('parentFolderId', event.target.value)}>
-          <option value="">Top level</option>
-          {folders.map((folder) => (
-            <option key={folder.id} value={folder.id}>
-              {folder.title}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Permission mode
-        <select aria-label="Permission mode" data-testid="task-mode" value={form.mode} onChange={(event) => set('mode', event.target.value as ModeChoice)}>
-          {MODES.map((mode) => (
-            <option key={mode.value} value={mode.value}>
-              {mode.value === 'profile' && profileMode !== undefined ? `${mode.label} (${profileMode})` : mode.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <p>Isolation: the profile's provider.</p>
-      <details open={previewOpen} onToggle={(event) => setPreviewOpen(event.currentTarget.open)}>
-        <summary>Preview</summary>
+    <DialogContent
+      title="New task"
+      className="task-dialog"
+      data-testid="new-task-dialog"
+      data-parent={parentFolderId ?? ''}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!busy && kind !== undefined) void start();
+      }}
+      footer={
+        <>
+          <Button data-dialog-cancel onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" data-testid="task-start" disabled={busy || kind === undefined} loading={busy}>
+            {busy ? 'Starting…' : 'Start'}
+          </Button>
+        </>
+      }
+    >
+      <TextArea
+        label="Source"
+        data-autofocus
+        data-testid="task-source"
+        rows={3}
+        value={form.source}
+        placeholder="A prompt, a GitHub pull request URL, or a Jira key"
+        onChange={(event) => set('source', event.target.value)}
+      />
+      <div>
+        <Chip data-testid="task-kind" label={kind === undefined ? 'Nothing entered' : KIND_LABEL[kind]} />
+      </div>
+      {kind !== undefined && kind !== 'prompt' && <TextArea label="Instruction (optional)" data-testid="task-instruction" rows={2} value={form.instruction} onChange={(event) => set('instruction', event.target.value)} />}
+      <TextField
+        label="Repository"
+        data-testid="task-repo"
+        title={form.repoPath || repoFromPreview}
+        list="task-repositories"
+        mono
+        value={form.repoPath}
+        placeholder={repoFromPreview ?? 'No repository'}
+        onChange={(event) => set('repoPath', event.target.value)}
+      />
+      <datalist id="task-repositories">
+        {repositories.map((path) => (
+          <option key={path} value={path} />
+        ))}
+      </datalist>
+      {(kind === 'prompt' || kind === 'jira') && form.repoPath.trim() !== '' && <TextField label="Base" data-testid="task-base" mono value={form.base} placeholder="origin/HEAD" onChange={(event) => set('base', event.target.value)} />}
+      <Field label="Parent folder">
+        {(control) => (
+          <Select {...control} data-testid="task-parent" value={form.parentFolderId} onValueChange={(value) => set('parentFolderId', value)} options={[{ value: '', label: 'Top level' }, ...folders.map((folder) => ({ value: folder.id, label: folder.title }))]} />
+        )}
+      </Field>
+      <Field label="Permission mode">
+        {(control) => (
+          <Select
+            {...control}
+            data-testid="task-mode"
+            value={form.mode}
+            onValueChange={(value) => set('mode', value as ModeChoice)}
+            options={MODES.map((mode) => ({ value: mode.value, label: mode.value === 'profile' && profileMode !== undefined ? `${mode.label} (${profileMode})` : mode.label }))}
+          />
+        )}
+      </Field>
+      <Hint>Isolation: the profile&apos;s provider.</Hint>
+      <Disclosure label="Preview" open={previewOpen} onOpenChange={setPreviewOpen}>
         {preview && (
           <div data-testid="task-preview">
             <pre>{preview.commands.join('\n') || 'No commands run before the session starts.'}</pre>
             <pre>{preview.prompt}</pre>
           </div>
         )}
-      </details>
+      </Disclosure>
       {error && (
-        <p role="alert" className="dialog-error" data-testid="task-error">
+        <Notice tone="danger" data-testid="task-error">
           {error}
-        </p>
+        </Notice>
       )}
-      <div className="dialog-actions">
-        <button type="button" data-dialog-cancel onClick={onClose}>
-          Cancel
-        </button>
-        <button type="button" className="btn-primary" data-testid="task-start" disabled={busy || kind === undefined} onClick={() => void start()}>
-          {busy ? 'Starting…' : 'Start'}
-        </button>
-      </div>
-    </div>
+    </DialogContent>
   );
 }

@@ -10,6 +10,7 @@ import type { ProfileService, ResolvedProfile } from '../core/profile/index';
 import type { SessionService } from '../core/session/index';
 import type { Database } from '../core/store/index';
 import type { TasksService } from '../core/tasks/index';
+import type { ThemeService } from '../core/theme/service';
 import type { TreeService } from '../core/tree/index';
 import type { BrowserViews } from './browser/views';
 
@@ -46,7 +47,7 @@ export interface Desktop {
   setBadgeCount(count: number): void;
 }
 
-/** Services the modules provide, in init order (0029): profile, tree, mcp, permissions, session, layout, inbox, browser, agents, tasks. */
+/** Services the modules provide, in init order (0029): profile, tree, mcp, permissions, session, layout, theme, inbox, browser, agents, tasks. */
 export interface Services {
   readonly profile: ProfileService;
   readonly tree: TreeService;
@@ -54,6 +55,7 @@ export interface Services {
   readonly permissions: PermissionService;
   readonly sessions: SessionService;
   readonly layout: LayoutService;
+  readonly theme: ThemeService;
   readonly inbox: InboxService;
   readonly browser: BrowserService;
   readonly agents: AgentsService;

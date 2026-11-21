@@ -195,7 +195,7 @@ async function inbox(context) {
     const count = await rows.count();
     for (let index = 0; index < count; index++) {
       await rows.nth(index).click();
-      await sleep(350);
+      await sleep(1300);
       const kind = (await rows.nth(index).getAttribute('data-kind')) ?? `item${index}`;
       await shoot(context, instance, `09-inbox-card-${index}-${kind}`);
       if ((await instance.page.getByTestId('inbox-expand').count()) > 0) {

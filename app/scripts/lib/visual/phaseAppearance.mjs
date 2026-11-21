@@ -25,7 +25,7 @@ export async function phaseAppearance(context) {
       await instance.page.getByText('Inbox', { exact: true }).first().click();
       await sleep(500);
       await shoot(context, instance, `12-appearance-${mode}-inbox`);
-      await instance.page.getByText('Surface host', { exact: true }).first().click();
+      await instance.page.getByRole('treeitem', { name: /Fix upload retry/ }).click();
     }
   } finally {
     await closeApp(instance);

@@ -8,6 +8,7 @@ import * as mcpModule from './modules/mcp';
 import * as permissionsModule from './modules/permissions';
 import * as profileModule from './modules/profile';
 import * as sessionModule from './modules/session';
+import * as themeModule from './modules/theme';
 import * as tasksModule from './modules/tasks';
 import * as treeModule from './modules/tree';
 
@@ -41,6 +42,7 @@ export async function initModules(ctx: ModuleContext): Promise<InitializedModule
   const permissions = keep(permissionsModule.init(ctx, { profile, launch }));
   const sessions = keep(await sessionModule.init(ctx, { tree, mcp, profile, permissions, launch }));
   const layout = keep(await layoutModule.init(ctx, { tree }));
+  const theme = keep(themeModule.init(ctx));
   const inbox = keep(await inboxModule.init(ctx, { tree, sessions, profile }));
   const browser = keep(browserModule.init(ctx, { tree, mcp, sessions, profile, permissions, inbox, launch }));
   const agents = keep(agentsModule.init(ctx, { tree, sessions, inbox, profile, launch }));
@@ -48,7 +50,7 @@ export async function initModules(ctx: ModuleContext): Promise<InitializedModule
   await mcp.start();
 
   return {
-    services: { profile, tree, mcp, permissions, sessions, layout, inbox, browser, agents, tasks },
+    services: { profile, tree, mcp, permissions, sessions, layout, theme, inbox, browser, agents, tasks },
     dispose: async () => {
       for (const handle of handles.reverse()) await handle.dispose?.();
     },

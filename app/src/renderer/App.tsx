@@ -1,15 +1,15 @@
 import { DialogHost } from './dialogs/DialogHost';
 import { LayoutHost } from './layout/LayoutHost';
-import { SetupPane } from './panes/SetupPane';
-import './dialogs/dialogs.css';
+import { ThemeNotice } from './theme/ThemeNotice';
+import { TooltipProvider } from './ui/index';
 
-/** The window is a layout host: the layout file says which panes it shows and where. The setup pane and dialogs float above it. */
+/** The window is a layout host: the layout file says which panes it shows and where. Dialogs float above it. */
 export function App() {
   return (
-    <>
+    <TooltipProvider>
       <LayoutHost />
-      <SetupPane />
       <DialogHost />
-    </>
+      <ThemeNotice />
+    </TooltipProvider>
   );
 }

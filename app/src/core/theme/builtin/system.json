@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "system",
+  "name": "System",
+  "kind": "system",
+  "light": {
+    "extends": "agide-light",
+    "tokens": {}
+  },
+  "dark": {
+    "extends": "agide-dark",
+    "tokens": {}
+  },
+  "source": {
+    "kind": "builtin"
+  }
+}

@@ -1,5 +1,7 @@
 import { useAgentsView } from './agents/agentsStore';
 import { TranscriptView } from './agents/TranscriptView';
+import { EmptyState } from '../ui/EmptyState';
+import { SURFACE_ICONS } from '../ui/icons';
 import type { PaneProps } from './paneTypes';
 import './agents/agents.css';
 
@@ -13,7 +15,7 @@ export function TranscriptViewerPane({ instanceId, config }: PaneProps) {
   const agentKey = typeof config['agentKey'] === 'string' ? config['agentKey'] : selected?.agentKey;
   return (
     <section className="agents-pane" data-testid="transcript-viewer-pane" data-instance={instanceId} aria-label="Transcript">
-      {sessionId && agentKey ? <TranscriptView sessionId={sessionId} agentKey={agentKey} /> : <p className="transcript-status">Select an agent to read its transcript.</p>}
+      {sessionId && agentKey ? <TranscriptView sessionId={sessionId} agentKey={agentKey} /> : <EmptyState icon={SURFACE_ICONS.agent.icon} title="Select an agent" help="Its transcript shows here." />}
     </section>
   );
 }

@@ -1,0 +1,52 @@
+.theme-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--agide-border-subtle);
+  border-radius: var(--agide-radius-lg);
+}
+.theme-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--agide-space-3);
+  padding: var(--agide-space-2) var(--agide-space-3);
+}
+.theme-row + .theme-row {
+  border-top: 1px solid var(--agide-border-subtle);
+}
+.theme-row[data-active] {
+  background: var(--agide-selection);
+}
+.theme-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--agide-space-0_5);
+  min-width: 0;
+}
+.theme-row-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--agide-space-1_5);
+}
+.theme-row-main .ui-hint {
+  margin: 0;
+}
+.theme-row-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--agide-space-1);
+}
+
+.import-review,
+.import-license {
+  display: flex;
+  flex-direction: column;
+  gap: var(--agide-space-3);
+}
+.import-review > p {
+  margin: 0;
+}

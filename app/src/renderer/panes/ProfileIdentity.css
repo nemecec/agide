@@ -1,0 +1,38 @@
+.profile-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--agide-space-2);
+  min-width: 0;
+  height: 28px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 var(--agide-space-2);
+  border: 0;
+  border-radius: var(--agide-radius-md);
+  background: transparent;
+  color: var(--agide-text-primary);
+  font: inherit;
+}
+
+button.profile-identity {
+  cursor: default;
+}
+
+button.profile-identity:hover {
+  background: var(--agide-surface-hover);
+}
+
+button.profile-identity:focus-visible,
+div.profile-identity:focus-visible {
+  outline: var(--agide-focus-width) solid var(--agide-focus-ring);
+  outline-offset: 2px;
+}
+
+.profile-identity-name {
+  overflow: hidden;
+  font-size: var(--agide-type-body-size);
+  font-weight: var(--agide-font-weight-semibold);
+  line-height: var(--agide-type-body-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -87,6 +87,14 @@ A command with a UI binding must be an MCP tool unless it declares `mcpExempt` w
 | `task_start` | menu tree-node, key CmdOrCtrl+Shift+N | yes | ok |
 | `task_trust_state` | none | no | ok |
 | `task_update` | none | yes | ok |
+| `theme_apply` | none | yes | ok |
+| `theme_get` | none | yes | ok |
+| `theme_import` | none | yes | ok |
+| `theme_list` | none | yes | ok |
+| `theme_preview` | none | yes | ok |
+| `theme_revert_preview` | none | yes | ok |
+| `theme_undo` | none | yes | ok |
+| `theme_validate` | none | yes | ok |
 | `ui_capture_window` | menu app | yes | ok |
 | `ui_create_folder` | menu tree-background | yes | ok |
 | `ui_create_leaf` | none | yes | ok |

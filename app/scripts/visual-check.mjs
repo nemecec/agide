@@ -9,6 +9,7 @@ import { phaseAppearance } from './lib/visual/phaseAppearance.mjs';
 import { phaseBrowser } from './lib/visual/phaseBrowser.mjs';
 import { phaseErrors } from './lib/visual/phaseErrors.mjs';
 import { phaseFocus } from './lib/visual/phaseFocus.mjs';
+import { phaseTheme } from './lib/visual/phaseTheme.mjs';
 import { phaseProfiles } from './lib/visual/phaseProfiles.mjs';
 import { phaseWorkspace } from './lib/visual/phaseWorkspace.mjs';
 
@@ -23,6 +24,7 @@ const PHASES = {
   errors: phaseErrors,
   appearance: phaseAppearance,
   focus: phaseFocus,
+  theme: phaseTheme,
 };
 
 const argument = (name) => {

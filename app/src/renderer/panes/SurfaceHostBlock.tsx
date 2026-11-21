@@ -1,3 +1,5 @@
+import { EmptyState } from '../ui/EmptyState';
+import { SURFACE_ICONS } from '../ui/icons';
 import type { PaneProps } from './paneTypes';
 import { SurfacePane } from './SurfacePane';
 import { useTreeNodes } from './useTreeNodes';
@@ -10,7 +12,7 @@ export function SurfaceHostBlock({ config, inputs }: PaneProps) {
   const emptyText = typeof config['emptyText'] === 'string' ? config['emptyText'] : undefined;
   return (
     <main className="surface-pane" data-testid="surface-pane" aria-label="Surface">
-      {node === undefined && emptyText !== undefined ? <div className="placeholder">{emptyText}</div> : <SurfacePane node={node} />}
+      {node === undefined && emptyText !== undefined ? <EmptyState icon={SURFACE_ICONS.session.icon} title={emptyText} /> : <SurfacePane node={node} />}
     </main>
   );
 }

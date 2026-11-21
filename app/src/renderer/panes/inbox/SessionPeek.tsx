@@ -1,11 +1,13 @@
 import { FitAddon } from '@xterm/addon-fit';
-import { Terminal, type ITheme } from '@xterm/xterm';
+import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState } from 'react';
 import type { SessionInfo } from '../../../core/session/types';
 import { api } from '../../api';
-
-const DARK: ITheme = { background: '#1e1e1e', foreground: '#e5e5e7' };
-const LIGHT: ITheme = { background: '#ffffff', foreground: '#1d1d1f' };
+import { currentTerminalOptions, followTheme } from '../../theme/terminalOptions';
+import { Button } from '../../ui/Button';
+import { Chip } from '../../ui/Chip';
+import { ACTION_ICONS, STATUS_ICONS, STATUS_TONES } from '../../ui/icons';
+import { sessionStatusKind } from '../sessionStatus';
 
 /**
  * A read-only view of a session's terminal beside the message card. It never takes keyboard focus, sends no
@@ -20,14 +22,14 @@ export function SessionPeek({ sessionId, onBack }: { sessionId: string; onBack: 
     const element = host.current;
     if (!element) return;
     const term = new Terminal({
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      ...currentTerminalOptions(false),
       fontSize: 12,
       disableStdin: true,
       cursorBlink: false,
       cursorInactiveStyle: 'none',
       scrollback: 2000,
-      theme: window.matchMedia('(prefers-color-scheme: dark)').matches ? DARK : LIGHT,
     });
+    const stopTheme = followTheme(term, false);
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(element);
@@ -65,21 +67,28 @@ export function SessionPeek({ sessionId, onBack }: { sessionId: string; onBack: 
       live = false;
       observer.disconnect();
       off();
+      stopTheme();
       term.dispose();
       void api().invoke('inbox_set_viewing', {});
     };
   }, [sessionId]);
 
+  const kind = sessionStatusKind(status);
   return (
     <aside className="inbox-peek" data-testid="inbox-peek" aria-label="Session peek" onKeyDown={(event) => event.key === 'Escape' && onBack()}>
       <div className="inbox-peek-bar">
-        <button type="button" onClick={onBack} data-testid="inbox-peek-back">
+        <Button variant="quiet" size="sm" icon={ACTION_ICONS.back.icon} onClick={onBack} data-testid="inbox-peek-back">
           Back to message
-        </button>
-        <span className="inbox-peek-status chip" data-tone={status === 'busy' ? 'busy' : status === 'waiting' ? 'waiting' : 'idle'} data-testid="inbox-peek-status" data-status={status}>
-          {status === 'closed' ? 'session not found' : status}
-        </span>
-        <span className="inbox-peek-note">read only</span>
+        </Button>
+        <Chip
+          tone={STATUS_TONES[kind]}
+          icon={STATUS_ICONS[kind].icon}
+          spin={kind === 'busy'}
+          label={status === 'closed' ? 'session not found' : status}
+          data-testid="inbox-peek-status"
+          data-status={status}
+        />
+        <Chip icon={ACTION_ICONS['permission-mode'].icon} label="read only" />
       </div>
       <div className="inbox-peek-host" ref={host} data-testid="inbox-peek-host" />
     </aside>

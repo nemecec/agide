@@ -1,0 +1,109 @@
+.ui-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--agide-space-1_5);
+  box-sizing: border-box;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: var(--agide-radius-md);
+  background: transparent;
+  color: var(--agide-text-primary);
+  font: inherit;
+  font-family: var(--agide-font-ui);
+  font-weight: var(--agide-font-weight-medium);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.ui-button[data-size='md'] {
+  height: var(--agide-density-control);
+  padding: 0 var(--agide-space-3);
+  font-size: var(--agide-type-body-size);
+  line-height: var(--agide-type-body-line);
+}
+
+.ui-button[data-size='sm'] {
+  height: var(--agide-density-control-sm);
+  padding: 0 var(--agide-space-2);
+  font-size: var(--agide-type-small-size);
+  line-height: var(--agide-type-small-line);
+}
+
+.ui-button-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ui-button[data-variant='primary'] {
+  background: var(--agide-accent);
+  color: var(--agide-accent-on);
+}
+.ui-button[data-variant='primary']:not(:disabled, [aria-disabled='true']):hover {
+  background: var(--agide-accent-hover);
+}
+.ui-button[data-variant='primary']:not(:disabled, [aria-disabled='true']):active {
+  background: var(--agide-accent-active);
+}
+
+.ui-button[data-variant='secondary'] {
+  background: var(--agide-surface-raised);
+  border-color: var(--agide-border-default);
+  box-shadow: var(--agide-shadow-1);
+}
+.ui-button[data-variant='secondary']:not(:disabled, [aria-disabled='true']):hover {
+  background: color-mix(in srgb, var(--agide-text-primary) 4%, var(--agide-surface-raised));
+}
+.ui-button[data-variant='secondary']:not(:disabled, [aria-disabled='true']):active {
+  background: color-mix(in srgb, var(--agide-text-primary) 8%, var(--agide-surface-raised));
+}
+
+.ui-button[data-variant='quiet']:not(:disabled, [aria-disabled='true']):hover {
+  background: var(--agide-surface-hover);
+}
+.ui-button[data-variant='quiet']:not(:disabled, [aria-disabled='true']):active {
+  background: var(--agide-surface-pressed);
+}
+
+.ui-button[data-variant='danger'] {
+  background: var(--agide-danger-fill);
+  color: var(--agide-accent-on);
+}
+.ui-button[data-variant='danger']:not(:disabled, [aria-disabled='true']):hover {
+  filter: brightness(0.92);
+}
+.ui-button[data-variant='danger']:not(:disabled, [aria-disabled='true']):active {
+  filter: brightness(0.84);
+}
+
+.ui-button[data-variant='danger-quiet'] {
+  color: var(--agide-danger-fg);
+}
+.ui-button[data-variant='danger-quiet']:not(:disabled, [aria-disabled='true']):hover {
+  background: var(--agide-danger-bg);
+}
+.ui-button[data-variant='danger-quiet']:not(:disabled, [aria-disabled='true']):active {
+  background: color-mix(in srgb, var(--agide-danger-fg) 8%, var(--agide-danger-bg));
+}
+
+.ui-button:disabled,
+.ui-button[aria-disabled='true'] {
+  opacity: 0.4;
+}
+
+.ui-button:focus-visible {
+  outline: var(--agide-focus-width) solid var(--agide-focus-ring);
+  outline-offset: 2px;
+}
+
+/* A button without a leading icon keeps its width while loading: the label hides and the loader sits over it. */
+.ui-button[data-overlay-spinner] .ui-button-label {
+  visibility: hidden;
+}
+.ui-button[data-overlay-spinner] .ui-button-icon {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+}

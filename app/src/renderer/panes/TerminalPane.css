@@ -3,25 +3,19 @@
   flex-direction: column;
   height: 100%;
   min-width: 0;
+  background: var(--agide-surface-content);
 }
 
 .terminal-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  border-bottom: 1px solid var(--border);
-  color: var(--muted);
+  flex: none;
+  gap: var(--agide-space-2);
+  border-bottom: 1px solid var(--agide-border-subtle);
+  background: var(--agide-surface-content);
 }
-
-.terminal-bar button {
-  font: inherit;
-}
-
 
 .terminal-host {
   flex: 1;
   min-height: 0;
-  padding: 6px 0 0 8px;
-  background: var(--bg);
+  padding: var(--agide-space-2) var(--agide-space-3);
+  background: var(--agide-terminal-background);
 }

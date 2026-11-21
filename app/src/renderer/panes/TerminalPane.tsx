@@ -1,24 +1,24 @@
 import { FitAddon } from '@xterm/addon-fit';
-import { Terminal, type ITheme } from '@xterm/xterm';
+import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState } from 'react';
 import type { SessionInfo, SessionStatus } from '../../core/session/types';
 import { api } from '../api';
+import { currentTerminalOptions, followTheme } from '../theme/terminalOptions';
 import './TerminalPane.css';
 import { SessionHeader } from './session/SessionHeader';
 import { TrustBanner } from './session/TrustBanner';
-
-const DARK: ITheme = { background: '#1e1e1e', foreground: '#e5e5e7', cursor: '#e5e5e7' };
-const LIGHT: ITheme = { background: '#ffffff', foreground: '#1d1d1f', cursor: '#1d1d1f', selectionBackground: '#b4d5fe' };
-
-const prefersDark = () => window.matchMedia('(prefers-color-scheme: dark)').matches;
+import { sessionStatusKind } from './sessionStatus';
+import { Button } from '../ui/Button';
+import { EmptyState } from '../ui/EmptyState';
+import { Chip } from '../ui/Chip';
+import { STATUS_ICONS, STATUS_TONES, SURFACE_ICONS } from '../ui/icons';
+import { Toolbar, ToolbarItem } from '../ui/Toolbar';
 
 /** Terminal of one Claude session, or a placeholder when none is selected. */
 export function TerminalPane({ sessionId }: { sessionId?: string | undefined }) {
-  if (!sessionId) return <div className="placeholder">No session selected</div>;
+  if (!sessionId) return <EmptyState icon={SURFACE_ICONS.session.icon} title="No session selected" />;
   return <SessionTerminal key={sessionId} sessionId={sessionId} />;
 }
-
-const toneOf = (status: SessionStatus): 'busy' | 'waiting' | 'idle' => (status === 'busy' ? 'busy' : status === 'waiting' ? 'waiting' : 'idle');
 
 type View = { kind: 'loading' } | { kind: 'missing' } | { kind: 'ready'; status: SessionStatus };
 
@@ -31,22 +31,16 @@ function SessionTerminal({ sessionId }: { sessionId: string }) {
     const element = host.current;
     if (!element) return;
     const term = new Terminal({
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      ...currentTerminalOptions(true),
       fontSize: 13,
-      cursorBlink: true,
       scrollback: 5000,
       allowProposedApi: false,
-      theme: prefersDark() ? DARK : LIGHT,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(element);
     terminal.current = term;
-    const scheme = window.matchMedia('(prefers-color-scheme: dark)');
-    const followScheme = () => {
-      term.options.theme = scheme.matches ? DARK : LIGHT;
-    };
-    scheme.addEventListener?.('change', followScheme);
+    const stopTheme = followTheme(term, true);
 
     let live = true;
     // Output that arrives before the snapshot is part of the snapshot: events and the snapshot reply travel
@@ -102,7 +96,7 @@ function SessionTerminal({ sessionId }: { sessionId: string }) {
     return () => {
       live = false;
       cancelAnimationFrame(frame);
-      scheme.removeEventListener?.('change', followScheme);
+      stopTheme();
       observer.disconnect();
       unsubscribe();
       input.dispose();
@@ -117,20 +111,28 @@ function SessionTerminal({ sessionId }: { sessionId: string }) {
     void api().invoke('session_resume', { sessionId });
   };
 
+  const kind = sessionStatusKind(view.kind === 'ready' ? view.status : view.kind === 'missing' ? 'closed' : 'loading');
   return (
     <div className="terminal-pane" data-testid="terminal-pane" onClick={() => terminal.current?.focus()}>
       <SessionHeader sessionId={sessionId} />
       <TrustBanner sessionId={sessionId} />
-      <div className="terminal-bar">
-        <span className="terminal-status chip" data-tone={view.kind === 'ready' ? toneOf(view.status) : 'idle'} data-testid="terminal-status" data-status={view.kind === 'ready' ? view.status : view.kind}>
-          {view.kind === 'ready' ? view.status : view.kind === 'missing' ? 'session not found' : 'loading'}
-        </span>
+      <Toolbar className="terminal-bar" aria-label="Session">
+        <Chip
+          tone={STATUS_TONES[kind]}
+          icon={STATUS_ICONS[kind].icon}
+          spin={kind === 'busy'}
+          label={view.kind === 'ready' ? view.status : view.kind === 'missing' ? 'session not found' : 'loading'}
+          data-testid="terminal-status"
+          data-status={view.kind === 'ready' ? view.status : view.kind}
+        />
         {view.kind === 'ready' && view.status === 'exited' && (
-          <button type="button" onClick={resume}>
-            Resume
-          </button>
+          <ToolbarItem asChild>
+            <Button variant="quiet" size="sm" onClick={resume}>
+              Resume
+            </Button>
+          </ToolbarItem>
         )}
-      </div>
+      </Toolbar>
       <div className="terminal-host" ref={host} data-testid="terminal-host" />
     </div>
   );

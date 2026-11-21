@@ -1,0 +1,26 @@
+.ui-tooltip {
+  z-index: var(--agide-z-tooltip);
+  box-sizing: border-box;
+  max-width: 280px;
+  padding: var(--agide-space-1) var(--agide-space-2);
+  border-radius: var(--agide-radius-md);
+  background: var(--agide-tooltip-bg);
+  color: var(--agide-text-inverse);
+  box-shadow: var(--agide-shadow-2);
+  font-family: var(--agide-font-ui);
+  font-size: var(--agide-type-small-size);
+  line-height: var(--agide-type-small-line);
+  animation: ui-tooltip-in var(--agide-motion-base) var(--agide-ease-enter);
+}
+
+.ui-tooltip-shortcut {
+  margin-left: var(--agide-space-2);
+  font: inherit;
+  opacity: 0.75;
+}
+
+@keyframes ui-tooltip-in {
+  from {
+    opacity: 0;
+  }
+}

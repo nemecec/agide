@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ageOf, KIND_LABEL, needsAnswer, orderItems, payloadText, tomorrowMorning } from './format';
+import { ageOf, isStructuredText, KIND_LABEL, needsAnswer, orderItems, payloadText, tomorrowMorning } from './format';
 
 const NOW = Date.parse('2026-11-17T12:00:00Z');
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
@@ -75,5 +75,15 @@ describe('orderItems', () => {
     expect(needsAnswer(entry('x', { kind: 'approval', state: 'seen' })), 'a seen approval still needs an answer').toBe(true);
     expect(needsAnswer(entry('x', { kind: 'approval', state: 'snoozed' })), 'a snoozed approval does not').toBe(false);
     expect(needsAnswer(entry('x', { kind: 'approval', state: 'done' })), 'a done approval does not').toBe(false);
+  });
+});
+
+describe('isStructuredText', () => {
+  it('recognises JSON objects and arrays and nothing else', () => {
+    expect(isStructuredText('{\n  "command": "npm test"\n}'), 'an object').toBe(true);
+    expect(isStructuredText('[1, 2]'), 'an array').toBe(true);
+    expect(isStructuredText('{not json'), 'broken braces').toBe(false);
+    expect(isStructuredText('Step one done.'), 'prose').toBe(false);
+    expect(isStructuredText('42'), 'a bare number').toBe(false);
   });
 });

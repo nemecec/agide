@@ -1,3 +1,11 @@
+.tree-pane {
+  container: tree / inline-size;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: auto;
+  background: var(--agide-surface-sidebar);
+}
+
 .tree-root {
   position: relative;
   min-height: 100%;
@@ -6,129 +14,136 @@
 
 .tree-items {
   position: relative;
-  padding: 6px 0;
+  padding: var(--agide-space-1);
   outline: none;
 }
 
 .tree-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  height: 24px;
-  padding-right: 8px;
+  gap: var(--agide-space-1_5);
+  box-sizing: border-box;
+  height: var(--agide-density-row);
+  padding-right: var(--agide-space-2);
+  border-radius: var(--agide-radius-sm);
+  color: var(--agide-text-primary);
   cursor: default;
   outline: none;
   white-space: nowrap;
 }
 
+.tree-item:hover {
+  background: var(--agide-surface-hover);
+}
+
 .tree-item[data-selected='true'] {
-  background: var(--select-bg);
-  box-shadow: inset 3px 0 0 var(--accent);
+  background: var(--agide-selection-inactive);
+}
+
+.tree-items:focus-within .tree-item[data-selected='true'] {
+  background: var(--agide-selection);
 }
 
 .tree-items:focus-within .tree-item[data-focused='true'] {
-  outline: 2px solid var(--focus);
+  outline: var(--agide-focus-width) solid var(--agide-focus-ring);
   outline-offset: -2px;
 }
 
 .tree-item[data-drop-target='true'] {
-  background: color-mix(in srgb, #0a84ff 25%, transparent);
+  background: var(--agide-accent-subtle);
+  outline: 1px solid var(--agide-accent-text);
+  outline-offset: -1px;
 }
 
 .tree-twisty {
-  width: 12px;
-  color: var(--muted);
-  text-align: center;
-}
-
-.tree-twisty {
+  display: inline-flex;
   flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  color: var(--agide-text-secondary);
+}
+
+.tree-chevron {
+  transition: transform var(--agide-motion-fast) var(--agide-ease-standard);
+}
+
+.tree-item[data-expanded='true'] .tree-chevron {
+  transform: rotate(90deg);
+}
+
+.tree-icon {
+  flex: none;
+  color: var(--agide-text-secondary);
 }
 
 .tree-title {
   flex: 1 1 auto;
-  min-width: 4ch;
+  min-width: 6ch;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.tree-type {
-  flex: 0 100 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--muted);
-  font-size: 11px;
 }
 
 .tree-empty-folder {
-  color: var(--muted);
-  font-style: italic;
+  color: var(--agide-text-tertiary);
+  font-size: var(--agide-type-small-size);
 }
 
 .tree-rename {
   flex: 1;
   min-width: 0;
-  font: inherit;
+  box-sizing: border-box;
+  height: calc(var(--agide-density-row) - 2px);
+  padding: 0 var(--agide-space-1_5);
+  border: 1px solid var(--agide-border-strong);
+  border-radius: var(--agide-radius-xs);
+  background: var(--agide-surface-content);
   color: inherit;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  font: inherit;
 }
 
 .tree-dragline {
   height: 2px;
-  background: #0a84ff;
+  background: var(--agide-accent-text);
   pointer-events: none;
 }
 
-.tree-empty,
-.tree-error {
-  margin: 0;
-  padding: 8px 12px;
-  color: var(--muted);
+.tree-dragline::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -3px;
+  box-sizing: border-box;
+  width: 6px;
+  height: 6px;
+  border: 2px solid var(--agide-accent-text);
+  border-radius: var(--agide-radius-full);
+  background: var(--agide-surface-sidebar);
 }
 
 .tree-error {
-  color: var(--danger);
+  margin: var(--agide-space-2);
 }
 
-.context-menu {
-  position: fixed;
-  z-index: 10;
-  min-width: 160px;
-  margin: 0;
-  padding: 4px;
-  list-style: none;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
+@media (prefers-reduced-motion: reduce) {
+  .tree-chevron {
+    transition: none;
+  }
 }
 
-.context-menu button {
-  display: block;
-  width: 100%;
-  padding: 4px 10px;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  background: none;
-  border: 0;
-  border-radius: 4px;
+@container tree (max-width: 260px) {
+  .folder-rate,
+  .agent-elapsed,
+  .agent-detail {
+    display: none;
+  }
 }
 
-.context-menu button:hover,
-.context-menu button:focus-visible {
-  background: color-mix(in srgb, var(--accent) 30%, transparent);
-  outline: none;
-}
-
-.context-menu hr {
-  margin: 4px 0;
-  border: 0;
-  border-top: 1px solid var(--border);
-}
-
-.context-menu button[data-danger='true'] {
-  color: var(--danger);
+@container tree (max-width: 200px) {
+  .session-decorations .heat-marker,
+  .folder-decorations .heat-marker,
+  .agent-row-wrap .heat-marker,
+  .tree-observation {
+    display: none;
+  }
 }

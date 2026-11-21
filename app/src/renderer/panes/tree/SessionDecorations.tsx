@@ -1,8 +1,15 @@
 import { summarise } from '../../../core/agents/view';
 import { HeatMarker } from '../agents/HeatMarker';
 import { useAgents, useUsageState } from '../agents/useAgents';
+import { Chip } from '../../ui/Chip';
+import { STATUS_ICONS, STATUS_TONES, type StatusKind } from '../../ui/icons';
 
-/** Running, waiting, failed and finished tallies and the heat marker on a session leaf (0027 sections 3 and 9). */
+/** An icon and a count; the words are the accessible name and the tooltip, so the chip stays short in a narrow tree. */
+function Tally({ status, count, label, testId }: { readonly status: StatusKind; readonly count: number; readonly label: string; readonly testId: string }) {
+  return <Chip className="tree-tally" tone={STATUS_TONES[status]} icon={STATUS_ICONS[status].icon} spin={status === 'busy'} label={count > 0 ? String(count) : ''} aria-label={label} title={label} data-testid={testId} data-status={status} />;
+}
+
+/** Running, waiting, failed and finished tallies and the usage meter on a session leaf (0027 sections 3 and 9). */
 export function SessionDecorations({ sessionId }: { readonly sessionId: string }) {
   const { agents, waitingSessions, now } = useAgents();
   const usage = useUsageState();
@@ -13,26 +20,10 @@ export function SessionDecorations({ sessionId }: { readonly sessionId: string }
   if (mine.length === 0 && !sessionWaits && !heat) return null;
   return (
     <span className="session-decorations" data-testid="session-decorations">
-      {summary.running > 0 ? (
-        <span className="agent-count" data-testid="agent-count" title={`${summary.running} agents running`}>
-          {summary.running} running
-        </span>
-      ) : null}
-      {summary.waiting > 0 || sessionWaits ? (
-        <span className="agent-waiting" data-testid="agent-waiting" title="waiting for an approval">
-          {summary.waiting > 0 ? `${summary.waiting} waiting` : 'waiting'}
-        </span>
-      ) : null}
-      {summary.failed > 0 ? (
-        <span className="agent-failed" data-testid="agent-failed" title="agents that failed">
-          {summary.failed} failed
-        </span>
-      ) : null}
-      {summary.finishedRecently > 0 ? (
-        <span className="agent-finished" data-testid="agent-finished" title="agents that finished in the last minute">
-          {summary.finishedRecently} finished
-        </span>
-      ) : null}
+      {summary.waiting > 0 || sessionWaits ? <Tally status="waiting" count={summary.waiting} label={summary.waiting > 0 ? `${summary.waiting} waiting for an approval` : 'Waiting for an approval'} testId="agent-waiting" /> : null}
+      {summary.failed > 0 ? <Tally status="failed" count={summary.failed} label={`${summary.failed} failed`} testId="agent-failed" /> : null}
+      {summary.running > 0 ? <Tally status="busy" count={summary.running} label={`${summary.running} running`} testId="agent-count" /> : null}
+      {summary.finishedRecently > 0 ? <Tally status="done" count={summary.finishedRecently} label={`${summary.finishedRecently} finished in the last minute`} testId="agent-finished" /> : null}
       {heat && usage ? <HeatMarker level={heat.level} costUsdPerMinute={heat.costUsdPerMinute} share={heat.share} windowMinutes={usage.windowMinutes} testId="session-heat" /> : null}
     </span>
   );

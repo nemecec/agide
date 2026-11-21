@@ -1,14 +1,12 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
+import { DropdownMenu as Primitive } from 'radix-ui';
 import { useViewSuspension } from './browser/suspension';
+import { MenuItems } from '../ui/Menu';
+import type { MenuEntry } from '../ui/menuModel';
+import { overlayRoot } from '../ui/overlayRoot';
+import '../ui/Menu.css';
 
-export interface MenuEntry {
-  readonly label: string;
-  readonly run: () => void;
-  /** A rule is drawn above the entry. */
-  readonly separated?: boolean;
-  /** The entry removes something: drawn in the warning colour. */
-  readonly danger?: boolean;
-}
+export type { MenuEntry } from '../ui/menuModel';
 
 export interface MenuState {
   readonly x: number;
@@ -16,61 +14,56 @@ export interface MenuState {
   readonly entries: readonly MenuEntry[];
 }
 
-const EDGE = 4;
-
-/** The left and top that keep a menu of the given size inside the window, as near the pointer as it fits. */
-export function clampToWindow(x: number, y: number, width: number, height: number, windowWidth: number, windowHeight: number): { left: number; top: number } {
-  return {
-    left: Math.max(EDGE, Math.min(x, windowWidth - width - EDGE)),
-    top: Math.max(EDGE, Math.min(y, windowHeight - height - EDGE)),
-  };
-}
-
-/** A small popup menu. It closes on any click outside, on Escape and after an entry runs. */
-export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => void }) {
+/**
+ * A menu at a pointer position. It opens on a point of the window, takes arrow keys, Escape and typing, keeps
+ * inside the window, and closes on a press outside, on losing the window focus and after an entry runs. A focus
+ * change inside the window does not close it: the tree moves focus between rows while a menu is open.
+ */
+export function ContextMenu({ menu, onClose }: { readonly menu: MenuState; readonly onClose: () => void }) {
   useViewSuspension(true);
-  const list = useRef<HTMLUListElement>(null);
-  useLayoutEffect(() => {
-    const element = list.current;
-    if (!element) return;
-    const { left, top } = clampToWindow(menu.x, menu.y, element.offsetWidth, element.offsetHeight, window.innerWidth, window.innerHeight);
-    element.style.left = `${left}px`;
-    element.style.top = `${top}px`;
-  }, [menu.x, menu.y, menu.entries.length]);
+  const opener = useRef(document.activeElement);
+  const entries = menu.entries.map((entry) => ({
+    ...entry,
+    run: () => {
+      // The entry may open a dialog; the dialog should find the element that had focus before the menu, not the menu item.
+      if (opener.current instanceof HTMLElement && opener.current.isConnected) opener.current.focus();
+      entry.run();
+    },
+  }));
   useEffect(() => {
-    const close = (event: Event) => {
-      if (event instanceof KeyboardEvent && event.key !== 'Escape') return;
-      onClose();
-    };
-    window.addEventListener('mousedown', close);
-    window.addEventListener('keydown', close);
-    window.addEventListener('blur', close);
-    return () => {
-      window.removeEventListener('mousedown', close);
-      window.removeEventListener('keydown', close);
-      window.removeEventListener('blur', close);
-    };
+    window.addEventListener('blur', onClose);
+    return () => window.removeEventListener('blur', onClose);
   }, [onClose]);
 
   return (
-    <ul ref={list} className="context-menu" role="menu" style={{ left: menu.x, top: menu.y }}>
-      {menu.entries.map((entry) => (
-        <li key={entry.label} role="none">
-          {entry.separated ? <hr role="separator" /> : null}
-          <button
-            type="button"
-            role="menuitem"
-            data-danger={entry.danger === true}
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={() => {
-              onClose();
-              entry.run();
-            }}
-          >
-            {entry.label}
-          </button>
-        </li>
-      ))}
-    </ul>
+    <Primitive.Root
+      open
+      modal={false}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <Primitive.Trigger asChild>
+        <span className="ui-menu-anchor" aria-hidden="true" style={{ position: 'fixed', left: menu.x, top: menu.y, width: 0, height: 0 }} />
+      </Primitive.Trigger>
+      <Primitive.Portal container={overlayRoot()}>
+        <Primitive.Content
+          className="ui-menu"
+          align="start"
+          side="bottom"
+          sideOffset={0}
+          collisionPadding={4}
+          loop
+          onFocusOutside={(event) => event.preventDefault()}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const active = document.activeElement;
+            if ((active === null || active === document.body) && opener.current instanceof HTMLElement && opener.current.isConnected) opener.current.focus();
+          }}
+        >
+          <MenuItems entries={entries} />
+        </Primitive.Content>
+      </Primitive.Portal>
+    </Primitive.Root>
   );
 }

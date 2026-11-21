@@ -1,0 +1,15 @@
+.ui-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--agide-space-0_5);
+  box-sizing: border-box;
+  height: var(--agide-density-toolbar);
+  padding: 0 var(--agide-space-1_5);
+}
+
+.ui-toolbar-separator {
+  width: 1px;
+  height: 16px;
+  margin: 0 var(--agide-space-1);
+  background: var(--agide-border-subtle);
+}

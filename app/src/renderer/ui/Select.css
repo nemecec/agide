@@ -1,0 +1,85 @@
+.ui-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--agide-space-2);
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--agide-density-control);
+  margin: 0;
+  padding: 0 var(--agide-space-2);
+  border: 1px solid var(--agide-border-strong);
+  border-radius: var(--agide-radius-md);
+  background: var(--agide-surface-content);
+  color: var(--agide-text-primary);
+  font: inherit;
+  font-family: var(--agide-font-ui);
+  font-size: var(--agide-type-body-size);
+  line-height: var(--agide-type-body-line);
+  text-align: left;
+  cursor: default;
+}
+.ui-select-trigger > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-select-trigger[data-placeholder] {
+  color: var(--agide-text-tertiary);
+}
+.ui-select-trigger[aria-invalid='true'] {
+  border-color: var(--agide-danger-fg);
+}
+.ui-select-trigger:disabled {
+  opacity: 0.4;
+}
+.ui-select-trigger:focus-visible {
+  outline: var(--agide-focus-width) solid var(--agide-focus-ring);
+  outline-offset: 2px;
+}
+
+.ui-select-content {
+  z-index: calc(var(--agide-z-dialog) + 1);
+  box-sizing: border-box;
+  min-width: var(--radix-select-trigger-width);
+  max-height: min(var(--radix-select-content-available-height), 320px);
+  overflow: hidden;
+  padding: var(--agide-space-1);
+  border-radius: var(--agide-radius-lg);
+  background: var(--agide-surface-overlay);
+  color: var(--agide-text-primary);
+  box-shadow: var(--agide-shadow-2);
+  font-family: var(--agide-font-ui);
+  animation: ui-select-in var(--agide-motion-base) var(--agide-ease-enter);
+}
+
+.ui-select-item {
+  display: flex;
+  align-items: center;
+  gap: var(--agide-space-1_5);
+  box-sizing: border-box;
+  height: var(--agide-density-row);
+  padding: 0 var(--agide-space-2) 0 var(--agide-space-1);
+  border-radius: var(--agide-radius-sm);
+  font-size: var(--agide-type-body-size);
+  outline: none;
+  user-select: none;
+}
+.ui-select-check {
+  display: inline-flex;
+  width: 14px;
+  flex: none;
+}
+.ui-select-item[data-highlighted] {
+  background: var(--agide-accent);
+  color: var(--agide-accent-on);
+}
+.ui-select-item[data-disabled] {
+  opacity: 0.4;
+}
+
+@keyframes ui-select-in {
+  from {
+    opacity: 0;
+  }
+}

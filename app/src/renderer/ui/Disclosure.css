@@ -1,0 +1,45 @@
+.ui-disclosure-button {
+  display: flex;
+  align-items: center;
+  gap: var(--agide-space-1);
+  box-sizing: border-box;
+  height: var(--agide-density-control-sm);
+  margin: 0;
+  padding: 0 var(--agide-space-1);
+  border: 0;
+  border-radius: var(--agide-radius-sm);
+  background: transparent;
+  color: var(--agide-text-secondary);
+  font: inherit;
+  font-family: var(--agide-font-ui);
+  font-size: var(--agide-type-small-size);
+  font-weight: var(--agide-font-weight-medium);
+  cursor: default;
+}
+.ui-disclosure-button:hover {
+  color: var(--agide-text-primary);
+}
+.ui-disclosure-button:focus-visible {
+  outline: var(--agide-focus-width) solid var(--agide-focus-ring);
+  outline-offset: -2px;
+}
+
+.ui-disclosure-chevron {
+  transition: transform var(--agide-motion-fast) var(--agide-ease-standard);
+}
+.ui-disclosure[data-open] .ui-disclosure-chevron {
+  transform: rotate(90deg);
+}
+
+.ui-disclosure-region {
+  padding: var(--agide-space-1) 0 var(--agide-space-1) var(--agide-space-4);
+}
+.ui-disclosure-region[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-disclosure-chevron {
+    transition: none;
+  }
+}

@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
 import type { PermissionOptions } from '../../core/permissions/options';
 import { api } from '../api';
+import { Button } from '../ui/Button';
+import { Checkbox } from '../ui/Checkbox';
+import { DialogContent } from '../ui/Dialog';
+import { Field, TextField } from '../ui/Field';
+import { Hint } from '../ui/Hint';
+import { Notice } from '../ui/Notice';
+import { Select } from '../ui/Select';
 import { createSession, finishNewSession, newSessionTitle } from './newSession';
 
 /**
@@ -40,42 +47,42 @@ export function NewSessionDialog({ folderId, onClose }: { readonly folderId: str
   const chosen = options?.modes.find((candidate) => candidate.id === mode);
 
   return (
-    <form className="dialog" role="dialog" aria-label="New Claude session" data-testid="new-session-dialog" data-folder={folderId} onSubmit={submit}>
-      <h2>New Claude session</h2>
-      <label>
-        Title
-        <input aria-label="Session title" data-autofocus value={title} onChange={(e) => setTitle(e.target.value)} />
-      </label>
-      <label>
-        Working directory
-        <input aria-label="Working directory" placeholder="Default directory of the folder" value={cwd} onChange={(e) => setCwd(e.target.value)} />
-      </label>
-      <label>
-        Permission mode
-        <select aria-label="Permission mode" data-testid="new-session-mode" value={mode} onChange={(e) => setMode(e.target.value)}>
-          {(options?.modes ?? []).map((candidate) => (
-            <option key={candidate.id} value={candidate.id}>
-              {candidate.id === options?.settings.defaultMode ? `${candidate.label} (profile default)` : candidate.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      {chosen ? <p className="dialog-hint" data-testid="new-session-mode-sentence">{chosen.sentence}</p> : null}
-      {mode === 'bypassPermissions' ? (
-        <label>
-          <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} /> I understand that nothing asks in this mode
-        </label>
-      ) : null}
-      {options?.runsAsUser ? <p className="dialog-hint">This session runs as your user on this computer.</p> : null}
-      {problem ? <p role="alert" className="dialog-error">{problem}</p> : null}
-      <div className="dialog-actions">
-        <button type="button" data-dialog-cancel onClick={cancel}>
-          Cancel
-        </button>
-        <button type="submit" className="btn-primary" data-testid="new-session-start" disabled={options === undefined || (mode === 'bypassPermissions' && !confirmed)}>
-          Start
-        </button>
-      </div>
-    </form>
+    <DialogContent
+      title="New Claude session"
+      data-testid="new-session-dialog"
+      data-folder={folderId}
+      onSubmit={submit}
+      footer={
+        <>
+          <Button data-dialog-cancel onClick={cancel}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" data-testid="new-session-start" disabled={options === undefined || (mode === 'bypassPermissions' && !confirmed)}>
+            Start
+          </Button>
+        </>
+      }
+    >
+      <TextField label="Title" aria-label="Session title" data-autofocus value={title} onChange={(e) => setTitle(e.target.value)} />
+      <TextField label="Working directory" aria-label="Working directory" placeholder="Default directory of the folder" mono value={cwd} onChange={(e) => setCwd(e.target.value)} />
+      <Field label="Permission mode">
+        {(control) => (
+          <Select
+            {...control}
+            data-testid="new-session-mode"
+            value={mode}
+            onValueChange={setMode}
+            options={(options?.modes ?? []).map((candidate) => ({
+              value: candidate.id,
+              label: candidate.id === options?.settings.defaultMode ? `${candidate.label} (profile default)` : candidate.label,
+            }))}
+          />
+        )}
+      </Field>
+      {chosen ? <Hint data-testid="new-session-mode-sentence">{chosen.sentence}</Hint> : null}
+      {mode === 'bypassPermissions' ? <Checkbox checked={confirmed} onCheckedChange={setConfirmed} label="I understand that nothing asks in this mode" /> : null}
+      {options?.runsAsUser ? <Hint>This session runs as your user on this computer.</Hint> : null}
+      {problem ? <Notice tone="danger">{problem}</Notice> : null}
+    </DialogContent>
   );
 }

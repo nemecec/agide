@@ -399,6 +399,7 @@ test('asks the user before an agent loads an origin outside loopback and carries
   const bar = page.getByTestId('approval-bar');
   await expect(bar, 'the question is drawn in the tab chrome').toBeVisible();
   await expect(bar, 'it names the origin').toContainText('http://acting.invalid');
+  await expect(page.getByTestId('browser-frame'), 'the page area carries the agent outline while the question is open').toHaveAttribute('data-agent-driven', 'true');
   await bar.getByRole('button', { name: 'Deny' }).click();
   const deniedResult = await denied;
   expect(deniedResult.isError, 'denied navigation').toBe(true);

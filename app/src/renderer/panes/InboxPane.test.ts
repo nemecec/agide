@@ -48,7 +48,7 @@ const ids = (command: string) => fake.invoke.mock.calls.filter((c) => c[0] === c
 describe('InboxPane', () => {
   it('says so when nothing is open', async () => {
     await mount([]);
-    expect(root().querySelector('[data-testid="inbox-empty"]')?.textContent, 'empty message').toBe('No open items');
+    expect(root().querySelector('[data-testid="inbox-empty"]')?.textContent, 'empty message').toContain('New items appear here.');
     expect(root().querySelector('[data-testid="inbox-unread"]')?.textContent, 'unread line').toBe('No unread items');
   });
 
@@ -127,9 +127,9 @@ describe('InboxPane', () => {
   it('offers actions that fit the state of the item', async () => {
     await mount([item('n', { state: 'new' }), item('s', { state: 'seen' })]);
     await select(0);
-    expect([button('Mark seen'), button('Mark unread')].map((b) => b !== undefined), 'new item').toEqual([true, false]);
+    expect([button('Mark as read'), button('Mark as unread')].map((b) => b !== undefined), 'new item').toEqual([true, false]);
     await select(1);
-    expect([button('Mark seen'), button('Mark unread')].map((b) => b !== undefined), 'seen item').toEqual([false, true]);
+    expect([button('Mark as read'), button('Mark as unread')].map((b) => b !== undefined), 'seen item').toEqual([false, true]);
     expect(root().querySelector('[data-testid="inbox-done"]'), 'done action').not.toBeNull();
   });
 
@@ -182,13 +182,13 @@ describe('InboxPane', () => {
   it('shows the raw request of an approval collapsed when the card already describes it', async () => {
     await mount([item('a', { kind: 'approval', details: 'Wants to run rm', payload: { toolInput: { command: 'rm -r build' } } })]);
     await select(0);
-    expect(root().querySelector<HTMLDetailsElement>('.inbox-raw-block')?.open, 'raw request closed under the description').toBe(false);
+    expect(root().querySelector('.inbox-raw-block .ui-disclosure-button')?.getAttribute('aria-expanded'), 'raw request closed under the description').toBe('false');
   });
 
   it('switches to the done filter', async () => {
     await mount([]);
     await act(async () => root().querySelector<HTMLElement>('[data-testid="inbox-filter-done"]')?.click());
-    expect(root().querySelector('[data-testid="inbox-empty"]')?.textContent, 'done empty message').toBe('No done items');
+    expect(root().querySelector('[data-testid="inbox-empty"]')?.textContent, 'done empty message').toContain('Items you finish appear here.');
   });
 
   it('opens the peek only for an item that has a session', async () => {
@@ -197,5 +197,24 @@ describe('InboxPane', () => {
     expect(root().querySelector('[data-testid="inbox-peek-open"]'), 'no session, no peek button').toBeNull();
     await select(1);
     expect(root().querySelector('[data-testid="inbox-peek-open"]'), 'peek button').not.toBeNull();
+  });
+
+  it('names the kind of each row with a glyph and the kind word, so colour is not the only signal', async () => {
+    await mount([item('a', { kind: 'failure' }), item('b', { kind: 'reminder' })]);
+    for (const row of rows()) {
+      const kind = row.querySelector('.inbox-kind');
+      expect(kind?.querySelector('svg'), 'kind glyph').not.toBeNull();
+      expect(kind?.textContent, 'kind word').toBe(row.getAttribute('data-kind') === 'failure' ? 'Failure' : 'Reminder');
+    }
+  });
+
+  it('opens the session from the primary action of a failure and offers the snooze times in a menu', async () => {
+    await mount([item('f', { kind: 'failure', linkNodeId: 'leaf1' })]);
+    await select(0);
+    expect(button('Open session')?.getAttribute('data-variant'), 'primary action of a failure').toBe('primary');
+    await act(async () => button('Open session')?.click());
+    expect(ids('ui_focus_node'), 'the session is brought to the front').toEqual([{ nodeId: 'leaf1' }]);
+    expect(button('Snooze 10 min'), 'snooze times are not separate buttons').toBeUndefined();
+    expect(button('Snooze'), 'one Snooze button opens the menu').toBeDefined();
   });
 });

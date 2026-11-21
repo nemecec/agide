@@ -1,18 +1,11 @@
-.task-dialog textarea,
-.task-dialog input:not([type='checkbox']),
-.task-dialog select {
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-  margin-top: 2px;
-}
 .task-dialog pre {
-  white-space: pre-wrap;
-  font-size: 11px;
+  margin: var(--agide-space-1) 0 0;
+  padding: var(--agide-space-2);
   max-height: 160px;
   overflow: auto;
-}
-.task-kind {
-  display: inline-block;
-  margin: 0 0 8px;
+  border-radius: var(--agide-radius-md);
+  background: var(--agide-surface-inset);
+  font-family: var(--agide-font-mono);
+  font-size: var(--agide-type-mono-size);
+  white-space: pre-wrap;
 }

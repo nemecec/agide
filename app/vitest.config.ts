@@ -30,6 +30,8 @@ export default defineConfig({
         'src/core/browser/observationServiceContract.ts',
         'src/core/agents/agentStoreContract.ts',
         'src/main/appForTests.ts',
+        // Electron wiring of the appearance adapter; the end-to-end theme tests cover it.
+        'src/main/appearanceIpc.ts',
         'src/renderer/testing/**',
       ],
       thresholds: {
@@ -37,6 +39,7 @@ export default defineConfig({
         'src/main/**': { statements: 77, branches: 62, functions: 76, lines: 81 },
         'src/main/modules/**': { statements: 81, branches: 63, functions: 79, lines: 85 },
         'src/shared/**': { statements: 98, functions: 98, lines: 98 },
+        'src/renderer/ui/**': { statements: 92, branches: 82, functions: 92, lines: 94 },
         // Renderer files with logic that runs in Node or jsdom; the components without a unit test are covered by the end-to-end tests only.
         'src/renderer/{layout/{dockviewAdapter,hostModel,useLayoutState},panes/{treeModel,profileModel,useTreeNodes,useProfiles,TerminalPane,InboxPane,SetupPane},panes/inbox/{format,useInbox,ItemCard},panes/browser/{model,useBrowserTab,ObservationControl,ApprovalBar},dialogs/{newSession,NewTaskDialog,task/taskForm}}.{ts,tsx}': {
           statements: 95,

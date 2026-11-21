@@ -5,6 +5,9 @@ import { decideWindowOpen, isAppFrameUrl as isAppFrame, mainWindowWebPreferences
 
 export const APP_TITLE = 'Agide';
 
+/** Centres the traffic lights in the 38 px title bar of the renderer. */
+export const TRAFFIC_LIGHT_POSITION = { x: 14, y: 13 } as const;
+
 /** The dev server of `pnpm dev`. A packaged app ignores it, so the privileged preload loads only the app's own page. */
 function devServerUrl(): string | undefined {
   return app.isPackaged ? undefined : process.env['ELECTRON_RENDERER_URL'];
@@ -21,6 +24,8 @@ export function createMainWindow(options: { show: boolean; title?: string }): Br
     width: 1280,
     height: 800,
     show: false,
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: TRAFFIC_LIGHT_POSITION,
     webPreferences: mainWindowWebPreferences(join(import.meta.dirname, '../preload/index.cjs'), { devTools: !app.isPackaged }),
   });
 

@@ -1,33 +1,7 @@
 :root {
-  color-scheme: light dark;
-  --bg: #ffffff;
-  --fg: #1d1d1f;
-  --pane-bg: #f5f5f7;
-  --border: #d2d2d7;
-  --muted: #86868b;
-  --accent: #0a64d6;
-  --focus: #b86e00;
-  --danger: #c4201b;
-  --warn: #9a6200;
-  --ok: #1f7a3d;
-  --select-bg: color-mix(in srgb, var(--accent) 16%, transparent);
-  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
-  font-size: 13px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1e1e1e;
-    --fg: #e5e5e7;
-    --pane-bg: #252526;
-    --border: #3a3a3c;
-    --muted: #a0a0a6;
-    --accent: #4da3ff;
-    --focus: #ffb340;
-    --danger: #ff6961;
-    --warn: #ffb340;
-    --ok: #5dd68a;
-  }
+  font-family: var(--agide-font-ui);
+  font-size: var(--agide-type-body-size);
+  line-height: var(--agide-type-body-line);
 }
 
 html,
@@ -35,30 +9,20 @@ body,
 #root {
   height: 100%;
   margin: 0;
-  background: var(--bg);
-  color: var(--fg);
+  background: var(--agide-surface-content);
+  color: var(--agide-text-primary);
 }
 
-.layout {
-  display: grid;
-  grid-template-columns: 280px 1fr;
-  height: 100%;
-}
-
-.tree-pane {
-  background: var(--pane-bg);
-  border-right: 1px solid var(--border);
-  overflow: auto;
+button,
+input,
+select,
+textarea {
+  font: inherit;
 }
 
 .surface-pane {
   min-width: 0;
   overflow: hidden;
-}
-
-.placeholder {
-  padding: 12px;
-  color: var(--muted);
 }
 
 button:focus-visible,
@@ -67,55 +31,11 @@ input:focus-visible,
 textarea:focus-visible,
 a:focus-visible,
 .dv-tab:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 1px;
+  outline: var(--agide-focus-width) solid var(--agide-focus-ring);
+  outline-offset: 2px;
 }
 
 /* The dock's tab strip clips anything drawn outside a tab, so the ring sits inside it. */
 .dv-tab:focus-visible {
   outline-offset: -2px;
-}
-
-dialog button,
-.dialog button,
-.inbox button,
-.browser-chrome button {
-  font: inherit;
-}
-
-.btn-primary {
-  color: #fff;
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 5px;
-  padding: 3px 12px;
-}
-
-.btn-danger {
-  color: var(--danger);
-}
-
-.chip {
-  display: inline-block;
-  padding: 0 6px;
-  border-radius: 8px;
-  font-size: 11px;
-  line-height: 16px;
-  border: 1px solid currentColor;
-}
-
-.chip[data-tone='busy'] {
-  color: var(--accent);
-}
-
-.chip[data-tone='waiting'] {
-  color: var(--warn);
-}
-
-.chip[data-tone='failed'] {
-  color: var(--danger);
-}
-
-.chip[data-tone='idle'] {
-  color: var(--muted);
 }

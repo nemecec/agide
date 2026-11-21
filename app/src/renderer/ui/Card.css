@@ -1,0 +1,35 @@
+.ui-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--agide-space-2);
+  box-sizing: border-box;
+  padding: var(--agide-density-pad);
+  border: 1px solid var(--agide-border-subtle);
+  border-radius: var(--agide-radius-lg);
+  background: var(--agide-surface-raised);
+  box-shadow: var(--agide-shadow-1);
+  color: var(--agide-text-primary);
+  font-family: var(--agide-font-ui);
+  font-size: var(--agide-type-body-size);
+  line-height: var(--agide-type-body-line);
+}
+
+.ui-card-title {
+  margin: 0;
+  font-size: var(--agide-type-body-size);
+  line-height: var(--agide-type-body-line);
+  font-weight: var(--agide-font-weight-semibold);
+}
+
+.ui-card-meta {
+  margin: 0;
+  color: var(--agide-text-secondary);
+  font-size: var(--agide-type-small-size);
+  line-height: var(--agide-type-small-line);
+}
+
+.ui-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--agide-space-2);
+}

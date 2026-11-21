@@ -1,4 +1,8 @@
 import { HeatMarker } from './agents/HeatMarker';
+import { EmptyState } from '../ui/EmptyState';
+import { Hint } from '../ui/Hint';
+import { PANE_ICONS } from '../ui/icons';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/Table';
 import { formatCost, formatCount, formatDuration, planLine } from './agents/format';
 import { useUsageState } from './agents/useAgents';
 import type { PaneProps } from './paneTypes';
@@ -15,7 +19,7 @@ export function UsagePane({ instanceId, config }: PaneProps) {
   if (!usage) {
     return (
       <section className="agents-pane" data-testid="usage-pane" data-instance={instanceId} aria-label="Usage">
-        <p className="transcript-status">Loading usage</p>
+        <Hint>Loading usage</Hint>
       </section>
     );
   }
@@ -33,34 +37,44 @@ export function UsagePane({ instanceId, config }: PaneProps) {
         <ul className="usage-plan" aria-label="Plan usage">
           {usage.plan.length === 0 ? <li>No plan data</li> : usage.plan.map((window) => <li key={window.window}>{planLine(window, now)}</li>)}
         </ul>
-        <p className="usage-note">All dollar figures are estimates at list price, not billed amounts. Rates are estimated over the last {usage.windowMinutes} minutes.</p>
+        <Hint className="usage-note">All dollar figures are estimates at list price, not billed amounts. Rates are estimated over the last {usage.windowMinutes} minutes.</Hint>
       </header>
-      <div className="usage-columns" aria-hidden="true">
-        <span className="usage-label">Session or agent</span>
-        <span>Cost</span>
-        <span>Tokens</span>
-        <span>Share</span>
-        <span>Running</span>
-      </div>
-      <ol className="usage-ranking" data-testid="usage-ranking">
-        {rows.map((row) => {
-          const key = row.subject.kind === 'session' ? `session:${row.subject.sessionId}` : `agent:${row.subject.ref.sessionId}:${row.subject.ref.agentKey}`;
-          const heat = usage.heat[key];
-          return (
-            <li key={key} data-testid="usage-row" data-subject={key} data-kind={row.subject.kind}>
-              <span className="usage-label">{row.label ?? key}</span>
-              <span className="usage-rate" title="estimated cost per minute">
-                {formatCost(row.costUsdPerMinute)}/min
-              </span>
-              <span className="usage-tokens">{formatCount(row.weightedTokensPerMinute)} tok/min</span>
-              <span className="usage-share">{Math.round(row.share * 100)}%</span>
-              <span className="usage-elapsed">{formatDuration(row.elapsedSeconds)}</span>
-              {heat ? <HeatMarker level={heat.level} costUsdPerMinute={heat.costUsdPerMinute} share={heat.share} windowMinutes={usage.windowMinutes} /> : null}
-            </li>
-          );
-        })}
-      </ol>
-      {rows.length === 0 ? <p className="transcript-status">No activity in the window.</p> : null}
+      {rows.length === 0 ? (
+        <EmptyState className="usage-empty" icon={PANE_ICONS.usage.icon} title="No activity in the window" help="Sessions and agents appear here while they use tokens." data-testid="usage-empty" />
+      ) : (
+        <Table className="usage-table" data-testid="usage-ranking" aria-label="Usage ranking">
+          <TableHead>
+            <tr>
+              <TableHeader>Session or agent</TableHeader>
+              <TableHeader numeric>Cost</TableHeader>
+              <TableHeader numeric>Tokens</TableHeader>
+              <TableHeader numeric>Share</TableHeader>
+              <TableHeader numeric>Running</TableHeader>
+              <TableHeader>Level</TableHeader>
+            </tr>
+          </TableHead>
+          <TableBody>
+            {rows.map((row) => {
+              const key = row.subject.kind === 'session' ? `session:${row.subject.sessionId}` : `agent:${row.subject.ref.sessionId}:${row.subject.ref.agentKey}`;
+              const heat = usage.heat[key];
+              return (
+                <TableRow key={key} data-testid="usage-row" data-subject={key} data-kind={row.subject.kind}>
+                  <TableCell className="usage-label" title={row.label ?? key}>
+                    {row.label ?? key}
+                  </TableCell>
+                  <TableCell numeric title="estimated cost per minute">
+                    {formatCost(row.costUsdPerMinute)}/min
+                  </TableCell>
+                  <TableCell numeric>{formatCount(row.weightedTokensPerMinute)} tok/min</TableCell>
+                  <TableCell numeric>{Math.round(row.share * 100)}%</TableCell>
+                  <TableCell numeric>{formatDuration(row.elapsedSeconds)}</TableCell>
+                  <TableCell>{heat ? <HeatMarker level={heat.level} costUsdPerMinute={heat.costUsdPerMinute} share={heat.share} windowMinutes={usage.windowMinutes} /> : null}</TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
     </section>
   );
 }

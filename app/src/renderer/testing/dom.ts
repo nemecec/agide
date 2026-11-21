@@ -13,3 +13,14 @@ export async function setValue(field: Field, value: string): Promise<void> {
 }
 
 export const click = (element: Element): Promise<void> => act(async () => (element as HTMLElement).click());
+
+/** Opens a Select from its trigger with the keyboard and picks the option with the given label. */
+export async function chooseOption(trigger: Element, label: string): Promise<void> {
+  await act(async () => {
+    (trigger as HTMLElement).focus();
+    trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  });
+  const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((candidate) => candidate.textContent === label);
+  if (!option) throw new Error(`no option "${label}" in the open list`);
+  await click(option);
+}

@@ -1,6 +1,7 @@
 import { createElement, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
+import { installDomPolyfills } from './polyfills';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -12,6 +13,7 @@ export interface Rendered {
 
 /** Renders into a detached container and waits for effects and the promises they started. */
 export async function render(element: ReactElement): Promise<Rendered> {
+  installDomPolyfills();
   const container = document.createElement('div');
   document.body.append(container);
   const root: Root = createRoot(container);

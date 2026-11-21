@@ -27,6 +27,13 @@ export async function phaseFocus(context) {
     const trail = [];
     await instance.page.getByRole('treeitem', { name: 'Notes', exact: true }).click();
     await instance.page.keyboard.press('Escape');
+    await instance.page.evaluate(() => {
+      const start = document.createElement('span');
+      start.tabIndex = -1;
+      document.body.prepend(start);
+      start.focus();
+      start.remove();
+    });
     for (let step = 0; step < 14; step++) {
       await instance.page.keyboard.press('Tab');
       await sleep(150);

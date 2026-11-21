@@ -40,7 +40,7 @@ describe('IsolationSection', () => {
     });
     rendered = await render(createElement(IsolationSection));
     expect(rendered.container.querySelector('[data-testid="isolation-srt-check"]')?.textContent, 'reason and fix').toBe('The sandbox runtime (srt) is not installed. Install it.');
-    const radio = rendered.container.querySelector<HTMLInputElement>('[data-testid="isolation-srt"] input[type="radio"]');
+    const radio = rendered.container.querySelector<HTMLButtonElement>('[data-testid="isolation-srt"] [role="radio"]');
     expect(radio?.disabled, 'unavailable provider cannot be chosen').toBe(true);
   });
 
@@ -56,7 +56,7 @@ describe('IsolationSection', () => {
       setter?.call(input, '/opt/srt');
       input?.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    await act(async () => rendered?.container.querySelector<HTMLInputElement>('[data-testid="isolation-srt"] input[type="radio"]')?.click());
+    await act(async () => rendered?.container.querySelector<HTMLButtonElement>('[data-testid="isolation-srt"] [role="radio"]')?.click());
     expect(fake.invoke, 'command with provider and path').toHaveBeenCalledWith('isolation_set_provider', { provider: 'srt', srtBinary: '/opt/srt' });
     expect(rendered.container.querySelector('[role="alert"]')?.textContent, 'refusal shown').toBe('refused');
   });
