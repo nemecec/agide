@@ -210,6 +210,41 @@ describe('StopFailure', () => {
   });
 });
 
+describe('stream-json sessions', () => {
+  const streamSession = () => {
+    const info = { id: 'agent-1', folderId, launchPath: 'stream-json' } as SessionInfo;
+    mapper = new HookItemMapper({
+      inbox,
+      tree,
+      sessions: { get: (id) => (id === 'agent-1' ? info : undefined) },
+      now: () => new Date(time),
+      isInView: () => false,
+      notifyNow: (item) => notified.push(item),
+    });
+  };
+
+  it('makes no approval item from PermissionRequest or the permission_prompt notification, since can_use_tool is their source', () => {
+    streamSession();
+    mapper.handle('agent-1', 'PermissionRequest', permission('rm -rf build'));
+    mapper.handle('agent-1', 'Notification', { notification_type: 'permission_prompt', message: 'Claude needs permission' });
+    expect(open(), 'no hook approval for a stream-json session').toEqual([]);
+    expect(notified, 'no notification either').toEqual([]);
+  });
+
+  it('still reports other hook items of a stream-json session, such as a blocked call and an auth failure', () => {
+    streamSession();
+    mapper.handle('agent-1', 'PreToolUse', { tool_name: 'Bash', tool_input: { command: 'curl x' }, agide_gate: { decision: 'deny', classId: 'net.fetch', reason: 'blocked' } });
+    mapper.handle('agent-1', 'Notification', { notification_type: 'auth_storage_failure', message: 'cannot store login' });
+    expect(open().map((item) => item.origin), 'gate deny and auth failure remain').toEqual(expect.arrayContaining(['gate:deny']));
+    expect(open().length, 'both items exist').toBeGreaterThanOrEqual(2);
+  });
+
+  it('keeps the hook approval of a PTY session', () => {
+    mapper.handle(SID, 'PermissionRequest', permission('ls'));
+    expect(open().map((item) => item.origin), 'PTY sessions are unchanged').toEqual(['hook:PermissionRequest']);
+  });
+});
+
 describe('unknown sessions and events', () => {
   it('puts items of an unknown session at the top level and ignores other hook events', () => {
     mapper.handle('other', 'PermissionRequest', permission('a'));

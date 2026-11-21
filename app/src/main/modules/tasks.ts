@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { resolveAgentSettings } from '../../core/agents/index';
 import type { BrowserService } from '../../core/browser/index';
 import { CommandError } from '../../core/commands/index';
 import type { InboxService } from '../../core/inbox/index';
@@ -25,6 +26,7 @@ import {
 import { previewTaskStart } from '../../core/tasks/preview';
 import type { TreeService } from '../../core/tree/index';
 import type { ModuleContext, ModuleHandle } from '../context';
+import type { AgentsRuntime } from './agents';
 
 const TRUST_ITEM_MESSAGE = 'Claude asks whether to trust this folder; answer in the terminal';
 
@@ -44,6 +46,7 @@ export function init(
     inbox: InboxService;
     browser: BrowserService;
     launch: LaunchContributors;
+    agents: AgentsRuntime;
   },
 ): ModuleHandle<TasksService> {
   const { tree, sessions, profile, permissions, inbox } = deps;
@@ -65,6 +68,11 @@ export function init(
     store,
     sourceDir,
     emit: (event) => ctx.events.emit(event),
+    // One cap for every app-started agent: swarm agents count against the sessions agents start here.
+    appStarted: {
+      cap: () => resolveAgentSettings(profile.settings().agents).maxConcurrentAppStarted,
+      otherLive: () => deps.agents.controller.appStartedRunning(),
+    },
   });
 
   const trustStates = new Map<string, TrustState>();
@@ -204,7 +212,7 @@ export function init(
   ];
 
   return {
-    service: { starter, directories },
+    service: { starter, directories, setSpawnContext: (context) => starter.setSpawnContext(context) },
     dispose: () => {
       for (const off of [...unregister, unsubscribe, unregisterLaunch]) off();
       trust.dispose();

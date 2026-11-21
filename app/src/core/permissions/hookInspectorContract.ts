@@ -57,6 +57,7 @@ export function describeHookInspectorContract(name: string, create: () => Inspec
       expect(decide(payload('mcp__claude_ai_Other__create_thing', {})), 'unknown connector write').toMatchObject({ decision: 'ask', classId: 'connector.unknown' });
       expect(decide(payload('mcp__claude_ai_Other__get_thing', {})), 'unknown connector read prefix').toMatchObject({ decision: 'none' });
       expect(decide(payload('mcp__app__task_start', {})), 'agent task start').toMatchObject({ decision: 'ask', classId: 'app.agent_start' });
+      expect(decide(payload('mcp__app__swarm_start', {})), 'agent swarm start').toMatchObject({ decision: 'ask', classId: 'app.agent_start' });
       expect(decide(payload('mcp__app__ui_list_tree', {})), 'own app tool').toMatchObject({ decision: 'none' });
       expect(decide(payload('mcp__someserver__delete_everything', {})), 'user MCP write').toMatchObject({ decision: 'ask', classId: 'mcp.other' });
     });

@@ -15,6 +15,7 @@ import { mergeContributions, type LaunchContributor } from './launchContribution
 import { OutputBuffer } from './OutputBuffer';
 import { MemorySessionStore, type SessionStore } from './SessionStore';
 import { statusAfterHook } from './status';
+import type { StreamProcess, StreamSpawner } from './streamSpawner';
 import {
   SessionError,
   type PermissionMode,
@@ -75,6 +76,12 @@ export interface PtySessionServiceOptions {
   readonly selectProvider?: (session: SessionInfo) => IsolationProvider;
   /** The network policy the provider enforces for a launch. Defaults to `unrestricted`. */
   readonly networkPolicy?: (session: SessionInfo) => NetworkPolicy;
+  /**
+   * Spawns sessions whose `launchPath` is `stream-json` (0038). The service prepares the environment, hooks,
+   * `mcp.json`, contributions and base arguments as for a PTY launch and hands the spawn to it. Without it such
+   * a launch fails with `launch_failed`.
+   */
+  readonly streamSpawner?: StreamSpawner;
   /** Modules that add settings, arguments, environment, MCP servers or session files to every launch (0029). */
   readonly contributors?: () => readonly LaunchContributor[];
   /** Pause between typed text and the Enter key in `sendText`. */
@@ -95,6 +102,8 @@ interface Entry {
   cols: number;
   rows: number;
   process?: nodePty.IPty | undefined;
+  /** The process of a stream-json session; `process` stays undefined for it. */
+  stream?: StreamProcess | undefined;
   environment?: AgentEnvironment | undefined;
   inbox?: HookInbox | undefined;
   /** Resolves when the current process has ended. */
@@ -154,8 +163,9 @@ export class PtySessionService implements SessionService {
   }
 
   async create(input: SessionCreateInput): Promise<SessionInfo> {
+    if (input.id !== undefined && this.entries.has(input.id)) throw new SessionError('launch_failed', `session id ${input.id} is in use`);
     const info: SessionInfo = {
-      id: this.newId(),
+      id: input.id ?? this.newId(),
       folderId: input.folderId,
       title: input.title ?? 'Claude session',
       cwd: input.cwd,
@@ -237,6 +247,10 @@ export class PtySessionService implements SessionService {
 
   sendText(id: SessionId, text: string): void {
     const entry = this.requireRunning(id);
+    if (entry.stream !== undefined) {
+      entry.stream.sendText(text);
+      return;
+    }
     const proc = entry.process;
     const started = entry.started;
     entry.typing = entry.typing.then(async () => {
@@ -249,11 +263,11 @@ export class PtySessionService implements SessionService {
   }
 
   write(id: SessionId, data: string): void {
-    this.requireRunning(id).process?.write(data);
+    this.requirePty(id).process?.write(data);
   }
 
   resize(id: SessionId, cols: number, rows: number): void {
-    const entry = this.requireRunning(id);
+    const entry = this.requirePty(id);
     if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 1 || rows < 1) {
       throw new RangeError(`invalid terminal size ${cols}x${rows}`);
     }
@@ -339,6 +353,10 @@ export class PtySessionService implements SessionService {
         replacesBaseHooks: merged.replacesBaseHooks,
         extraArgs: [...merged.args, ...((await this.options.extraArgs?.(info)) ?? [])],
       });
+      if (info.launchPath === 'stream-json') {
+        await this.launchStream(entry, prepared, inboxDir, resume, args, merged.env);
+        return;
+      }
       const command = await prepared.ptyCommand({ sessionId: info.id, cwd: info.cwd, args, cols: entry.cols, rows: entry.rows, env: merged.env });
       const inbox = new HookInbox(inboxDir, (record) => this.onHook(entry, record));
       let proc: nodePty.IPty;
@@ -361,7 +379,7 @@ export class PtySessionService implements SessionService {
       entry.environment = environment;
       entry.ended = new Promise<void>((resolve) => {
         proc.onExit(({ exitCode, signal }) => {
-          if (entry.process === proc) this.onExit(entry, exitCode, signal);
+          if (entry.process === proc) this.onExit(entry, exitCode, signalName(signal));
           resolve();
         });
       });
@@ -381,6 +399,29 @@ export class PtySessionService implements SessionService {
         ? error
         : new SessionError('launch_failed', `cannot start claude: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  private async launchStream(entry: Entry, environment: AgentEnvironment, inboxDir: string, resume: boolean, args: readonly string[], env: Readonly<Record<string, string>>): Promise<void> {
+    if (this.options.streamSpawner === undefined) throw new Error('no stream-json runtime is configured');
+    const inbox = new HookInbox(inboxDir, (record) => this.onHook(entry, record));
+    let stream: StreamProcess;
+    try {
+      stream = await this.options.streamSpawner.spawn({ session: entry.info, resume, environment, args, env });
+    } catch (error) {
+      inbox.dispose();
+      throw error;
+    }
+    environment.attach(entry.info.id, stream.pid);
+    entry.started = new Promise<void>((resolve) => (entry.markStarted = resolve));
+    entry.inbox = inbox;
+    entry.stream = stream;
+    entry.environment = environment;
+    entry.ended = new Promise<void>((resolve) => {
+      stream.onExit((exitCode, signal) => {
+        if (entry.stream === stream) this.onExit(entry, exitCode ?? -1, signal);
+        resolve();
+      });
+    });
   }
 
   private profileLaunch(): ProfileLaunchSpec {
@@ -415,18 +456,19 @@ export class PtySessionService implements SessionService {
     }
   }
 
-  private onExit(entry: Entry, exitCode: number, signal: number | undefined): void {
+  private onExit(entry: Entry, exitCode: number, signal: string | null): void {
     entry.inbox?.stop();
     entry.inbox = undefined;
     entry.process = undefined;
+    entry.stream = undefined;
     void entry.environment?.releaseSession(entry.info.id).catch(() => undefined);
     const session = this.setInfo(entry, (info) => ({ ...info, status: 'exited', exitCode }));
-    this.emit({ type: 'session.exited', session, exitCode, signal: signalName(signal) });
+    this.emit({ type: 'session.exited', session, exitCode, signal });
   }
 
   private async shutdownEntry(entry: Entry): Promise<void> {
-    const { process: proc, environment } = entry;
-    if (!proc || !environment) return;
+    const { environment } = entry;
+    if ((!entry.process && !entry.stream) || !environment) return;
     const sessionId = entry.info.id;
     await environment.terminate(sessionId, 'SIGTERM');
     const killer = setTimeout(() => void environment.terminate(sessionId, 'SIGKILL').catch(() => undefined), this.killTimeoutMs);
@@ -467,7 +509,14 @@ export class PtySessionService implements SessionService {
 
   private requireRunning(id: SessionId): Entry {
     const entry = this.require(id);
-    if (entry.info.status === 'exited' || !entry.process) throw new SessionError('not_running', `session ${id} has exited`);
+    if (entry.info.status === 'exited' || (!entry.process && !entry.stream)) throw new SessionError('not_running', `session ${id} has exited`);
+    return entry;
+  }
+
+  /** A running PTY session; a stream-json session has no terminal to write to or resize. */
+  private requirePty(id: SessionId): Entry {
+    const entry = this.requireRunning(id);
+    if (!entry.process) throw new SessionError('not_running', `session ${id} has no terminal`);
     return entry;
   }
 

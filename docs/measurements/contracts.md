@@ -59,3 +59,46 @@ End: 2026-11-17T22:09:49Z
 - No real-Claude run and no probe; nothing in this step needs one.
 - The srt and container providers, the inspector, the class table, the SQLite stores, the browser views and every UI beyond placeholders are the builders' work.
 - The dialog host and the settings panel were not seen on screen; the hidden e2e runs do not open them.
+
+# Milestone 4 contracts (swarm orchestration, 0038)
+
+Start: 2026-11-21T06:58:42Z
+End: 2026-11-21T07:25:16Z
+
+## What was built
+
+- `docs/decisions/0038-milestone-4-architecture-and-contracts.md`: the slices of w-runtime, w-manager and w-ui, modules, contracts, ownership, initialization order, test strategy and choices.
+- `app/src/core/swarm`: the definition schema with the graph checks, the tier table and its resolution, budget types, swarm settings, the strictest-mode helper, the manager types, the `swarm_*` command inputs and bindings with `registerSwarmCommands`; `runtime/` with the `AgentRuntime` interface, the step language of the fake agents, `InMemoryAgentRuntime` and the runtime contract suite; `manager/` with `InMemorySwarmManager`, `InMemorySwarmFolders` and the manager contract suite; `fixtures/fake-claude-stream.mjs` with a test that drives it over pipes.
+- Session seam: `core/session/streamSpawner.ts` (`StreamSpawner`, `StreamSpawners`), the stream-json branch in `PtySessionService` (`streamSpawner` option, `SessionCreateInput.id`, `sendText` to the stream process, `write` and `resize` refused), with a test.
+- Shared files, each with the smallest change: `AgentEnvironment.processCommand` (optional) and `ProcessLaunch`; `CommandErrorCode` gains `limit_reached` and `refused`; `AppEvent` gains `SwarmEvent`; `ProfileSettings.swarm`; the `agide/swarm` pane type; `mcp__app__swarm_start` in the `app.agent_start` class with one more line in the inspector contract; `Services.swarm`; `modules.ts` creates `StreamSpawners` and initializes the swarm module last; the session module takes `streams` and adopts a leaf made in a session's folder for a session without one; the service-order line of `m3Modules.test.ts`.
+- `main/modules/swarm.ts` (stub with a pending manager and the commands without handlers) and `swarm.test.ts`.
+- Renderer stubs and hook points: `StartSwarmDialog`, `SwarmPane`, `SwarmFolderDecorations`, `SwarmAgentDecorations`, `swarmMenuEntries`, `SwarmApprovalActions`; the `new-swarm` dialog request, "New swarm…" in the tree menus, the network glyph for the pane and the menu entry.
+- Regenerated `docs/parity.md` and `docs/blocks.md`.
+
+## Commands run
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | pass |
+| `pnpm test` | pass; the stream-json runtime and persistent manager suites are skipped as pending |
+| `pnpm e2e` | pass |
+| `pnpm check:colours` | pass |
+| `pnpm parity` | pass |
+| `pnpm blocks-docs` | wrote `docs/blocks.md` |
+| Mutation: drop the folder check of the leaf adoption | the swarm module test fails, as it should |
+
+## What took long
+
+- The seam between the runtime and the session service. 0037 placed a stream session service in `core/session`, a folder no builder may edit. The choice of a spawner slot plus a launch contributor for the per-agent flags keeps the launch preparation in one place; finding that the agent's deny rules fit through the contributor (`mergeContributions` appends deny rules) took a second pass over the record.
+- The in-memory manager surfaced ordering issues: concurrent scheduling launched an agent twice, and a synchronous turn finished before the agent's state was set. Both are fixed and covered by the contract suite; `isBusy` is now defined at the `result` event.
+- A session without a tree leaf is closed at start by the session module, so agent sessions need leaves; the adoption rule came from that.
+
+## What was not done
+
+- No independent agent reviewed this step: the step has no tool for starting agents. The user asked for a review by another agent; it should run before the builders start.
+- No real Claude call was made.
+- `processCommand` stays optional in the interface until w-runtime adds it to every provider.
+
+## Temporary files
+
+The e2e log under `/tmp` and the session-module backup used for the mutation were removed. The tests remove their temporary directories.

@@ -16,6 +16,7 @@ import {
   type EnvironmentSpec,
   type IsolationProvider,
   type ProviderCapabilities,
+  type ProcessLaunch,
   type ProviderCheck,
   type PtyCommand,
 } from './types';
@@ -132,7 +133,16 @@ class ContainerEnvironment extends HostEnvironment {
     return this.options.hostAlias ?? DEFAULT_HOST_ALIAS;
   }
 
-  async ptyCommand(launch: ClaudeLaunch): Promise<PtyCommand> {
+  ptyCommand(launch: ClaudeLaunch): Promise<PtyCommand> {
+    return this.dockerCommand(launch, true);
+  }
+
+  /** `docker run -i` without a terminal: the NDJSON of a stream-json agent would be mangled by a TTY. */
+  processCommand(launch: ProcessLaunch): Promise<PtyCommand> {
+    return this.dockerCommand(launch, false);
+  }
+
+  private async dockerCommand(launch: ProcessLaunch, tty: boolean): Promise<PtyCommand> {
     const { workspace, profile } = this.spec;
     if (workspace.mode !== 'bind') throw new IsolationError('unsupported', 'the container provider mounts a host directory');
     const claudeDir = this.options.claudeConfigDir;
@@ -161,6 +171,7 @@ class ContainerEnvironment extends HostEnvironment {
       envNames: containerEnvNames({ ...profile, claudeConfigDir: claudeDir }, launch.env, env),
       fixedEnv: { HOME: '/tmp' },
       claudeArgs: launch.args,
+      tty,
     });
     return { file: this.options.dockerBinary, args, cwd: launch.cwd, env };
   }

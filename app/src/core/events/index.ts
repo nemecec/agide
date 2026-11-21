@@ -6,6 +6,7 @@ import type { InboxEvent } from '../inbox/types';
 import type { PermissionsEvent } from '../permissions/types';
 import type { ProfileEvent } from '../profile/types';
 import type { SessionEvent } from '../session/types';
+import type { SwarmEvent } from '../swarm/types';
 import type { TasksEvent } from '../tasks/types';
 import type { TreeEvent } from '../tree/types';
 import { EventBus } from './EventBus';
@@ -23,7 +24,8 @@ export type AppEvent =
   | PermissionsEvent
   | BrowserEvent
   | AgentsEvent
-  | TasksEvent;
+  | TasksEvent
+  | SwarmEvent;
 
 export type AppEventBus = EventBus<AppEvent>;
 

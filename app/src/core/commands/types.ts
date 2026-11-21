@@ -63,7 +63,8 @@ export interface CommandDescriptor {
   readonly mcp: boolean;
 }
 
-export type CommandErrorCode = 'not_found' | 'invalid_input' | 'out_of_scope' | 'failed';
+/** `limit_reached` and `refused` come with the swarm commands (0037 section 9): a depth or count limit, and a refused mode. */
+export type CommandErrorCode = 'not_found' | 'invalid_input' | 'out_of_scope' | 'limit_reached' | 'refused' | 'failed';
 
 export class CommandError extends Error {
   constructor(

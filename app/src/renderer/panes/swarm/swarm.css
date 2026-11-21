@@ -1,0 +1,204 @@
+.budget-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--agide-space-2);
+  min-width: 0;
+}
+.budget-bar {
+  flex: none;
+  width: 72px;
+  height: 6px;
+}
+.budget-meter[data-compact] .budget-bar {
+  width: 36px;
+}
+.budget-track {
+  fill: var(--agide-surface-inset);
+  stroke: var(--agide-border-default);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+.budget-reported {
+  fill: var(--agide-accent);
+}
+.budget-estimated {
+  fill: var(--agide-accent-subtle);
+  stroke: var(--agide-accent-text);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+.budget-reserved {
+  fill: none;
+  stroke: var(--agide-border-strong);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+.budget-bar[data-level='warning'] .budget-reported {
+  fill: var(--agide-warning-fg);
+}
+.budget-bar[data-level='danger'] .budget-reported {
+  fill: var(--agide-danger-fg);
+}
+.budget-label {
+  color: var(--agide-text-secondary);
+  font-size: var(--agide-type-small-size);
+  line-height: var(--agide-type-small-line);
+}
+.budget-meter[data-level='warning'] .budget-label {
+  color: var(--agide-text-primary);
+}
+.budget-meter[data-level='danger'] .budget-label {
+  color: var(--agide-danger-fg);
+}
+
+.swarm-decorations {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--agide-space-1_5);
+  margin-left: auto;
+  padding-left: var(--agide-space-2);
+  flex: none;
+}
+.swarm-cap {
+  color: var(--agide-text-secondary);
+  font-size: var(--agide-type-caption-size);
+  white-space: nowrap;
+}
+.swarm-origin {
+  color: var(--agide-text-tertiary);
+  font-size: var(--agide-type-caption-size);
+}
+
+.swarm-pane {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--agide-space-3);
+  height: 100%;
+  overflow: auto;
+  padding: var(--agide-space-3);
+  background: var(--agide-surface-content);
+  color: var(--agide-text-primary);
+  font-family: var(--agide-font-ui);
+  font-size: var(--agide-type-body-size);
+}
+.swarm-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--agide-space-2);
+}
+.swarm-goal {
+  margin: 0;
+  font-size: var(--agide-type-title-size);
+  line-height: var(--agide-type-title-line);
+  font-weight: var(--agide-font-weight-semibold);
+  overflow-wrap: anywhere;
+}
+.swarm-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--agide-space-2) var(--agide-space-3);
+  color: var(--agide-text-secondary);
+  font-size: var(--agide-type-small-size);
+}
+.swarm-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--agide-space-2);
+}
+.swarm-table td {
+  vertical-align: top;
+}
+.swarm-agent-name {
+  font-weight: var(--agide-font-weight-medium);
+}
+.swarm-cell-note {
+  display: block;
+  color: var(--agide-text-secondary);
+  font-size: var(--agide-type-small-size);
+}
+.swarm-row-actions {
+  display: inline-flex;
+  gap: var(--agide-space-1);
+}
+.swarm-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--agide-space-3);
+}
+.swarm-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--agide-space-2);
+  padding: var(--agide-space-3);
+  border-radius: var(--agide-radius-lg);
+  background: var(--agide-surface-raised);
+}
+.swarm-result h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--agide-space-2);
+  margin: 0;
+  font-size: var(--agide-type-body-size);
+  font-weight: var(--agide-font-weight-semibold);
+}
+.swarm-result pre,
+.swarm-dialog pre {
+  margin: 0;
+  padding: var(--agide-space-2);
+  max-height: 200px;
+  overflow: auto;
+  border-radius: var(--agide-radius-md);
+  background: var(--agide-surface-inset);
+  font-family: var(--agide-font-mono);
+  font-size: var(--agide-type-mono-size);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.swarm-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--agide-space-1) var(--agide-space-3);
+  margin: 0;
+  font-size: var(--agide-type-small-size);
+}
+.swarm-facts dt {
+  color: var(--agide-text-secondary);
+}
+.swarm-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.swarm-approval-meta,
+.swarm-approval-tool {
+  margin: 0;
+  color: var(--agide-text-secondary);
+  font-size: var(--agide-type-small-size);
+}
+.swarm-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--agide-space-3);
+}
+
+.swarm-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.swarm-approval {
+  display: flex;
+  flex-direction: column;
+  gap: var(--agide-space-2);
+  flex-basis: 100%;
+}
+.swarm-approval-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--agide-space-2);
+}

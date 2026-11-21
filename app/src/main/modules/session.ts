@@ -14,6 +14,7 @@ import {
   SessionError,
   SqliteSessionStore,
   type LaunchContributors,
+  type StreamSpawner,
   type SessionService,
 } from '../../core/session/index';
 import type { SessionInfo } from '../../core/session/index';
@@ -32,7 +33,7 @@ const permissionMode = z.enum(['default', 'acceptEdits', 'plan', 'auto', 'bypass
  */
 export async function init(
   ctx: ModuleContext,
-  deps: { tree: TreeService; mcp: AppMcpServer; profile: ProfileService; permissions: PermissionService; launch: LaunchContributors },
+  deps: { tree: TreeService; mcp: AppMcpServer; profile: ProfileService; permissions: PermissionService; launch: LaunchContributors; streams?: StreamSpawner },
 ): Promise<ModuleHandle<SessionService>> {
   const { tree, mcp, permissions } = deps;
   const launchArgs = claudeArgsFromEnv();
@@ -57,6 +58,7 @@ export async function init(
     onLaunchFailed: (session) => mcp.revoke(session.id),
     networkPolicy: (session) => permissions.networkPolicy(session.id),
     contributors: () => deps.launch.list(),
+    ...(deps.streams === undefined ? {} : { streamSpawner: deps.streams }),
     extraArgs: () => launchArgs,
     mcpConfig: (session, endpoint) => mcpConfig(mcp, session, leafOf(session.id), endpoint),
   });
@@ -97,7 +99,14 @@ export async function init(
       }
     }),
     tree.subscribe((event) => {
-      if (event.type === 'tree.subtree_removed') {
+      if (event.type === 'tree.node_created') {
+        // A leaf that another module creates in the session's folder for a session without a leaf becomes its
+        // leaf: swarm agents are created through the session service, then get their leaf (0038).
+        const node = event.node;
+        if (node.kind === 'leaf' && node.surfaceType === SURFACE_TYPE && !leafIds.has(node.surfaceId) && sessions.get(node.surfaceId)?.folderId === node.parentId) {
+          leafIds.set(node.surfaceId, node.id);
+        }
+      } else if (event.type === 'tree.subtree_removed') {
         for (const node of event.removed) {
           if (isSessionLeaf(node)) void closeQuietly(node.surfaceId).catch(logError);
         }

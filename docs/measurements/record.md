@@ -62,3 +62,31 @@ Reconciling the builder reports, written while other builders were still changin
 - The judged days built are a judgement; no measurement gives them.
 - The m3 and gate real-Claude scripts, `pnpm e2e`, `pnpm mutation` and `pnpm coverage:e2e` were not re-run for this record; their figures come from the fix, verification and quality reports.
 - The temporary log files of this step were removed. Leftovers of other steps are listed in 0030 and were not touched.
+
+## Milestone 4 record
+
+Start: 2026-11-21 10:14:29 UTC (date -u). End: 2026-11-21 10:24:31 UTC (date -u). Wall time about 10 minutes.
+
+### Built
+
+- `docs/decisions/0039-milestone-4-results.md`: what milestone 4 built and what each slice shows against R18 (cap, queue, stages, steering, budgets, approvals from the inbox card, worktrees, tools, UI, usage, isolation); the statements of 0004, 0011, 0027 and 0037 that the probes and the build change; review findings with their status; tests and per-area unit coverage; measured effort per step and a re-estimate; what remains open; recommendations for milestone 5 (R19, then R21, notes and mounts, apps); questions for the user.
+- `docs/README.md`: rows for 0037 to 0039, the amendment summary, the milestone 4 measurement files, `notes/probes-m4-swarm.md`, the P30 to P37 scripts, the swarm real-Claude scripts and the CLI versions.
+- `README.md`: swarms in the status list and the milestone 4 results record.
+- `app/README.md`: links to 0038 and 0039; the Swarms section (shared cap with `task_start`, definition fields, budgets, approvals, Resume for paused swarms, no removal yet, the `swarm` settings with defaults); the swarm unit and end-to-end tests.
+
+### Commands run
+
+- `pnpm typecheck`: pass. `pnpm coverage`: 216 files, 2203 tests pass, 15 skipped, thresholds met; per-area figures computed from `coverage/coverage-summary.json` with a one-off `node -e` script.
+- A read-only `claude -p` reviewer (sonnet, effort medium, tools Read, Grep and Glob, `--max-budget-usd 1.5`, `--setting-sources user`, `--strict-mcp-config`, cost about 0.36 USD) checked the record and the READMEs against the records, notes, measurement files and code. Its findings were applied: this section was missing, the test counts needed their source, and sums were in prose (moved into tables).
+- A grep for the banned words and for user paths, e-mail addresses and employer names in the written files: none, apart from a quoted finding that was reworded.
+
+### What took long
+
+Collecting the start and end times from the measurement files, and matching the statements of 0004, 0011, 0027 and 0037 against the probe notes and the step reports.
+
+### Not done
+
+- The `w-ui.md` start time of the swarm UI step reads 05:38, before the milestone started; the record assumes 07:38, when the builders started.
+- `docs/measurements/w-ui.md` of the restyle was overwritten by the swarm UI step; the record lists it as open and did not restore it (not this step's file).
+- `pnpm e2e`, `pnpm mutation` and the real-Claude scripts were not run by this step.
+- Temporary files of this step were removed. The reviewer ran in the project directory, so the CLI may have added a session file under the project entry of that directory in the Claude configuration directory (not checked).

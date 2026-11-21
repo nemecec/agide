@@ -1,6 +1,6 @@
 # Agide spike: index
 
-Spike to choose the base for a personal, macOS-only desktop tool for agentic coding. Records are dated point-in-time decisions from 2026-11-17 and hold for Claude Code 2.1.326.
+Spike to choose the base for a personal, macOS-only desktop tool for agentic coding. Records are dated point-in-time decisions from 2026-11-17 on. 0004 to 0036 hold for Claude Code 2.1.326 and 2.1.327; 0037 to 0039 and the probes P30 to P37 for 2.1.330.
 
 ## Decision records (`decisions/`)
 
@@ -42,14 +42,17 @@ Spike to choose the base for a personal, macOS-only desktop tool for agentic cod
 | [0034](decisions/0034-notes-requirement.md) | proposed | R27 notes (inline first, file-backed on request) and live read-only mounts |
 | [0035](decisions/0035-visual-design-system.md) | accepted | The visual design brief: token values for Agide Light, Dark and System, components, chrome, icons, theme file format, VS Code import mapping, contrast tables, migration steps |
 | [0036](decisions/0036-restyle-results.md) | accepted | Restyle results: what each migration step of 0035 built, before and after evidence, the independent review's defects and fixes, tests, contrast, measured effort, what is not done or verified, questions, next milestone |
+| [0037](decisions/0037-swarm-orchestration-design.md) | proposed | R18 design: swarm definition, the stream-json agent runtime, the manager with run states, cap and queue, stages and failure policy, workspaces and patches, tiers, budgets, approvals from `can_use_tool`, steering, the `swarm_*` tools, UI, persistence, threats |
+| [0038](decisions/0038-milestone-4-architecture-and-contracts.md) | accepted | Milestone 4 slices, modules, contracts, the stream-json spawner seam, ownership, init order and test strategy; changes after the review |
+| [0039](decisions/0039-milestone-4-results.md) | accepted | Milestone 4 results: slices against R18 (cap, queue, stages, steering, budgets, approvals, worktrees, tools, UI), amendments to 0004, 0011, 0027 and 0037, review fixes, tests and coverage, measured effort and re-estimate, milestone 5 |
 
-0007 is accepted for the base through 0012. 0004 needs the amendments listed in 0014, 0024 and 0030; 0019 those in 0024, 0029 and 0030; 0021 those in 0024; 0010, 0011 and 0022 those in 0029 and 0030; 0028 those in 0030.
+0007 is accepted for the base through 0012. 0004 needs the amendments listed in 0014, 0024, 0030 and 0039; 0019 those in 0024, 0029 and 0030; 0021 those in 0024 and 0037; 0010 and 0022 those in 0029 and 0030 (0022 also 0037); 0011 those in 0029, 0030, 0037 and 0039; 0027 those in 0037 and 0039; 0028 those in 0030; 0037 those in 0038 and 0039.
 
 The plan: [spike-plan.md](spike-plan.md).
 
 ## Application (`../app/`)
 
-The greenfield app lives in `../app/` in this repository. `../app/README.md` covers install, run, environment variables and the test commands. Architecture and contracts: 0013 (milestone 1), 0023 (milestone 2) and 0029 (milestone 3). Results: 0014, 0024 and 0030; the on-screen check: 0031; the restyle: 0036.
+The greenfield app lives in `../app/` in this repository. `../app/README.md` covers install, run, environment variables and the test commands. Architecture and contracts: 0013 (milestone 1), 0023 (milestone 2), 0029 (milestone 3) and 0038 (milestone 4). Results: 0014, 0024, 0030 and 0039; the on-screen check: 0031; the restyle: 0036.
 
 | Command (run in `../app/`) | Checks |
 |---|---|
@@ -58,13 +61,13 @@ The greenfield app lives in `../app/` in this repository. `../app/README.md` cov
 | `pnpm coverage` | the unit tests with coverage thresholds |
 | `pnpm e2e` | builds the app and runs Playwright against it with a hidden window |
 | `pnpm coverage:e2e` | the end-to-end tests with renderer and main-process coverage; not a gate |
-| `pnpm mutation` | breaks each security decision once (folder scope, navigation schemes, inspector rules, redaction, observation switch) and fails when no unit test notices |
+| `pnpm mutation` | breaks each security and cost decision once (folder scope, navigation schemes, inspector rules, redaction, observation switch, the swarm cap and queue, permission caps of children, spawn depth, budget stops, approval answers, swarm tool scope, worktree removal, the stream-json runtime) and fails when no unit test notices |
 | `pnpm parity` | checks that every UI-bound command is an MCP tool or states an exemption; writes `parity.md` |
 | `pnpm blocks-docs` | writes `blocks.md` from the block manifest and layout schemas |
 | `pnpm check:colours` | no stylesheet or component of the renderer holds a colour literal outside the allowlist (empty since the restyle, 0036) |
 | `pnpm visual-check` | after `pnpm build`, walks the UI states on sample data in a fixed-size window, including the theme phase, and writes one PNG per state into a new temporary directory; not a gate (0031, 0036) |
 | `node scripts/port-vscode-theme.mjs` | ports a theme of a VS Code package or theme file to an Agide theme file with the app's importer; the ported built-in themes come from it |
-| `node scripts/smoke-real-claude.mjs`, `pnpm e2e:claude-mcp`, `pnpm e2e:real-claude`, `pnpm e2e:real-claude-inbox`, `pnpm e2e:real-claude-m3`, `node --experimental-strip-types scripts/real-claude-gate.mjs` | real `claude` on Haiku with the budget cap; outside the default test commands |
+| `node scripts/smoke-real-claude.mjs`, `pnpm e2e:claude-mcp`, `pnpm e2e:real-claude`, `pnpm e2e:real-claude-inbox`, `pnpm e2e:real-claude-m3`, `node --experimental-strip-types scripts/real-claude-gate.mjs`, `node scripts/e2e-real-swarm-runtime.mjs`, `node scripts/e2e-real-swarm-mcp.mjs`, `node scripts/e2e-real-swarm-dialog.mjs` | real `claude` on Haiku with the budget cap; outside the default test commands; the swarm scripts after `pnpm build` |
 | `electron scripts/browser-checks.mjs` | the Electron and CDP checks of the browser first slice; results in `../probes/RESULTS.md` |
 
 ## Other documents (`docs/`)
@@ -73,7 +76,7 @@ The greenfield app lives in `../app/` in this repository. `../app/README.md` cov
 |---|---|
 | `parity.md` | UI and MCP parity table, generated by `pnpm parity` |
 | `blocks.md` | First-party pane types, shared context keys, and the JSON Schemas of the block manifest and the layout document, generated by `pnpm blocks-docs` |
-| `measurements/*.md` | start and end times and a short account per agent step of stage 2; files of steps that ran again in later milestones (`contracts.md`, `integrate.md`, `fix.md`, `record.md`, `w-quality.md`, `cross-review.md`) have a section per milestone; the milestone 3 fix step is `fix-m3-review.md`; the on-screen check steps are `v-capture.md`, `v-review.md`, `v-fix.md`, `v-verify.md`, `v-record.md` and `v-cross-review.md`; the restyle steps of 0036 are `r-before.md`, `w-tokens.md`, `w-ui.md`, `integrate-a.md`, `w-chrome.md`, `w-import.md`, `integrate-b.md`, `w-panes.md`, `r-after.md`, `r-review.md`, `r-fix.md`, `r-record.md` and `r-cross-review.md` |
+| `measurements/*.md` | start and end times and a short account per agent step of stage 2; files of steps that ran again in later milestones (`contracts.md`, `integrate.md`, `fix.md`, `record.md`, `w-quality.md`, `cross-review.md`) have a section per milestone; the milestone 3 fix step is `fix-m3-review.md`; the on-screen check steps are `v-capture.md`, `v-review.md`, `v-fix.md`, `v-verify.md`, `v-record.md` and `v-cross-review.md`; the restyle steps of 0036 are `r-before.md`, `w-tokens.md`, `w-ui.md` (now overwritten by the milestone 4 swarm UI step; the restyle text is in git at the last commit), `integrate-a.md`, `w-chrome.md`, `w-import.md`, `integrate-b.md`, `w-panes.md`, `r-after.md`, `r-review.md`, `r-fix.md`, `r-record.md` and `r-cross-review.md`; the milestone 4 steps of 0039 are `p-swarm.md`, `review-swarm-probes.md`, `d-swarm.md`, `review-swarm-design.md`, `review-m4-contracts.md`, `w-runtime.md`, `w-manager.md`, `w-ui.md`, `review-swarm-runtime.md`, `review-swarm-ui.md`, `fix-m4-review.md`, `review-fix-m4.md` and `fix-2.md`, with sections in `contracts.md`, `integrate.md`, `w-quality.md`, `record.md` and `cross-review.md` |
 | `images/agide-overview.png` | Overview screenshot for the repository README (Pair layout, dark System theme), from a `pnpm visual-check` run on sample data after the restyle |
 | `images/agide-settings-themes.png`, `images/agide-inbox-light.png` | After screenshots of the restyle (0036): the settings theme list, and the inbox in the light System theme |
 
@@ -99,6 +102,7 @@ The greenfield app lives in `../app/` in this repository. `../app/README.md` cov
 | `browser-tools-mapping.md` | Milestone 3 browser survey: Claude in Chrome tool list and schemas, CDP mapping through `webContents.debugger`, `WebContentsView` facts, guards, observation signals, redaction, test strategy |
 | `probes-m3-permissions.md` | Milestone 3 probes P20 to P24: ask rules in auto mode, `PreToolUse` hook decisions and precedence, permission modes, sandbox settings and `strictAllowlist`, folder trust; reviewer re-run |
 | `probes-m3-isolation.md` | Milestone 3 probes I1 to I3: Anthropic's sandbox runtime (srt) with the real claude, Docker and OpenShell with a fake claude; host changes and what remains on the host |
+| `probes-m4-swarm.md` | Milestone 4 probes P30 to P37: a stream-json agent with `can_use_tool`, interrupt, control requests, resume, concurrency and `rate_limit_event`, budgets, worktrees, `--bare` on the subscription login; reviewer re-run |
 | `onscreen-check.md` | On-screen check of the milestone 2 and 3 UI: capture sources, the screens, the capture agent's defects V-01 to V-22, what the screenshots do not show, and the fixes with their after screenshots (0031) |
 | `visual-design-audit.md` | Audit for the visual design: inventory of the UI and its styles, verified Electron and CSS platform facts, library and theme licenses, VS Code theme data; `scripts/token-contrast.mjs` computes the contrast tables (0035), and reports no pair below target after the restyle (0036) |
 
@@ -112,7 +116,7 @@ Candidate clones (read only, never installed or run): `../candidates/`.
 
 The probes call the real `claude` CLI under the user's login and spend a small amount of subscription budget per run. Results hold for the CLI version they ran against.
 
-1. Check the CLI version: `claude --version`. The records assume 2.1.326.
+1. Check the CLI version: `claude --version`. The records up to 0036 assume 2.1.326; P30 to P37 and 0037 to 0039 ran on 2.1.330.
 2. Run from `../probes/` with no dependencies: `node <script>.mjs` or `python3 <script>.py`. Every script states its usage in its first line.
 3. The scripts use `--model haiku`, `--max-budget-usd 0.25` on `-p` runs, the empty working directory `probes/work`, `--setting-sources user` and, except for connector probes, `--strict-mcp-config`. They remove variables injected by a parent Claude Code session and keep `CLAUDE_CONFIG_DIR`, which selects the login.
 4. Never point a probe at a candidate repository or a PR checkout.
@@ -132,5 +136,6 @@ The probes call the real `claude` CLI under the user's login and spend a small a
 | `pb1_server_names.mjs` | PB1 MCP server names (`agide-browser`, `claude-in-chrome`) |
 | `p16_srt.py`, `p17_container.py`, `p18_openshell.py` | Isolation probes I1 to I3; the file names predate the probe ids, and P16 in the records is the MCP call wait probe, not run. Helpers `p17_container_lib.py`, `hooks/srt_claude.sh`, `fixtures/fake_claude.sh`, `fixtures/hook_events.sh`; `mcp_host.mjs` takes `--allow-host` and `--bind`. They need srt, Docker or OpenShell; the notes list the install precautions and host changes |
 | `p20_ask_rules.mjs`, `p21_pretool_hook.mjs`, `p22_modes.mjs`, `p23_sandbox.mjs`, `p23_sandbox_pty.py`, `p24_trust.py`, `p24_print_untrusted.mjs`, `p_perm_pty.py` | P20 to P24 (helper `p_perm_lib.mjs`, hook `hooks/pretool_decide.py`) |
+| `p30_stream_agent.mjs`, `p31_interrupt.mjs`, `p32_control_requests.mjs`, `p33_resume.mjs`, `p34_concurrency.mjs`, `p35_budgets.mjs`, `p36_worktrees.mjs`, `p37_bare.mjs` | P30 to P37 (helper `p_swarm_lib.mjs`); each script states its usage in its first line |
 
-Raw logs and per-probe reports go to `../probes/out/`. Summary: `../probes/RESULTS.md` for P1 to P3 and P6 to P15; P5 is summarized in `../notes/swarm-visibility.md`; P6 to P10 details are in `../notes/probes-stage2.md`, P11 to P15 details in `../notes/probes-m2.md`, P20 to P24 in `../notes/probes-m3-permissions.md`, I1 to I3 in `../notes/probes-m3-isolation.md`; PB1 and the browser first-slice checks are in `../probes/RESULTS.md`. Probes not yet written or run are listed in 0007 (stage 2), 0014, 0021 (P16, P17), 0022 (E, C, G, D, O and S series), 0024, 0027 (U1 to U7), 0028 (Q1 to Q7) and 0030. The probes work in directories under `probes/work/`. A new directory can raise the CLI's folder-trust prompt with "No, exit" highlighted; `m2_lib.py` answers it, and each answer adds a trust entry for that directory to the user's Claude config.
+Raw logs and per-probe reports go to `../probes/out/`. Summary: `../probes/RESULTS.md` for P1 to P3 and P6 to P15; P5 is summarized in `../notes/swarm-visibility.md`; P6 to P10 details are in `../notes/probes-stage2.md`, P11 to P15 details in `../notes/probes-m2.md`, P20 to P24 in `../notes/probes-m3-permissions.md`, I1 to I3 in `../notes/probes-m3-isolation.md`, P30 to P37 in `../notes/probes-m4-swarm.md` and `../probes/RESULTS.md`; PB1 and the browser first-slice checks are in `../probes/RESULTS.md`. Probes not yet written or run are listed in 0007 (stage 2), 0014, 0021 (P16, P17), 0022 (E, C, G, D, O and S series), 0024, 0027 (U1 to U7), 0028 (Q1 to Q7), 0030 and 0039. The probes work in directories under `probes/work/`. A new directory can raise the CLI's folder-trust prompt with "No, exit" highlighted; `m2_lib.py` answers it, and each answer adds a trust entry for that directory to the user's Claude config.

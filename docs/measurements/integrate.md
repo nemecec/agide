@@ -112,3 +112,64 @@ Writing the integration fake claude so that a bracketed paste with newlines coun
 - The session status and the approval item after a refusal with Escape (above).
 - The real-Claude script under srt and the probes listed in the builders' reports were not run here.
 - Empty `playwright-artifacts-*` directories from the test runs remain in the temporary directory.
+
+# integrate (milestone 4, swarm orchestration)
+
+Start: 2026-11-21T08:15:50Z
+End: 2026-11-21T08:44:00Z (about 28 minutes wall time)
+
+This section belongs to the milestone 4 integration run under the same label; the record above is the milestone 1 integration.
+
+## What was built
+
+- The builders had already wired most of the path: the swarm module builds `StreamAgentRuntime`, registers its launch contributor and sets it into `streams`, so every agent is a `claude -p` stream-json process launched by the session service through the profile's isolation provider. `AGIDE_SWARM_RUNTIME=fake` keeps the in-memory runtime for the specs that need no process.
+- `AgentEnvironment.processCommand` is required now (0038 said the integration step does this); `HostEnvironment` declares it and the runtime's undefined check is gone.
+- Agent nodes: the swarm module records each agent with the new `AgentsController.trackAppStarted`, which does not check the cap, since the manager already holds the slot. `beginAppStarted` uses it after its own check.
+- Usage: the stream adapter turns each `assistant` message into a usage fact on the process row, so the ranking and rates include swarm agents. The controller reads a stream-json session through the stream adapter only (decided per event from the session's launch path); its hooks and transcript no longer count its agents and usage a second time, and its transcript path is still kept for the copy at exit. The row's cost is the cost the CLI reported; a resumed process adds to what earlier processes reported, taken from the swarm ledger, which survives an app restart.
+- The cap: the swarm module counts live sessions that agents started with `task_start`, and `task_start` counts app-started agents and follows `agents.maxConcurrentAppStarted` (default 4, as before). Both messages now say "app-started agents".
+- Scratch and inputs directories of agents moved out of the app root to `<task base>/swarms/<swarm id>`, since every launch denies the CLI's Read and Edit tools on the app root. Patches stay in the data directory. `prepare` refuses an agent directory inside the app root.
+- `src/core/inbox/plainText.test.ts` failed on a renderer test that read `innerHTML`; the test now checks the child nodes.
+- `e2e/swarmIntegration.spec.ts` with `e2e/fixtures/fake-claude-dispatch.mjs` (the PTY fake for sessions, the stream-json fake for agents): a session starts a two-agent swarm over MCP; the agents are stream-json processes; the nodes, the "2 of 2 agents running" label, the app-started rows and the usage ranking show them; the worker waits for an approval that is answered on the inbox card and continues; the cap queues the agent of a second swarm until the slot frees; `swarm_stop` stops the group. A mutation that drops the assistant usage case fails it.
+- Real-Claude scripts: `scripts/e2e-real-swarm-mcp.mjs`, `scripts/e2e-real-swarm-dialog.mjs`, helpers in `scripts/lib/realSwarm.mjs`; `launchApp` takes extra variables.
+- README: a Swarms section, the variable, the scripts, the module order and the shared cap.
+
+Shared files changed with the smallest change: `core/isolation/types.ts`, `HostEnvironment.ts`, `core/agents/AgentsController.ts`, `core/agents/normalise/streamAdapter.ts`, `core/tasks/TaskStartService.ts`, `main/modules.ts` (agents passed to tasks), `main/modules/agents.ts`, `main/modules/tasks.ts`, `scripts/lib/realClaude.mjs`, and tests of the builders (`StreamAgentRuntime.test.ts`, `SwarmWorkspaces.test.ts`, `testRig.ts`, `PersistentSwarmManager*.test.ts`, `swarm.test.ts`, `swarm.spec.ts`, `SwarmApprovalActions.test.ts`).
+
+## Real-Claude runs
+
+Haiku (`maxTier` small, effort low), `--max-budget-usd 0.25` per process, `--strict-mcp-config`, `--setting-sources user`, the scrubbed environment of `scripts/lib/realClaude.mjs`, claude 2.1.330.
+
+| Run | Result | Agents' reported cost (USD) | Notes |
+|---|---|---|---|
+| dialog, first | fail | 0.0136 | The writer's Write was refused by the CLI: "File is in a directory that is denied by your permission settings". The scratch directory lay under the app root. Fixed by moving it. |
+| dialog | pass | 0.0082 | The Write reached the app as `can_use_tool`, the inbox card showed "writer wants to run Write: <path>" and "Agent writer, mode default, denied automatically in 60 minutes"; Allow on the card wrote the file; replies WRITTEN and READY; at most 2 agents ran. |
+| MCP | pass | 0.0077 plus the session | The session called ToolSearch, then `mcp__app__swarm_start`. The CLI showed its permission dialog: "Rule mcp__app__swarm_start from command line arguments overrides auto mode … Do you want to proceed? 1. Yes 2. Yes, and don't ask again for app — SwarmStart commands in <cwd> 3. No". Enter allowed it. With the cap at 1, beta was queued with reason `slot` until alpha ended; replies ALPHA and BETA. A `hook:PermissionRequest` inbox item "Approve: app.agent_start" appeared and was superseded once the call ran. |
+| both again after the review fixes | pass | 0.0077 and 0.0082 | Agent node costs equal the ledger. |
+
+Not predicted by the probes:
+
+- A scratch workspace under the swarm's data directory (0037 section 4) is inside the app root, where the launch denies Read and Edit; the CLI refuses the agent's writes there.
+- `claude-haiku-5-5` costs about a tenth of the `haiku` row of `src/core/usage/prices.json` by the CLI's own `modelUsage.costUSD` (a call with 17403 one-hour cache-write tokens and 12333 cache-read tokens reported 0.0036 USD; the table gives about 0.036). Token estimates of every Haiku session are about ten times too high. The table is not changed here.
+- Agents that reply without tools in auto mode raise no `can_use_tool` request; a Write in default mode raises one, as P30 showed.
+
+The real runs and the review passes cost about 0.04 USD for the scripts and a one-call raw stream probe, and about 2.33 USD for the reviews (opus, read-only tools).
+
+## Review
+
+No sub-agent tool was available in this session, so the reviews ran as separate read-only `claude -p` processes (opus, effort high, tools Read, Grep and Glob, `--max-budget-usd` 3 and 2). The first found these defects: usage counted twice through the hooks and transcript of a stream-json session, a resumed process's cost replacing the earlier cost, and the cap shared in one direction only. The second found that the first fix missed sessions resumed after an app restart, lost the transcript copy at exit, and lost the prior cost after a restart. The third found no defects and an unreachable branch, which was removed.
+
+## Commands
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | pass |
+| `pnpm coverage` | pass; all files 89.28 statements, 80.8 branches; thresholds met |
+| `pnpm build` | pass |
+| `pnpm e2e` | pass, all specs, hidden windows (the last run was before the removal of the unreachable branch, a change without behaviour) |
+| `pnpm parity` | ok; the `swarm_*` tools are in the table, `swarm_approval_answer` exempt |
+| `pnpm check:colours` | pass |
+
+## What took long, what is open
+
+- Most time went to the real run that found the denied scratch directory and to the review rounds on the usage path.
+- Open: `swarm_remove` has no command, so the Remove swarm dialog and the cleanup of scratch directories under `~/Agide/swarms` wait for it. The "Always" answer stays hidden. The swarm row's cap label counts swarm agents only, not `task_start` sessions. `SqliteUsageStore.loadTotals` is not called at start, so usage totals of PTY sessions are not restored after a restart. The task-start depth hop of 0038 is not built. The price table's Haiku row.

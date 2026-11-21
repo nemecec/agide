@@ -20,6 +20,7 @@ const MIGRATIONS: readonly Migration[] = [
     );
     CREATE INDEX task_starts_session ON task_starts (session_id);`,
   },
+  { version: 2, sql: 'ALTER TABLE task_starts ADD COLUMN spawn_depth INTEGER NOT NULL DEFAULT 0;' },
 ];
 
 interface Row {
@@ -44,11 +45,12 @@ export class TaskStartStore {
     migrate(db, 'taskstart', MIGRATIONS);
   }
 
-  insert(record: TaskStartRecord, startedBy: StartedBy): void {
+  /** `spawnDepth` is 0 for a start by the user and for an agent that is not below a swarm agent. */
+  insert(record: TaskStartRecord, startedBy: StartedBy, spawnDepth = 0): void {
     this.db
       .prepare(
-        `INSERT INTO task_starts (folder_id, source_kind, source_ref, repo_path, worktree_path, branch, base, session_id, permission_mode, started_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO task_starts (folder_id, source_kind, source_ref, repo_path, worktree_path, branch, base, session_id, permission_mode, started_by, created_at, spawn_depth)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.folderId,
@@ -62,7 +64,14 @@ export class TaskStartStore {
         record.permissionMode,
         startedBy,
         record.createdAt,
+        spawnDepth,
       );
+  }
+
+  /** The spawn depth recorded for a session a task start created; 0 for any other session. */
+  depthOf(sessionId: string): number {
+    const row = this.db.prepare('SELECT spawn_depth FROM task_starts WHERE session_id = ?').get(sessionId) as { spawn_depth: number } | undefined;
+    return row?.spawn_depth ?? 0;
   }
 
   get(folderId: string): TaskStartRecord | undefined {

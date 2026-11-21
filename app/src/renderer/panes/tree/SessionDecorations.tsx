@@ -1,6 +1,7 @@
 import { summarise } from '../../../core/agents/view';
 import { HeatMarker } from '../agents/HeatMarker';
 import { useAgents, useUsageState } from '../agents/useAgents';
+import { useSwarmAgent } from '../swarm/useSwarms';
 import { Chip } from '../../ui/Chip';
 import { STATUS_ICONS, STATUS_TONES, type StatusKind } from '../../ui/icons';
 
@@ -13,7 +14,9 @@ function Tally({ status, count, label, testId }: { readonly status: StatusKind; 
 export function SessionDecorations({ sessionId }: { readonly sessionId: string }) {
   const { agents, waitingSessions, now } = useAgents();
   const usage = useUsageState();
-  const mine = agents.filter((agent) => agent.sessionId === sessionId && agent.agentKey !== 'main');
+  const isSwarmAgent = useSwarmAgent(sessionId) !== undefined;
+  // The swarm chip next to the session tells the state of a swarm agent; its own tally would repeat and can disagree.
+  const mine = agents.filter((agent) => agent.sessionId === sessionId && agent.agentKey !== 'main' && !(isSwarmAgent && agent.origin === 'app-started'));
   const summary = summarise(mine, now);
   const heat = usage?.heat[`session:${sessionId}`];
   const sessionWaits = waitingSessions.includes(sessionId);

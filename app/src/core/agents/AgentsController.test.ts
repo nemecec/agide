@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { SessionEvent, SessionInfo } from '../session/types';
+import type { LaunchPath, SessionEvent, SessionInfo } from '../session/types';
 import { UsageEngine } from '../usage/UsageEngine';
 import { AgentsController } from './AgentsController';
 import { InMemoryAgentStore } from './InMemoryAgentStore';
@@ -27,19 +27,21 @@ function setup(outcomeOf?: (path: string) => AgentOutcome, maxAppStarted = 4) {
   const usage = new UsageEngine({ now: () => clock.now, windowMinutes: () => 5 });
   const archived: string[] = [];
   const exited: (string | undefined)[] = [];
+  const launchPaths = new Map<string, LaunchPath>();
   const controller = new AgentsController({
     store,
     usage,
     now: () => clock.now,
     eventsDirOf: (id) => join(root as string, 'events', id),
     maxAppStarted: () => maxAppStarted,
+    launchPathOf: (id) => launchPaths.get(id),
     ...(outcomeOf === undefined ? {} : { outcomeOf }),
     onAgentEnded: (record) => archived.push(record.ref.agentKey),
     onSessionExited: (_id, path) => exited.push(path),
   });
   const hook = (hookEvent: string, payload: object): void =>
     controller.handleSession({ type: 'session.hook', sessionId: 's1', hookEvent, payload: { session_id: 's1', transcript_path: transcript, ...payload } } as SessionEvent);
-  return { controller, store, usage, hook, archived, exited, transcript, subagents, clock };
+  return { controller, store, usage, hook, archived, exited, transcript, subagents, clock, launchPaths };
 }
 
 const line = (id: string, input: number) => JSON.stringify({ type: 'assistant', message: { id, model: 'claude-haiku-5-5', usage: { input_tokens: input, output_tokens: 1 } } });
@@ -116,5 +118,54 @@ describe('AgentsController over stream-json', () => {
     controller.beginAppStarted('p1');
     controller.streamMessage('p1', { type: 'result', total_cost_usd: 0.02 });
     expect(usage.sessionTotals('p1'), 'result cost').toMatchObject({ costUsd: 0.02, basis: 'result' });
+  });
+
+  it('adds the cost of a resumed process to what the earlier process reported', () => {
+    const { controller, usage } = setup();
+    controller.trackAppStarted('p1');
+    controller.streamMessage('p1', { type: 'result', total_cost_usd: 0.8 });
+    controller.streamExited('p1');
+    controller.trackAppStarted('p1');
+    controller.streamMessage('p1', { type: 'result', total_cost_usd: 0.05 });
+    expect(usage.sessionTotals('p1')?.costUsd, 'the cost of both processes').toBeCloseTo(0.85, 9);
+  });
+
+  it('tracks an app-started agent whose starter already holds its slot, even at the cap', () => {
+    const { controller, store } = setup(undefined, 1);
+    controller.beginAppStarted('p1');
+    controller.trackAppStarted('p2', { description: 'swarm agent' });
+    expect(store.get({ sessionId: 'p2', agentKey: 'session' }), 'a running app-started row').toMatchObject({ origin: 'app-started', state: 'running' });
+  });
+
+  it('reads a stream-json session through the stream adapter only, keeping its transcript path for the copy at exit', () => {
+    const { controller, store, usage, transcript, exited, launchPaths } = setup();
+    launchPaths.set('p1', 'stream-json');
+    const info = { ...session('p1'), launchPath: 'stream-json' } as const;
+    controller.handleSession({ type: 'session.created', session: info });
+    controller.trackAppStarted('p1');
+    writeFileSync(transcript, `${line('m1', 100)}\n`);
+    controller.handleSession({ type: 'session.hook', sessionId: 'p1', hookEvent: 'SessionStart', payload: { session_id: 'p1', transcript_path: transcript } });
+    controller.handleSession({ type: 'session.hook', sessionId: 'p1', hookEvent: 'SubagentStart', payload: { session_id: 'p1', agent_id: 'a1' } });
+    controller.streamMessage('p1', JSON.parse(line('m1', 100)));
+    controller.tick();
+    controller.handleSession({ type: 'session.exited', session: info, exitCode: 0, signal: null });
+    expect(store.get({ sessionId: 'p1', agentKey: 'a1' }), 'no agent record from a hook').toBeUndefined();
+    expect(usage.sessionTotals('p1')?.tokens.input, 'the message counted once, from the stream').toBe(100);
+    expect(exited, 'the transcript from the hooks is handed on for the copy').toEqual([transcript]);
+  });
+
+  it('treats a stream-json session it never saw created, such as one resumed after an app restart, the same way', () => {
+    const { controller, store, usage, transcript, launchPaths } = setup();
+    launchPaths.set('p1', 'stream-json');
+    controller.trackAppStarted('p1', { priorCostUsd: 0.8 });
+    writeFileSync(transcript, `${line('m1', 100)}\n`);
+    controller.handleSession({ type: 'session.status_changed', session: { ...session('p1'), launchPath: 'stream-json' }, previous: 'exited' });
+    controller.handleSession({ type: 'session.hook', sessionId: 'p1', hookEvent: 'SessionStart', payload: { session_id: 'p1', transcript_path: transcript } });
+    controller.streamMessage('p1', JSON.parse(line('m1', 100)));
+    controller.streamMessage('p1', { type: 'result', total_cost_usd: 0.05 });
+    controller.tick();
+    expect(store.get({ sessionId: 'p1', agentKey: 'main' }), 'no session-started row').toBeUndefined();
+    expect(usage.sessionTotals('p1')?.tokens.input, 'counted once').toBe(100);
+    expect(usage.sessionTotals('p1')?.costUsd, 'the cost the starter knew plus the new process').toBeCloseTo(0.85, 9);
   });
 });

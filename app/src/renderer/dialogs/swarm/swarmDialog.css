@@ -1,0 +1,64 @@
+.swarm-start-dialog .swarm-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--agide-space-3);
+  padding-top: var(--agide-space-3);
+}
+.swarm-budget-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--agide-space-3);
+}
+.swarm-agents-editor {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--agide-space-2);
+}
+.swarm-agents-editor .ui-table {
+  width: 100%;
+  table-layout: auto;
+}
+.swarm-agents-editor .ui-table-cell {
+  padding-inline: var(--agide-space-1);
+}
+.swarm-agent-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--agide-space-3);
+  padding: var(--agide-space-2) 0;
+}
+.swarm-stage-input {
+  width: 48px;
+  text-align: right;
+}
+.swarm-preview pre {
+  margin: 0 0 var(--agide-space-2);
+  padding: var(--agide-space-2);
+  max-height: 160px;
+  overflow: auto;
+  border-radius: var(--agide-radius-md);
+  background: var(--agide-surface-inset);
+  font-family: var(--agide-font-mono);
+  font-size: var(--agide-type-mono-size);
+  white-space: pre-wrap;
+}
+.swarm-preview ul,
+.swarm-issue-list {
+  margin: 0;
+  padding-left: var(--agide-space-4);
+}
+
+.swarm-start-dialog .ui-segment {
+  white-space: nowrap;
+}
+.swarm-start-dialog .ui-table-cell input[data-mono] {
+  width: 100%;
+  min-width: 80px;
+}
+.swarm-start-dialog .ui-segment {
+  padding-inline: var(--agide-space-1_5);
+}
+.swarm-start-dialog .ui-select-trigger {
+  min-width: 0;
+}

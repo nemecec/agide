@@ -8,6 +8,7 @@ import { installFakeGh, samplePullRequest } from '../../core/tasks/fixtures/fake
 import { createRepositoryWithRemote, git, type TestRepository } from '../../core/tasks/fixtures/gitRepo';
 import type { TaskStartResult } from '../../core/tasks/index';
 import { startAppModules, type AppModules } from '../appForTests';
+import type { AgentsRuntime } from './agents';
 
 const FAKE_CLAUDE = join(import.meta.dirname, '..', '..', 'core', 'session', 'fixtures', 'fake-claude.mjs');
 const FAKE_TRUST = join(import.meta.dirname, '..', '..', 'core', 'tasks', 'fixtures', 'fake-claude-trust.mjs');
@@ -199,6 +200,18 @@ describe('task start by an agent', () => {
     const fifth = await startTask(modules, { source: 'one more' }, caller);
     expect(fifth, 'fifth start').toMatchObject({ ok: false, error: { message: expect.stringContaining('already run') } });
     expect(modules.services.inbox.list({ folderId, kinds: ['alert'] }).length, 'alert item').toBe(1);
+  });
+
+  it('shares the cap setting with the other app-started agents, such as swarm agents', async () => {
+    const modules = await start();
+    const { caller } = await agent(modules, 'auto');
+    await modules.commands.invoke('agents_settings_set', { maxConcurrentAppStarted: 2 }, ui);
+    (modules.services.agents as AgentsRuntime).controller.trackAppStarted('swarm-agent', { description: 'a swarm agent' });
+    expect(await startTask(modules, { source: 'first' }, caller), 'one slot is left next to the swarm agent').toMatchObject({ ok: true });
+    expect(await startTask(modules, { source: 'second' }, caller), 'the swarm agent and the first start fill the cap').toMatchObject({
+      ok: false,
+      error: { message: expect.stringContaining('2 app-started agents already run') },
+    });
   });
 });
 

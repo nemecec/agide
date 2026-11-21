@@ -1,6 +1,7 @@
 import type { SessionId } from '../../session/types';
 import { APP_STARTED_AGENT_KEY, MAIN_AGENT_KEY, type AgentFact, type AgentOutcome, type AgentRef } from '../types';
 import { asRecord, defined, num, str, type Json } from './payload';
+import { tokenUsageFrom } from './transcriptAdapter';
 
 interface WorkflowEntry {
   state?: string;
@@ -27,7 +28,14 @@ const END_STATUS: Record<string, AgentOutcome> = { completed: 'completed', faile
 export class StreamNormaliser {
   private readonly state: StreamState = { requests: new Map(), denied: new Set(), workflows: new Map(), running: new Set() };
 
-  constructor(private readonly sessionId: SessionId) {}
+  /**
+   * `priorCostUsd` is what earlier processes of the same session reported: a resumed process counts its
+   * `total_cost_usd` from zero, and the session's cost adds both.
+   */
+  constructor(
+    private readonly sessionId: SessionId,
+    private readonly priorCostUsd = 0,
+  ) {}
 
   /** The process started; its own row is `running` until the process exits. */
   processStarted(at: string, details: { description?: string } = {}): AgentFact[] {
@@ -43,6 +51,8 @@ export class StreamNormaliser {
         return this.system(message, at);
       case 'control_request':
         return this.controlRequest(message, at);
+      case 'assistant':
+        return this.assistant(message, at);
       case 'result':
         return this.result(message, at);
       case 'rate_limit_event':
@@ -212,9 +222,18 @@ export class StreamNormaliser {
     ];
   }
 
+  /** Token usage of one API message, counted on the process's own row so the usage rate moves between results. */
+  private assistant(message: Json, at: string): AgentFact[] {
+    const body = asRecord(message['message']);
+    const messageId = str(body?.['id']);
+    const usage = tokenUsageFrom(body?.['usage']);
+    if (messageId === undefined || usage === undefined) return [];
+    return [{ kind: 'usage', ref: this.ref(APP_STARTED_AGENT_KEY), at, messageId, usage, ...defined({ model: str(body?.['model']) }) }];
+  }
+
   private result(message: Json, at: string): AgentFact[] {
     const cost = num(message['total_cost_usd']);
-    return cost === undefined ? [] : [{ kind: 'session-cost', sessionId: this.sessionId, at, costUsd: cost, basis: 'result' }];
+    return cost === undefined ? [] : [{ kind: 'session-cost', sessionId: this.sessionId, at, costUsd: this.priorCostUsd + cost, basis: 'result' }];
   }
 
   private rateLimit(message: Json, at: string): AgentFact[] {

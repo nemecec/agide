@@ -118,6 +118,7 @@ export function init(
     now,
     eventsDirOf: (sessionId) => join(eventsRoot, sessionId),
     maxAppStarted: () => settings().maxConcurrentAppStarted,
+    launchPathOf: (sessionId) => sessions.get(sessionId)?.launchPath,
     onAgentEnded: archive,
     onSessionExited: (sessionId, transcript) => {
       const totals = usage.sessionTotals(sessionId);
@@ -446,6 +447,11 @@ const unrefTimer = (handle: NodeJS.Timeout): NodeJS.Timeout => {
 };
 
 function costOfRecord(usage: UsageEngine, record: AgentRecord): number | undefined {
+  // The row of an app-started process takes the cost the CLI reported in its result over the token estimate.
+  if (record.origin === 'app-started' && record.ref.agentKey === 'session') {
+    const reported = usage.sessionTotals(record.ref.sessionId)?.costUsd;
+    if (reported !== undefined) return reported;
+  }
   const tokens = usage.agentTokensOf(record.ref) ?? record.tokens;
   const total = tokens.input + tokens.output + tokens.cacheWrite5m + tokens.cacheWrite1h + tokens.cacheRead;
   if (total === 0) return undefined;

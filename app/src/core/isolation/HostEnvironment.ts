@@ -8,6 +8,7 @@ import type {
   HookDelivery,
   HookTarget,
   McpEndpoint,
+  ProcessLaunch,
   ProviderId,
   PtyCommand,
   SessionFileName,
@@ -42,6 +43,7 @@ export abstract class HostEnvironment implements AgentEnvironment {
   ) {}
 
   abstract ptyCommand(launch: ClaudeLaunch): Promise<PtyCommand>;
+  abstract processCommand(launch: ProcessLaunch): Promise<PtyCommand>;
 
   /** Host name the CLI in the environment dials for the app endpoint. */
   protected appHost(): string {

@@ -1,4 +1,4 @@
-import { LaunchContributors } from '../core/session/index';
+import { LaunchContributors, StreamSpawners } from '../core/session/index';
 import type { ModuleContext, ModuleHandle, Services } from './context';
 import * as agentsModule from './modules/agents';
 import * as browserModule from './modules/browser';
@@ -8,6 +8,7 @@ import * as mcpModule from './modules/mcp';
 import * as permissionsModule from './modules/permissions';
 import * as profileModule from './modules/profile';
 import * as sessionModule from './modules/session';
+import * as swarmModule from './modules/swarm';
 import * as themeModule from './modules/theme';
 import * as tasksModule from './modules/tasks';
 import * as treeModule from './modules/tree';
@@ -26,7 +27,10 @@ export interface InitializedModules {
  * - inbox comes after session because it maps session hooks to items, and its tables refer to the tree's.
  * - browser, agents and tasks come after inbox: they post inbox items and read sessions. They add to session
  *   launches through `launch`, which the session service reads before every spawn, so registering after the
- *   session module is in time for every launch. tasks comes last because it opens browser tabs.
+ *   session module is in time for every launch. tasks comes after browser because it opens browser tabs.
+ * - swarm comes last (0038): it posts inbox items, counts app-started agents through agents, and sets the
+ *   stream-json runtime into `streams`, the spawner slot the session service reads at each stream-json launch.
+ *   No stream-json session launches during init.
  */
 export async function initModules(ctx: ModuleContext): Promise<InitializedModules> {
   const handles: ModuleHandle<unknown>[] = [];
@@ -35,22 +39,24 @@ export async function initModules(ctx: ModuleContext): Promise<InitializedModule
     return handle.service;
   };
   const launch = new LaunchContributors();
+  const streams = new StreamSpawners();
 
   const profile = keep(await profileModule.init(ctx));
   const tree = keep(treeModule.init(ctx));
   const mcp = keep(await mcpModule.init(ctx, { tree }));
   const permissions = keep(permissionsModule.init(ctx, { profile, launch }));
-  const sessions = keep(await sessionModule.init(ctx, { tree, mcp, profile, permissions, launch }));
+  const sessions = keep(await sessionModule.init(ctx, { tree, mcp, profile, permissions, launch, streams }));
   const layout = keep(await layoutModule.init(ctx, { tree }));
   const theme = keep(themeModule.init(ctx));
   const inbox = keep(await inboxModule.init(ctx, { tree, sessions, profile }));
   const browser = keep(browserModule.init(ctx, { tree, mcp, sessions, profile, permissions, inbox, launch }));
   const agents = keep(agentsModule.init(ctx, { tree, sessions, inbox, profile, launch }));
-  const tasks = keep(tasksModule.init(ctx, { tree, sessions, profile, permissions, inbox, browser, launch }));
+  const tasks = keep(tasksModule.init(ctx, { tree, sessions, profile, permissions, inbox, browser, launch, agents }));
+  const swarm = keep(swarmModule.init(ctx, { tree, sessions, profile, permissions, inbox, agents, tasks, launch, streams }));
   await mcp.start();
 
   return {
-    services: { profile, tree, mcp, permissions, sessions, layout, theme, inbox, browser, agents, tasks },
+    services: { profile, tree, mcp, permissions, sessions, layout, theme, inbox, browser, agents, tasks, swarm },
     dispose: async () => {
       for (const handle of handles.reverse()) await handle.dispose?.();
     },

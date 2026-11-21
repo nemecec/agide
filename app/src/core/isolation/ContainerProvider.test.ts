@@ -84,6 +84,17 @@ describe('ContainerProvider command', () => {
     expect(command.env['PROFILE_VAR'], 'values travel in the client environment').toBe('p');
   });
 
+  it('runs a process without a terminal as docker run -i, with the mounts and variables of the PTY launch', async () => {
+    const environment = await provider({ ownerId: 'o1' }).prepare(spec);
+    const launch = { sessionId: 's1', cwd: join(dir, 'work'), args: ['-p', '--session-id', 's1'], env: { LAUNCH_VAR: 'l' } };
+    const command = await environment.processCommand?.(launch);
+    const withTerminal = await environment.ptyCommand({ ...launch, cols: 80, rows: 24 });
+    expect(command?.args.slice(0, 4), 'interactive without a terminal, removed, init').toEqual(['run', '-i', '--rm', '--init']);
+    expect(command?.args.slice(4), 'everything after the flags is the PTY launch').toEqual(withTerminal.args.slice(4));
+    expect(command?.args.slice(-4), 'image, command, launch arguments last').toEqual([TEST_IMAGE, 'claude', '-p', '--session-id', 's1'].slice(-4));
+    expect(command?.env, 'same client environment').toEqual(withTerminal.env);
+  });
+
   it('uses the provider Claude directory as CLAUDE_CONFIG_DIR even when the profile names another', async () => {
     const environment = await provider().prepare({ ...spec, profile: { ...spec.profile, claudeConfigDir: join(dir, 'profile-claude') } });
     const command = await environment.ptyCommand({ sessionId: 's1', cwd: join(dir, 'work'), args: [], cols: 80, rows: 24 });

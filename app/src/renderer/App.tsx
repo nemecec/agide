@@ -1,4 +1,5 @@
 import { DialogHost } from './dialogs/DialogHost';
+import { SwarmActionDialogs } from './panes/swarm/SwarmActionDialogs';
 import { LayoutHost } from './layout/LayoutHost';
 import { ThemeNotice } from './theme/ThemeNotice';
 import { TooltipProvider } from './ui/index';
@@ -9,6 +10,7 @@ export function App() {
     <TooltipProvider>
       <LayoutHost />
       <DialogHost />
+      <SwarmActionDialogs />
       <ThemeNotice />
     </TooltipProvider>
   );

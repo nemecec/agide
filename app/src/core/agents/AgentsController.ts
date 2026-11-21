@@ -1,4 +1,4 @@
-import type { SessionEvent, SessionId } from '../session/types';
+import type { LaunchPath, SessionEvent, SessionId } from '../session/types';
 import type { UsageEngine } from '../usage/UsageEngine';
 import { SessionWatcher, outcomeOfAgentTranscript } from '../usage/SessionWatcher';
 import { HookNormaliser } from './normalise/hookAdapter';
@@ -19,6 +19,8 @@ export interface AgentsControllerDeps {
   readonly onAgentEnded?: (record: AgentRecord) => void;
   /** Called when a session's process exited and its last transcript read is done. */
   readonly onSessionExited?: (sessionId: SessionId, transcriptPath: string | undefined) => void;
+  /** The launch path of a known session; a stream-json session is read through the stream adapter only. */
+  readonly launchPathOf?: (sessionId: SessionId) => LaunchPath | undefined;
   readonly debug?: (message: string) => void;
 }
 
@@ -50,6 +52,11 @@ export class AgentsController {
 
   /** Session events of the PTY path: launches, hooks and exits. */
   handleSession(event: SessionEvent): void {
+    const launchPath = 'session' in event ? event.session.launchPath : this.deps.launchPathOf?.(event.sessionId);
+    if (launchPath === 'stream-json') {
+      this.handleStreamSession(event);
+      return;
+    }
     switch (event.type) {
       case 'session.created':
         this.watcher(event.session.id);
@@ -73,6 +80,25 @@ export class AgentsController {
     }
   }
 
+  /**
+   * A stream-json session's agents and usage come from its stdout through the stream adapter; its hooks and
+   * transcript would count them a second time. Only the transcript path is kept, for the copy at exit.
+   */
+  private handleStreamSession(event: SessionEvent): void {
+    switch (event.type) {
+      case 'session.hook': {
+        const transcript = str(asRecord(event.payload)?.['transcript_path']);
+        if (transcript !== undefined) this.transcripts.set(event.sessionId, transcript);
+        return;
+      }
+      case 'session.exited':
+        this.deps.onSessionExited?.(event.session.id, this.transcripts.get(event.session.id));
+        return;
+      // `session.closed` comes after the session is gone, so it takes the PTY branch, which forgets the path.
+      default:
+    }
+  }
+
   /** Polls the watchers of running sessions (status snapshot and appended transcript lines). */
   tick(): void {
     for (const watcher of this.watchers.values()) watcher.poll();
@@ -91,10 +117,20 @@ export class AgentsController {
     const running = this.appStartedRunning();
     const cap = this.deps.maxAppStarted();
     if (running >= cap) return { ok: false, reason: 'cap', running, cap };
-    const stream = new StreamNormaliser(sessionId);
-    this.streams.set(sessionId, stream);
-    this.apply(stream.processStarted(this.iso(), details));
+    this.trackAppStarted(sessionId, details);
     return { ok: true };
+  }
+
+  /**
+   * Records an app-started agent whose slot its starter already holds, such as a swarm agent the manager let
+   * through its own count. `priorCostUsd` is what earlier processes of the session reported, when the starter
+   * knows it (after an app restart the usage engine does not); otherwise the engine's figure is used.
+   */
+  trackAppStarted(sessionId: SessionId, details: { description?: string; priorCostUsd?: number } = {}): void {
+    const { priorCostUsd, ...rest } = details;
+    const stream = new StreamNormaliser(sessionId, priorCostUsd ?? this.deps.usage.sessionTotals(sessionId)?.costUsd ?? 0);
+    this.streams.set(sessionId, stream);
+    this.apply(stream.processStarted(this.iso(), rest));
   }
 
   streamMessage(sessionId: SessionId, message: unknown): void {

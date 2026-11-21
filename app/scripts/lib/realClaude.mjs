@@ -45,12 +45,12 @@ export function timeline() {
   };
 }
 
-/** Launches the built app hidden with a temporary data directory and records bus events and terminal output in the page. */
-export async function launchApp({ cwd }) {
+/** Launches the built app hidden with a temporary data directory and records bus events and terminal output in the page. `env` adds variables. */
+export async function launchApp({ cwd, env = {} }) {
   const userData = mkdtempSync(join(tmpdir(), 'agide-real-e2e-'));
   const app = await electron.launch({
     args: [join(appRoot, 'out', 'main', 'index.js')],
-    env: cleanEnv({ AGIDE_HIDDEN: '1', AGIDE_USER_DATA: userData, AGIDE_SESSION_CWD: cwd, AGIDE_CLAUDE_ARGS: JSON.stringify(LAUNCH_ARGS) }),
+    env: cleanEnv({ AGIDE_HIDDEN: '1', AGIDE_USER_DATA: userData, AGIDE_SESSION_CWD: cwd, AGIDE_CLAUDE_ARGS: JSON.stringify(LAUNCH_ARGS), ...env }),
   });
   const page = await app.firstWindow();
   await page.evaluate(() => {

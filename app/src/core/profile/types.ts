@@ -1,6 +1,7 @@
 import type { Unsubscribe } from '../events/EventBus';
 import type { AgentSettingsInput } from '../agents/settings';
 import type { PermissionSettings } from '../permissions/types';
+import type { SwarmSettingsInput } from '../swarm/settings';
 
 /**
  * Profiles (0017, design 0022 sections 1 to 4). One Electron process runs one profile. Only the definition
@@ -58,6 +59,8 @@ export interface ProfileSettings {
   readonly permissions?: PermissionSettings;
   /** Agent removal delays, the app-started cap and usage thresholds (0027). Absent keys read as the defaults. */
   readonly agents?: AgentSettingsInput;
+  /** Tier table, approval timeout, spawn depth and active swarms per session (0037). Absent keys read as the defaults. */
+  readonly swarm?: SwarmSettingsInput;
 }
 
 export interface NewProfileInput {

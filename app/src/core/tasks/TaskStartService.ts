@@ -17,6 +17,7 @@ import {
   TaskStartError,
   type PullRequestInfo,
   type PullRequestReader,
+  type SpawnContext,
   type TaskSource,
   type TaskStartInput,
   type TaskStartRecord,
@@ -45,6 +46,17 @@ export interface TaskStartDeps {
   readonly now?: () => Date;
   readonly nonce?: () => string;
   readonly agentCap?: number;
+  /**
+   * The cap shared with the other app-started agents (0037 section 3.2): when given, its `cap` replaces `agentCap`
+   * and its `otherLive` agents, such as swarm agents, count with the sessions agents started here.
+   */
+  readonly appStarted?: { readonly cap: () => number; readonly otherLive: () => number };
+}
+
+interface AgentStart {
+  readonly sessionTitle: string;
+  readonly mode: PermissionMode;
+  readonly spawnDepth: number;
 }
 
 interface Plan {
@@ -64,7 +76,13 @@ export class TaskStartService implements TaskStarter {
   /** Agent starts that passed the cap check and have no task row yet. */
   private pendingAgentStarts = 0;
 
+  private spawnContext: SpawnContext = () => undefined;
+
   constructor(private readonly deps: TaskStartDeps) {}
+
+  setSpawnContext(context: SpawnContext): void {
+    this.spawnContext = context;
+  }
 
   async start(input: TaskStartInput, caller: Caller): Promise<TaskStartResult> {
     const source = parseTaskSource(input.source);
@@ -78,7 +96,7 @@ export class TaskStartService implements TaskStarter {
     }
   }
 
-  private async run(input: TaskStartInput, caller: Caller, source: TaskSource, agent: { sessionTitle: string; mode: PermissionMode } | undefined): Promise<TaskStartResult> {
+  private async run(input: TaskStartInput, caller: Caller, source: TaskSource, agent: AgentStart | undefined): Promise<TaskStartResult> {
     const { tree, directories, store, commands } = this.deps;
     const parentId = input.parentFolderId ?? (caller.kind === 'mcp' ? caller.folderId : null);
     if (parentId !== null) {
@@ -156,7 +174,7 @@ export class TaskStartService implements TaskStarter {
         permissionMode: session?.permissionMode ?? input.permissionMode ?? 'default',
         createdAt: (this.deps.now ?? (() => new Date()))().toISOString(),
       };
-      store.insert(record, agent === undefined ? 'user' satisfies StartedBy : 'agent');
+      store.insert(record, agent === undefined ? 'user' satisfies StartedBy : 'agent', agent?.spawnDepth);
       await this.link(folder.id, sessionId, source, plan);
       if (caller.kind === 'ui') await commands.invoke('ui_focus_node', { nodeId: leafId }, { kind: 'ui' });
       this.deps.emit({ type: 'tasks.started', record });
@@ -173,7 +191,7 @@ export class TaskStartService implements TaskStarter {
   }
 
   /** What an agent may start (0028 section 13). */
-  private agentContext(caller: Extract<Caller, { kind: 'mcp' }>, input: TaskStartInput): { sessionTitle: string; mode: PermissionMode } {
+  private agentContext(caller: Extract<Caller, { kind: 'mcp' }>, input: TaskStartInput): AgentStart {
     const { sessions, store, inbox, tree } = this.deps;
     const callerSession = sessions.get(caller.sessionId);
     const callerMode = callerSession?.permissionMode ?? 'default';
@@ -188,8 +206,9 @@ export class TaskStartService implements TaskStarter {
       throw new TaskStartError('not_allowed', 'repoPath must be a repository the user already used in a task start');
     }
     const live = store.agentSessionIds().filter((id) => sessions.get(id)?.status !== undefined && sessions.get(id)?.status !== 'exited').length;
-    const cap = this.deps.agentCap ?? AGENT_START_CAP;
-    if (live + this.pendingAgentStarts >= cap) {
+    const cap = this.deps.appStarted?.cap() ?? this.deps.agentCap ?? AGENT_START_CAP;
+    const others = this.deps.appStarted?.otherLive() ?? 0;
+    if (live + others + this.pendingAgentStarts >= cap) {
       if (tree.get(caller.folderId)) {
         inbox.post({
           folderId: caller.folderId,
@@ -197,14 +216,16 @@ export class TaskStartService implements TaskStarter {
           source: 'app',
           origin: 'tasks:agent_cap',
           sessionId: caller.sessionId,
-          message: `A session asked to start a task, but ${cap} agent-started sessions already run`,
+          message: `A session asked to start a task, but ${cap} app-started agents already run`,
           textAuthor: 'app',
           dedupeKey: `tasks:agent_cap:${caller.sessionId}`,
         });
       }
-      throw new TaskStartError('at_cap', `${cap} agent-started sessions already run; wait for one to end`);
+      throw new TaskStartError('at_cap', `${cap} app-started agents already run; wait for one to end`);
     }
-    return { sessionTitle: callerSession?.title ?? 'unknown', mode };
+    // A session below a swarm agent keeps counting up, so a hop through task_start does not reset the depth.
+    const callerDepth = this.spawnContext(caller.sessionId)?.depth ?? store.depthOf(caller.sessionId);
+    return { sessionTitle: callerSession?.title ?? 'unknown', mode, spawnDepth: callerDepth > 0 ? callerDepth + 1 : 0 };
   }
 
   private async plan(source: TaskSource, input: TaskStartInput): Promise<Plan> {

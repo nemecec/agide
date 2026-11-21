@@ -87,6 +87,20 @@ describe('StreamNormaliser', () => {
     expect(facts.map((f) => (f.kind === 'ended' ? `${f.ref.agentKey}:${f.outcome}` : '')), 'ends').toEqual(['a1:lost', 'session:stopped']);
   });
 
+  it('counts the token usage of each assistant message on the process row with its message id and model', () => {
+    const assistant = { type: 'assistant', message: { id: 'msg_1', model: 'claude-haiku-4-5', usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 20 } } };
+    expect(new StreamNormaliser(S).message(assistant, T), 'a usage fact for the session row').toEqual([
+      {
+        kind: 'usage',
+        ref: { sessionId: S, agentKey: 'session' },
+        at: T,
+        messageId: 'msg_1',
+        model: 'claude-haiku-4-5',
+        usage: { input: 10, output: 5, cacheWrite5m: 20, cacheWrite1h: 0, cacheRead: 100 },
+      },
+    ]);
+  });
+
   it('ignores messages it does not know', () => {
     expect(new StreamNormaliser(S).message({ type: 'assistant' }, T), 'no facts').toEqual([]);
     expect(new StreamNormaliser(S).message('text', T), 'not an object').toEqual([]);

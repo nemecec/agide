@@ -9,7 +9,9 @@ import {
   CircleCheck,
   CircleDashed,
   CircleExclamationPoint,
+  CircleStop,
   CircleX,
+  Clock,
   Copy,
   Ellipsis,
   ExternalLink,
@@ -17,6 +19,7 @@ import {
   EyeOff,
   Folder,
   FolderOpen,
+  FileText,
   FolderPlus,
   Gauge,
   Globe,
@@ -30,18 +33,22 @@ import {
   LoaderCircle,
   MessageCircleQuestionMark,
   MessageSquareText,
+  Network,
   Minus,
   Monitor,
   Moon,
   OctagonX,
   PanelRight,
+  Pause,
   Palette,
   Pencil,
+  Play,
   Plus,
   Radio,
   RotateCcwClock,
   RotateCw,
   Search,
+  Send,
   Settings,
   ShieldCheck,
   ShieldQuestionMark,
@@ -86,6 +93,7 @@ export const PANE_ICONS = {
   'agent-history': spec(RotateCcwClock, 'Agent history'),
   settings: spec(Settings, 'Settings'),
   layout: spec(LayoutDashboard, 'Layout'),
+  swarm: spec(Network, 'Swarm'),
 } as const;
 export type PaneKind = keyof typeof PANE_ICONS;
 
@@ -96,6 +104,9 @@ export const STATUS_ICONS = {
   done: spec(CircleCheck, 'Done'),
   idle: spec(CircleDashed, 'Idle'),
   exited: spec(Square, 'Exited'),
+  queued: spec(Clock, 'Queued'),
+  interrupted: spec(Pause, 'Interrupted'),
+  stopped: spec(CircleStop, 'Stopped'),
 } as const;
 export type StatusKind = keyof typeof STATUS_ICONS;
 
@@ -106,6 +117,9 @@ export const STATUS_TONES: Readonly<Record<StatusKind, Tone>> = {
   done: 'success',
   idle: 'neutral',
   exited: 'neutral',
+  queued: 'neutral',
+  interrupted: 'neutral',
+  stopped: 'neutral',
 };
 
 /** The glyph of an inbox kind and the tone it is drawn in. The kind name always shows beside it. */
@@ -148,6 +162,11 @@ export const ACTION_ICONS = {
   'permission-mode': spec(Lock, 'Permission mode'),
   'new-folder': spec(FolderPlus, 'New folder'),
   'new-task': spec(ListPlus, 'New task'),
+  'new-swarm': spec(Network, 'New swarm'),
+  pause: spec(Pause, 'Pause'),
+  resume: spec(Play, 'Resume'),
+  'send-message': spec(Send, 'Send message'),
+  results: spec(FileText, 'Results'),
   'open-to-side': spec(PanelRight, 'Open to the side'),
   devtools: spec(Wrench, 'Developer tools'),
   settings: spec(Settings, 'Settings'),

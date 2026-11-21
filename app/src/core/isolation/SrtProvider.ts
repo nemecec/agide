@@ -13,6 +13,7 @@ import {
   type EnvironmentSpec,
   type IsolationProvider,
   type ProviderCapabilities,
+  type ProcessLaunch,
   type ProviderCheck,
   type PtyCommand,
 } from './types';
@@ -117,7 +118,11 @@ class SrtEnvironment extends HostEnvironment {
     this.settings = new SessionFiles(options.settingsDir);
   }
 
-  async ptyCommand(launch: ClaudeLaunch): Promise<PtyCommand> {
+  ptyCommand(launch: ClaudeLaunch): Promise<PtyCommand> {
+    return this.processCommand(launch);
+  }
+
+  async processCommand(launch: ProcessLaunch): Promise<PtyCommand> {
     const { workspace, profile } = this.spec;
     if (workspace.mode !== 'bind') throw new IsolationError('unsupported', 'srt runs in a host directory only');
     const inbox = this.inboxes.get(launch.sessionId);

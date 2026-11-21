@@ -97,6 +97,12 @@ export interface AgentEnvironment {
   mcpEndpoint(sessionId: SessionId): McpEndpoint;
   /** The host command node-pty spawns. Secrets never appear in `args`. */
   ptyCommand(launch: ClaudeLaunch): Promise<PtyCommand>;
+  /**
+   * The host command for a process without a terminal (stream-json swarm agents, 0037 section 2.1). Secrets never
+   * appear in `args`. `local` and `srt` return what `ptyCommand` returns; `container` runs `docker run -i` without
+   * `-t`. A provider that cannot run without a terminal throws `IsolationError('unsupported')`.
+   */
+  processCommand(launch: ProcessLaunch): Promise<PtyCommand>;
   /** Tells the environment the host pid of the spawned PTY child, so `terminate` can reach it. */
   attach(sessionId: SessionId, pid: number): void;
   /** Ends the agent process inside the environment; killing the host client is not enough for every provider. */
@@ -138,6 +144,14 @@ export interface ClaudeLaunch {
   readonly cols: number;
   readonly rows: number;
   /** Variables for this launch on top of the profile environment (launch contributions). No secrets. */
+  readonly env?: Readonly<Record<string, string>>;
+}
+
+/** A launch without a terminal: `ClaudeLaunch` without the terminal size. */
+export interface ProcessLaunch {
+  readonly sessionId: SessionId;
+  readonly cwd: string;
+  readonly args: readonly string[];
   readonly env?: Readonly<Record<string, string>>;
 }
 

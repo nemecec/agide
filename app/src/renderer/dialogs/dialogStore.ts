@@ -4,6 +4,7 @@ import { useSyncExternalStore } from 'react';
 export type DialogRequest =
   | { readonly kind: 'new-session'; readonly folderId: string }
   | { readonly kind: 'new-task'; readonly parentFolderId: string | null }
+  | { readonly kind: 'new-swarm'; readonly parentFolderId: string | null }
   | { readonly kind: 'settings' };
 
 let current: DialogRequest | null = null;

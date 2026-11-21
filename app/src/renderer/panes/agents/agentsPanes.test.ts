@@ -13,6 +13,8 @@ import { SessionDecorations } from '../tree/SessionDecorations';
 import { setAgentsView } from './agentsStore';
 import { planLine } from './format';
 import { resetAgentsFeeds } from './useAgents';
+import { agentStatus, swarmAnswers, swarmStatus } from '../swarm/swarmFixtures';
+import { resetSwarmFeed } from '../swarm/useSwarms';
 
 const now = Date.now();
 const iso = (offsetMs: number): string => new Date(now + offsetMs).toISOString();
@@ -33,6 +35,7 @@ const usageState = (over: Partial<UsageState> = {}): UsageState => ({
 let mounted: Rendered | undefined;
 beforeEach(() => {
   resetAgentsFeeds();
+  resetSwarmFeed();
   setAgentsView({ showFinished: false, selected: undefined });
 });
 afterEach(async () => {
@@ -44,9 +47,26 @@ const answers = (agents: AgentNodeView[], usage: UsageState = usageState(), wait
   installFakeApi({
     agents_list: { agents, waitingSessions: waiting, settings: { removeDoneAfterSeconds: 10, removeFailedAfterSeconds: 300, maxConcurrentAppStarted: 4 } },
     usage_state: usage,
+    ...swarmAnswers([]),
   });
 
 describe('tree decorations', () => {
+  it('leaves the tallies of the app-started node of a swarm agent out, since the swarm chip tells its state', async () => {
+    installFakeApi({
+      agents_list: {
+        agents: [agent({ origin: 'app-started', state: 'done', endedAt: iso(-1000) }), agent({ agentKey: 'sub', state: 'running' })],
+        waitingSessions: [],
+        settings: { removeDoneAfterSeconds: 10, removeFailedAfterSeconds: 300, maxConcurrentAppStarted: 4 },
+      },
+      usage_state: usageState(),
+      ...swarmAnswers([swarmStatus('sw', [agentStatus('worker', 'stopped', { sessionId: 's1' })])]),
+    });
+    mounted = await render(createElement(SessionDecorations, { sessionId: 's1' }));
+    const tally = (testId: string) => mounted?.container.querySelector(`[data-testid=${testId}]`);
+    expect(tally('agent-finished'), 'the app-started node of the swarm agent adds no finished tally').toBeNull();
+    expect(tally('agent-count')?.getAttribute('aria-label'), 'a native subagent of the agent still counts').toBe('1 running');
+  });
+
   it('shows the running count, the waiting count, the failed count and the finished tally on the session leaf', async () => {
     answers([
       agent({}),

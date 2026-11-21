@@ -11,6 +11,7 @@ export const PANE_TYPES = {
   agentHistory: 'agide/agent-history',
   transcriptViewer: 'agide/transcript-viewer',
   observationLog: 'agide/observation-log',
+  swarm: 'agide/swarm',
 } as const;
 
 export type FirstPartyPaneType = (typeof PANE_TYPES)[keyof typeof PANE_TYPES];
@@ -76,6 +77,14 @@ export const FIRST_PARTY_MANIFEST = {
       configVersion: 1,
       configSchema: { type: 'object', properties: { folderId: { type: 'string' } } },
       size: { minWidth: 280, preferredWidth: 400 },
+    },
+    {
+      type: PANE_TYPES.swarm,
+      title: 'Swarm',
+      tier: 'builtin',
+      configVersion: 1,
+      configSchema: { type: 'object', properties: { swarmId: { type: 'string' } } },
+      size: { minWidth: 360, preferredWidth: 560 },
     },
   ],
 } as const;

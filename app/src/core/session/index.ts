@@ -4,6 +4,7 @@ export { PtySessionService, type PtySessionServiceOptions } from './PtySessionSe
 export { MemorySessionStore, SqliteSessionStore, type PersistedSession, type SessionStore } from './SessionStore';
 export { claudeArgsFromEnv, defaultPermissionModeFromEnv, defaultSessionCwd, resolveClaudeBinary } from './env';
 export { profileLaunchSpec } from './profileLaunch';
+export { StreamSpawners, type StreamProcess, type StreamSpawner, type StreamSpawnRequest } from './streamSpawner';
 export {
   LaunchContributors,
   mergeContributions,

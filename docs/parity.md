@@ -80,6 +80,14 @@ A command with a UI binding must be an MCP tool unless it declares `mcpExempt` w
 | `surface_highlight` | none | yes | ok |
 | `surfaces_list` | none | yes | ok |
 | `surfaces_observe` | none | yes | ok |
+| `swarm_approval_answer` | bound | no | exempt: agents never answer approvals |
+| `swarm_interrupt` | bound | yes | ok |
+| `swarm_list` | bound | yes | ok |
+| `swarm_results` | bound | yes | ok |
+| `swarm_send` | bound | yes | ok |
+| `swarm_start` | menu tree-node | yes | ok |
+| `swarm_status` | bound | yes | ok |
+| `swarm_stop` | bound | yes | ok |
 | `task_create` | none | yes | ok |
 | `task_list` | none | yes | ok |
 | `task_preview` | none | no | ok |

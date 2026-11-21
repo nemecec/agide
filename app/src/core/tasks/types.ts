@@ -135,7 +135,12 @@ export type TasksEvent =
   | { readonly type: 'tasks.trust_changed'; readonly sessionId: SessionId; readonly state: TrustState };
 
 /** What the tasks module gives the other modules. */
+/** What `task_start` needs to know about a session that is an agent of a swarm: its spawn depth. */
+export type SpawnContext = (sessionId: string) => { readonly depth: number } | undefined;
+
 export interface TasksService {
   readonly starter: TaskStarter;
   readonly directories: WorkingDirectoryManager;
+  /** The swarm module supplies the depth of swarm agents; a session an agent starts sits one level deeper. */
+  setSpawnContext(context: SpawnContext): void;
 }

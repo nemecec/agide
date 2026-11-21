@@ -14,11 +14,12 @@ import {
   type McpEndpoint,
   type ProviderCapabilities,
   type ProviderCheck,
+  type ProcessLaunch,
   type PtyCommand,
   type SessionFileName,
 } from './types';
 
-export type FakeStep = 'check' | 'prepare' | 'writeSessionFile' | 'ptyCommand' | 'terminate';
+export type FakeStep = 'check' | 'prepare' | 'writeSessionFile' | 'ptyCommand' | 'processCommand' | 'terminate';
 
 export interface FakeCall {
   readonly step: FakeStep | 'attach' | 'releaseSession' | 'removeSessionFile' | 'dispose';
@@ -128,6 +129,14 @@ class FakeEnvironment implements AgentEnvironment {
     this.fake.step('ptyCommand');
     const configured = this.fake.options.command;
     if (typeof configured === 'function') return configured(launch, this.spec);
+    return configured ?? { file: 'claude', args: [...launch.args], cwd: launch.cwd, env: launchEnv(this.spec.profile, this.paths.toEnv, launch.env) };
+  }
+
+  async processCommand(launch: ProcessLaunch): Promise<PtyCommand> {
+    this.record({ step: 'processCommand', sessionId: launch.sessionId, detail: launch });
+    this.fake.step('processCommand');
+    const configured = this.fake.options.command;
+    if (typeof configured === 'function') return configured({ ...launch, cols: 0, rows: 0 }, this.spec);
     return configured ?? { file: 'claude', args: [...launch.args], cwd: launch.cwd, env: launchEnv(this.spec.profile, this.paths.toEnv, launch.env) };
   }
 

@@ -118,3 +118,37 @@ Finding which decisions lived only in `ElectronViews` and the agents module, and
 - `src/main/index.ts` start-up has no unit test.
 - `ElectronViews.page()` is tested for attach, reuse and detach only; the dialog events and the cookie callback of the page session run in the end-to-end tests.
 
+
+## Swarm integration pass (second run)
+
+Start: 2026-11-21 08:44:58 UTC
+End: 2026-11-21 09:22:30 UTC
+
+### What was built
+
+- `callerView.ts` gained `assertUser`; the `swarm_approval_answer` handler uses it, so the user-only rule is a function with a unit test. `liveCount.ts` holds the count of processes that share the cap with swarm agents, extracted from `src/main/modules/swarm.ts` (the smallest change to that shared file).
+- New tests: caller views, live count, swarm alerts, fake script parser, usage store, swarm context menu, agents editor of the start dialog; manager tests for the slot of an interrupted live process, nested spawn depth, the agent budget stop during a turn, and swarms whose folder is gone after a restart.
+- `scripts/mutation-checks.mjs` has entries for the cap and queue, permission caps of children, spawn depth, budget stops, approval deny paths, folder scope of the swarm tools, caller views and worktree removal. The whole list ran: no mutation survived and none was skipped after one text anchor was repaired.
+- Mutations first found surviving: caller views (no unit test), the interrupted slot, spawn depth increase, the agent budget stop, the folderless swarm, the approval guard in the module. Each got a test and is now killed. Two candidate mutations are equivalent and were left out: the user's start mode (the schema excludes bypass) and the stage sort of the queue (stages gate dependencies first).
+- Thresholds in `app/vitest.config.ts` rose to just below the measured values for `src/core`, `src/main`, `src/main/modules`, new entries for `src/core/swarm` and the swarm renderer folders, and the swarm menu joined the renderer logic list.
+
+### Coverage (unit, V8, two identical runs)
+
+| Area | Statements | Branches | Functions | Lines |
+|---|---|---|---|---|
+| src/core | 93.88 | 85.03 | 94.62 | 96.62 |
+| src/core/swarm | 95.42 | 89.50 | 94.26 | 98.03 |
+| src/main | 79.33 | 65.77 | 77.68 | 82.89 |
+| src/main/modules | 82.69 | 67.39 | 81.14 | 85.67 |
+| src/renderer/ui | 98.20 | 92.34 | 98.57 | 99.32 |
+| renderer swarm folders | 97.81 | 93.09 | 95.31 | 97.91 |
+
+End-to-end (pnpm coverage:e2e), functions / branches / lines: main src/core 72.0 / 47.8 / 72.8, main src/main 71.9 / 62.3 / 81.3, renderer src/renderer 76.4 / 70.8 / 85.4.
+
+### What took long
+
+The full mutation run takes about ten minutes and edits source files in place, so no other edit to those files is safe while it runs.
+
+### Not finished
+
+`src/main/modules/swarm.ts` wiring (onStarted, the runtime subscription) is still covered by the end-to-end tests only. The sandbox blocked nothing. Temporary files in the system temp directory were removed.

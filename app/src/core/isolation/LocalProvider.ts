@@ -10,6 +10,7 @@ import {
   type EnvironmentSpec,
   type IsolationProvider,
   type ProviderCapabilities,
+  type ProcessLaunch,
   type ProviderCheck,
   type PtyCommand,
 } from './types';
@@ -75,7 +76,11 @@ class LocalEnvironment extends HostEnvironment {
     super(id, spec, files);
   }
 
-  async ptyCommand(launch: ClaudeLaunch): Promise<PtyCommand> {
+  ptyCommand(launch: ClaudeLaunch): Promise<PtyCommand> {
+    return this.processCommand(launch);
+  }
+
+  async processCommand(launch: ProcessLaunch): Promise<PtyCommand> {
     if (this.spec.workspace.mode !== 'bind') throw new IsolationError('unsupported', 'the local provider runs in a host directory only');
     return { file: this.claudeBinary, args: [...launch.args], cwd: launch.cwd, env: launchEnv(this.spec.profile, this.paths.toEnv, launch.env) };
   }

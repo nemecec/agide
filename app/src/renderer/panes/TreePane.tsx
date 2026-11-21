@@ -19,6 +19,8 @@ import { setAgentsView, useAgentsView } from './agents/agentsStore';
 import './agents/agents.css';
 import { AgentRows } from './tree/AgentRows';
 import { FolderDecorations } from './tree/FolderDecorations';
+import { SwarmFolderDecorations } from './tree/SwarmDecorations';
+import { swarmMenuEntries } from './tree/swarmMenu';
 import { createSurfaceLeaf } from './tree/createLeaf';
 import { LeafDecorations } from './tree/leafDecorations';
 import { indexTree, isWithin, ROOT_ID, type TreeIndex } from './treeModel';
@@ -193,6 +195,7 @@ export function TreePane({ nodes, loaded, onOpen }: TreePaneProps) {
     const entries: MenuEntry[] = [
       { label: 'New folder', icon: ACTION_ICONS['new-folder'].icon, run: () => void create(parentId, 'folder') },
       { label: 'New task…', icon: ACTION_ICONS['new-task'].icon, run: () => openDialog({ kind: 'new-task', parentFolderId: parentId }) },
+      { label: 'New swarm…', icon: ACTION_ICONS['new-swarm'].icon, run: () => openDialog({ kind: 'new-swarm', parentFolderId: parentId }) },
       // A Claude session belongs to a folder: its MCP access is scoped to that folder.
       ...surfaceTypes
         .filter((type) => type.id !== SURFACE_CLAUDE_SESSION || parentId !== null)
@@ -204,6 +207,7 @@ export function TreePane({ nodes, loaded, onOpen }: TreePaneProps) {
     ];
     if (target) {
       entries.push(
+        ...swarmMenuEntries(target.getItemData()),
         { label: 'Open to the side', icon: ACTION_ICONS['open-to-side'].icon, run: () => void run('ui_open_to_side', { nodeId: target.getId() }) },
         { label: 'Rename', icon: ACTION_ICONS.rename.icon, run: () => target.startRenaming() },
         { label: 'Delete', icon: ACTION_ICONS.remove.icon, separated: true, danger: true, run: () => void remove(target) },
@@ -260,6 +264,7 @@ export function TreePane({ nodes, loaded, onOpen }: TreePaneProps) {
                 ) : (
                   <span className="tree-title">{node.title}</span>
                 )}
+                {node.kind === 'folder' && <SwarmFolderDecorations folderId={node.id} />}
                 {node.kind === 'folder' && <FolderDecorations folderId={node.id} />}
                 {node.kind === 'leaf' && <LeafDecorations surfaceType={node.surfaceType} surfaceId={node.surfaceId} />}
               </div>

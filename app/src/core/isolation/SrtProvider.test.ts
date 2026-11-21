@@ -59,6 +59,15 @@ describe('SrtProvider command', () => {
     expect(settings.network.allowedDomains, 'policy host').toContain('example.com');
   });
 
+  it('gives a process without a terminal the same srt command as the PTY launch', async () => {
+    const environment = await provider('/bin/claude-stand-in').prepare(spec);
+    const launch = { sessionId: 's1', cwd: join(dir, 'work'), args: ['-p', '--session-id', 's1'], env: { LAUNCH_VAR: 'l' } };
+    const command = await environment.processCommand?.(launch);
+    expect(command?.args, 'settings, separator, claude, arguments').toEqual(['-s', join(dir, 'srt', 's1', 'srt.json'), '--', '/bin/claude-stand-in', '-p', '--session-id', 's1']);
+    expect(command?.env['LAUNCH_VAR'], 'launch variable').toBe('l');
+    expect(command, 'same as the PTY command').toEqual(await environment.ptyCommand({ ...launch, cols: 80, rows: 24 }));
+  });
+
   it('removes the settings file on release', async () => {
     const environment = await provider('/bin/claude-stand-in').prepare(spec);
     await environment.ptyCommand({ sessionId: 's1', cwd: dir, args: [], cols: 80, rows: 24 });

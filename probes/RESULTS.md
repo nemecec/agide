@@ -166,3 +166,30 @@ Script `app/scripts/browser-checks.mjs`, run with the Electron 45.3.3 binary and
 | `getStoragePath()` of a persistent partition | pass | Lies under `userData`. |
 
 Not run: P16 (how long the CLI keeps an MCP call open with the entry `timeout` set).
+
+## Milestone 4 swarm probes P30 to P37 (2026-11-21)
+
+Claude Code 2.1.330 (earlier probes: 2.1.326). Details in `notes/probes-m4-swarm.md`; evidence in `probes/out/p30_*` to `p37_*`. Haiku, `--max-budget-usd 0.25`, `--setting-sources user`, `--strict-mcp-config` except where P37 compares, fresh directories under `probes/work/` removed afterwards, at most three concurrent processes, subscription login.
+
+| Probe | Result | Short finding |
+|---|---|---|
+| P30 stream-json agent | pass | Several user turns over one process and session; every turn re-emits `system/init`. `can_use_tool` carries `tool_name`, `display_name`, `input`, `description`, `permission_suggestions`, `tool_use_id`. Allow, deny (message becomes the tool error, listed in `permission_denials`) and a changed `updatedInput` (runs with the host's input, the tool result does not say so) work. An unanswered request stayed pending for 60 s with the process alive and completed after the answer. |
+| P31 interrupt | pass | The `interrupt` control request answers with `still_queued` in a few ms and ends the turn with `error_during_execution` (`aborted_streaming` or `aborted_tools`) about 20 ms later; a pending approval gets a `control_cancel_request`. The next user message works in all three cases. SIGINT ends the turn and the process (exit 0). |
+| P32 control requests | pass (list), partial (effects) | Accepted under `-p` stream-json: `initialize`, `mcp_status`, `set_permission_mode`, `set_model`, `set_max_thinking_tokens`, `stop_task`, `get_task_output`, `mcp_set_servers`, `mcp_toggle`, `mcp_reconnect`, `get_context_usage`, `get_session_cost`, `get_usage`, `get_status`, `get_settings`, `list_models`, `list_permission_rules`, `get_hooks_listing`, `get_workspace_diff`, `reload_plugins`, `reload_skills`, `side_question`, `end_session` and others. `set_permission_mode` and `stop_task` show their effect; unknown subtypes answer `Unsupported control request subtype`. |
+| P33 resume | pass | Session file `<config dir>/projects/<cwd with every character other than a letter or digit as ->/<id>.jsonl`. `--resume` after SIGKILL continues the context, also from another directory, also after a kill during a running tool. `--session-id` on an existing id fails (`already in use`, exit 1). A second live process can resume the same session. |
+| P34 concurrency | pass | Three agents with two turns each: all succeeded, init after about 1 s, first turn about 2 s, second under 1 s, no errors. `rate_limit_event` carries `rate_limit_info` with `status`, `rateLimitType`, `resetsAt`, overage fields and `unifiedWindows` (`five_hour`, `seven_day` with `utilization`). `result` carries cumulative `total_cost_usd`, `usage` and `modelUsage`. |
+| P35 budgets | pass | `--max-turns` is per user message: `error_max_turns`, process stays alive. `--max-budget-usd` is per process: `error_max_budget_usd` with `terminal_reason: budget_exhausted`, checked after a response (the crossing response is streamed, its `result` is the error with empty text and a cost above the cap); later messages return the same error without a model call. Exit code follows the last result (0 or 1). |
+| P36 worktrees | pass | `git worktree add` works as the isolation; the agent's `cwd` is the worktree. Plain `git diff` misses new files; `git add -N .` then `git diff HEAD`, or the `get_workspace_diff` control request, collects them. `git worktree remove` refuses with modified or untracked files, `--force` deletes the edits and keeps the branch; a committed worktree removes cleanly. |
+| P37 --bare | pass | Default `-p` is not bare in 2.1.330 (user plugins, skills, connectors load). The docs say `--bare` will become the default later. `--bare -p` returns `Not logged in` with exit 1: it never reads the subscription login. The swarm must not pass `--bare`. A user-settings `defaultMode` (here `auto`) applies to `-p` runs without `--permission-mode`, so the app passes the mode explicitly. |
+
+### Design effects
+
+1. One `claude -p` stream-json process per swarm agent covers multi-turn input, approvals, interrupt, resume, budgets and diff collection from the host side.
+2. After an `error_max_*` result the process stays alive, so the app ends or stops feeding the agent itself.
+3. Per-agent removal of a worktree needs a commit or a stored patch first.
+4. The `rate_limit_event` windows give the swarm view a utilization meter; the payload of a rejected limit is not seen yet.
+5. The approval probes ran in manual mode; `can_use_tool` under auto mode, the decided swarm default (0025), is not probed.
+
+Reviewed by a second agent against the logs and the headless, permission-mode and SDK approval docs; P37, P35 `after_budget` and P31 `pending_permission_control` re-ran and reproduced.
+
+New scripts: `p_swarm_lib.mjs`, `p30_stream_agent.mjs`, `p31_interrupt.mjs`, `p32_control_requests.mjs`, `p33_resume.mjs`, `p34_concurrency.mjs`, `p35_budgets.mjs`, `p36_worktrees.mjs`, `p37_bare.mjs`.

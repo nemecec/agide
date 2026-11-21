@@ -91,7 +91,7 @@ export const OUTWARD_BUILTIN_TOOLS: readonly string[] = ['RemoteTrigger', 'Publi
 /** The app's own MCP servers; their tools follow the mode, except the ones that start agents. */
 export const OWN_MCP_SERVERS: readonly string[] = ['app', 'agide-browser'];
 
-const AGENT_START_TOOLS: readonly string[] = ['mcp__app__task_start'];
+const AGENT_START_TOOLS: readonly string[] = ['mcp__app__task_start', 'mcp__app__swarm_start'];
 
 /** Names that start a read-only tool of a connector or another MCP server, after the connector's own prefix. */
 export const READ_PREFIXES: readonly string[] = ['get', 'search', 'list', 'read', 'fetch', 'query', 'lookup', 'view'];

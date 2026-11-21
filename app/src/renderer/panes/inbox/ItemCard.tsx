@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ItemContextInfo, ItemRow } from '../../../core/inbox/viewTypes';
+import { SWARM_APPROVAL_ORIGIN } from '../../../core/swarm/types';
+import { SwarmApprovalActions } from './SwarmApprovalActions';
 import { api } from '../../api';
 import { Button } from '../../ui/Button';
 import { Disclosure } from '../../ui/Disclosure';
@@ -55,6 +57,7 @@ export function ItemCard({ item, canPeek, peeking, onPeek }: { item: ItemRow; ca
   const url = item.linkAnchor && 'url' in item.linkAnchor ? item.linkAnchor.url : undefined;
   const browserApprovalId = item.origin === 'browser:approval' ? (item.payload as { approvalId?: unknown } | undefined)?.approvalId : undefined;
   const openSession = (): void => act('ui_focus_node', { nodeId: item.linkNodeId });
+  const swarmApproval = item.origin === SWARM_APPROVAL_ORIGIN;
   const where = [context.project?.name, context.session?.name].filter(Boolean).join(' / ');
 
   return (
@@ -114,7 +117,7 @@ export function ItemCard({ item, canPeek, peeking, onPeek }: { item: ItemRow; ca
             </pre>
           </Disclosure>
         )}
-        {needsAnswer(item) && typeof browserApprovalId !== 'string' && (
+        {needsAnswer(item) && typeof browserApprovalId !== 'string' && item.origin !== SWARM_APPROVAL_ORIGIN && (
           <Notice tone="warning" role="status" data-testid="inbox-answer-note">
             The session is waiting for your answer. Allow or deny it in the session; this card cannot answer for it.
           </Notice>
@@ -143,7 +146,8 @@ export function ItemCard({ item, canPeek, peeking, onPeek }: { item: ItemRow; ca
                 </Button>
               </>
             )}
-            {needsAnswer(item) && item.linkNodeId !== undefined && typeof browserApprovalId !== 'string' && (
+            <SwarmApprovalActions key={item.id} item={item} />
+            {needsAnswer(item) && item.linkNodeId !== undefined && typeof browserApprovalId !== 'string' && item.origin !== SWARM_APPROVAL_ORIGIN && (
               <Button variant="primary" onClick={openSession} data-testid="inbox-answer-in-session">
                 Open session to answer
               </Button>
@@ -156,7 +160,7 @@ export function ItemCard({ item, canPeek, peeking, onPeek }: { item: ItemRow; ca
             <Button
               onClick={() => act('inbox_resolve', { itemId: item.id, resolution: 'dismissed' })}
               data-testid="inbox-done"
-              title={item.kind === 'approval' ? 'Hides this item. The request stays open in its session.' : undefined}
+              title={item.kind === 'approval' ? (swarmApproval ? 'Hides this item. The call is denied automatically when the request expires.' : 'Hides this item. The request stays open in its session.') : undefined}
             >
               {item.kind === 'approval' ? 'Dismiss without answering' : 'Done'}
             </Button>
@@ -172,7 +176,7 @@ export function ItemCard({ item, canPeek, peeking, onPeek }: { item: ItemRow; ca
             ) : null}
           </>
         )}
-        {canPeek && (
+        {canPeek && !swarmApproval && (
           <Button variant="quiet" onClick={onPeek} aria-pressed={peeking} data-testid="inbox-peek-open">
             Peek at session
           </Button>

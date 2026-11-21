@@ -3,6 +3,8 @@ import { execFile } from 'node:child_process';
 export interface ExecOptions {
   readonly env: NodeJS.ProcessEnv;
   readonly timeoutMs: number;
+  /** How stdout is decoded; `latin1` keeps every byte, for output that is written back unchanged. Default `utf8`. */
+  readonly encoding?: 'utf8' | 'latin1';
 }
 
 export interface ExecResult {
@@ -27,9 +29,9 @@ export class ExecError extends Error {
   }
 }
 
-export const execFileNoShell: Exec = (file, args, { env, timeoutMs }) =>
+export const execFileNoShell: Exec = (file, args, { env, timeoutMs, encoding = 'utf8' }) =>
   new Promise((resolve, reject) => {
-    execFile(file, [...args], { env, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, encoding: 'utf8' }, (error, stdout, stderr) => {
+    execFile(file, [...args], { env, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, encoding }, (error, stdout, stderr) => {
       if (error) reject(new ExecError(error.message, String(stderr)));
       else resolve({ stdout: String(stdout) });
     });

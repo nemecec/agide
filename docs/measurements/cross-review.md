@@ -136,3 +136,53 @@ The mutation run and the repeated coverage runs.
 - Everything 0030 lists as not checked on screen.
 - The removal of `/tmp/agide-xreview` (my logs and the srt check directory, under 1 MB) was denied. Each of my gate script runs left a Claude project directory named after its removed `agide-gate-` temporary directory; I did not remove them.
 - No token count is available to me.
+
+## Cross-review of milestone 4
+
+Start: 2026-11-21 10:25:11 UTC (date -u). End: 2026-11-21 10:52 UTC (date -u). Wall time about 27 minutes.
+
+Scope: 0037 to 0039, the root README, `app/README.md`, `docs/README.md`, `notes/probes-m4-swarm.md`, the milestone 4 section of `probes/RESULTS.md`, the milestone 4 measurement files, and their claims about `app/`, checked against the code, my own test runs and the probe reports and logs in `probes/out/`.
+
+### Commands run
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | passes |
+| `pnpm coverage`, two runs | 216 files, 2203 tests pass, 15 skipped, thresholds met, both runs |
+| `pnpm e2e` | 79 pass with hidden windows, 2.1 minutes |
+| `pnpm parity`, `pnpm check:colours` | ok; no colour literal outside the allowlist |
+| `pnpm mutation`, the whole list, after the two repairs below | every mutation killed, none survived, none skipped, about 15 minutes |
+| `node scripts/e2e-real-swarm-runtime.mjs`, `e2e-real-swarm-mcp.mjs`, `e2e-real-swarm-dialog.mjs` (Haiku, 0.25 USD per process, claude 2.1.330) | all pass; agents' reported cost 0.0010, 0.0103 and 0.0082 USD |
+
+### Findings and what I changed
+
+- `app/scripts/mutation-checks.mjs`: the fix steps changed the source text of two entries (the launch that ends before its first line in `StreamAgentRuntime.ts`, the working directory in a status in `callerView.ts`), so the script would have skipped both and ended with exit code 1. I gave both entries the text of the current code; both are killed. The second entry now removes only the stripping of the working directory, which is what its name says.
+- 0039, coverage: the branch figures of `src/main` and `src/main/modules` came out 0.3 to 0.4 higher in both of my runs than in the record; the table now gives both values. The gap sentence named the `src/main` branch threshold as the narrow one; the narrow one is `src/main/modules`.
+- 0039, findings and open items: the field errors of the agents table were listed as not fixed, while the fix step built them with a test (`AgentsEditor.test.ts`). Moved to the fixed rows and taken out of the open list.
+- 0039, items of 0037 that are not built and were not listed: raising a budget and the buttons for the actions of the swarm alerts, the inspector record on approval items, the approval buttons on the agent's node, the plan windows in the pane header, and `GitWorkingDirectoryManager` left unchanged. Added to the 0037 table and the open list.
+- 0039, leftovers: `/tmp/rev-swarm-ui` was missing from the list. An Electron process of the app, started by Playwright at 23:01 UTC on 2026-11-20 and now without a parent, still runs; I did not end it and listed it.
+- 0039, spend: added that the opus and sonnet reviewer runs of the integration and record steps are outside the run's rule for real-Claude calls.
+- 0039, re-estimate: the sentence that the once-per-milestone steps took about the same time as in milestone 3 now has its sums in the totals table (about 161 against about 147 minutes).
+- 0039, tests: the srt and container suites are the skipped tests; srt is not installed on the host now and the container test image is not local, so these suites did not run in milestone 4. Stated in the table and the open list. The mutation and real-script rows now hold my runs.
+- 0038: a paragraph under "Changes after the review" for what was built differently from the slices (the cap counted in two places, the swarm's own `Git` class, approval answers on the card only).
+- `docs/measurements/review-fix-m4.md`: a finding quoted a word of the banned list; reworded.
+- `docs/README.md`: the milestone 4 section of this file is named.
+
+Supported as written: the probe statements of the notes and of `probes/RESULTS.md` against the P30 to P37 reports (request fields, deny and changed input, the 60 s pending request, interrupt timings and terminal reasons, the cancel request, SIGINT, a sample of the control request answers, the session id reuse error, resume from another directory and while live, the P34 table, the budget and turn limit results, the worktree results, `--bare` and the `auto` mode from the user settings); `fable` in the `initialize` models list; the CLI version 2.1.330; the wall times of every step with a measurement file and their sums; the rates and hour ranges of the re-estimate; the milestone 3 figures quoted from 0030; the test counts; every other coverage cell; the constants the records name (line limit, control timeout, stop waits, retry delay, queue alert, calibration limits, settings defaults, tiers); the git guard flags; the commands, exemption and permission class; the cap in the end-to-end test.
+
+Privacy and style: no employer name, user directory path, e-mail address or token in tracked or untracked files (test fixtures use reserved domains and made-up paths; `probes/out/` holds absolute paths and is ignored by git). `notes/probes-m4-swarm.md` names the plan type of the login; left as it is. No word of the banned list in the files of the milestone after the rewording.
+
+Host state: free disk 4.9 GiB at the end (5.1 at the start). No process of this step remains.
+
+### What took long
+
+The mutation run. A SIGINT sent to the script's own process did not end it: the run loop is synchronous, so the handler does not run until the loop ends. I let the run finish and kept a copy of the files it edits while it ran; the sources had the same checksums before and after.
+
+### Not finished
+
+- Not checked: the verification step's clean-copy run and its times (no file records them); `pnpm coverage:e2e`; the real-Claude scripts of the earlier milestones after the fixes; the review steps' own mutation and revert checks; the body of 0037 beyond its probe statements, the items compared with the build, the estimate and style; the P37 statement that the tool list length differed between two runs (one report is kept).
+- `PersistentSwarmManager.ts` has about 1300 lines, against the rule of small modules; not changed and not listed in 0039.
+- The app README says the mutation script restores its file on Ctrl-C. It restores after every run, but a signal to the script alone does not stop it; not changed.
+- My edit of `mutation-checks.mjs` and my edits of the records have no review by another agent: this step has no tool to start one.
+- No token count is available to me.
+- Temporary files: my logs and scripts were in `/tmp/xrev-m4`; the directory is removed. The real-Claude scripts removed their own temporary directories; the trust entries and project directories the CLI keeps for them in the Claude configuration directory were not checked.

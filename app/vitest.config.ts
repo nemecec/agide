@@ -35,13 +35,15 @@ export default defineConfig({
         'src/renderer/testing/**',
       ],
       thresholds: {
-        'src/core/**': { statements: 92, branches: 82, functions: 94, lines: 95 },
-        'src/main/**': { statements: 77, branches: 62, functions: 76, lines: 81 },
-        'src/main/modules/**': { statements: 81, branches: 63, functions: 79, lines: 85 },
+        'src/core/**': { statements: 93, branches: 84, functions: 94, lines: 96 },
+        'src/main/**': { statements: 79, branches: 65, functions: 77, lines: 82 },
+        'src/main/modules/**': { statements: 82, branches: 67, functions: 80, lines: 85 },
+        'src/core/swarm/**': { statements: 95, branches: 89, functions: 94, lines: 98 },
+        'src/renderer/{dialogs,panes}/swarm/**': { statements: 97, branches: 92, functions: 95, lines: 97 },
         'src/shared/**': { statements: 98, functions: 98, lines: 98 },
         'src/renderer/ui/**': { statements: 92, branches: 82, functions: 92, lines: 94 },
         // Renderer files with logic that runs in Node or jsdom; the components without a unit test are covered by the end-to-end tests only.
-        'src/renderer/{layout/{dockviewAdapter,hostModel,useLayoutState},panes/{treeModel,profileModel,useTreeNodes,useProfiles,TerminalPane,InboxPane,SetupPane},panes/inbox/{format,useInbox,ItemCard},panes/browser/{model,useBrowserTab,ObservationControl,ApprovalBar},dialogs/{newSession,NewTaskDialog,task/taskForm}}.{ts,tsx}': {
+        'src/renderer/{layout/{dockviewAdapter,hostModel,useLayoutState},panes/{tree/swarmMenu,treeModel,profileModel,useTreeNodes,useProfiles,TerminalPane,InboxPane,SetupPane},panes/inbox/{format,useInbox,ItemCard},panes/browser/{model,useBrowserTab,ObservationControl,ApprovalBar},dialogs/{newSession,NewTaskDialog,task/taskForm}}.{ts,tsx}': {
           statements: 95,
           branches: 89,
           functions: 91,

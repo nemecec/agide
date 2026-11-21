@@ -85,6 +85,31 @@ describe('LocalProvider launch', () => {
     }
   });
 
+  it('gives a process without a terminal the same command as the PTY launch, with the launch variables', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'local-provider-'));
+    try {
+      const environment = await new LocalProvider({ sessionFilesDir: dir, claudeBinary: FAKE_CLAUDE }).prepare(spec(dir, '/profiles/work/claude'));
+      const launch = { sessionId: 's1', cwd: dir, args: ['-p', '--session-id', 's1'], env: { LAUNCH_VAR: 'l' } };
+      const command = await environment.processCommand?.(launch);
+      expect(command, 'same command as the PTY launch').toEqual(await environment.ptyCommand({ ...launch, cols: 80, rows: 24 }));
+      expect(command?.args, 'arguments unchanged').toEqual(['-p', '--session-id', 's1']);
+      expect(command?.env['LAUNCH_VAR'], 'launch variable').toBe('l');
+      expect(command?.env['CLAUDE_CONFIG_DIR'], 'profile login directory').toBe('/profiles/work/claude');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a clone workspace for a process without a terminal', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'local-provider-'));
+    try {
+      const environment = await new LocalProvider({ sessionFilesDir: dir, claudeBinary: FAKE_CLAUDE }).prepare({ ...spec(dir, undefined), workspace: { mode: 'clone', remoteUrl: 'u', ref: 'r' } });
+      await expect(environment.processCommand?.({ sessionId: 's1', cwd: dir, args: [] }), 'clone workspace').rejects.toMatchObject({ code: 'unsupported' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('reports a missing binary in its check', async () => {
     const check = await new LocalProvider({ sessionFilesDir: '/nonexistent', claudeBinary: '/nonexistent/claude' }).check();
     expect(check.ok, 'check fails for a missing binary').toBe(false);
@@ -102,6 +127,32 @@ describe('FakeProvider', () => {
         'fake provider fails at ptyCommand',
       );
       expect(fake.calls.map((call) => call.step), 'recorded steps').toEqual(['prepare', 'ptyCommand']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('records the command of a process without a terminal, builds it from the launch and fails when told to', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fake-provider-'));
+    try {
+      const fake = new FakeProvider({ sessionFilesDir: dir });
+      const environment = await fake.prepare(spec(dir, undefined));
+      const command = await environment.processCommand?.({ sessionId: 's1', cwd: dir, args: ['-p'], env: { A: '1' } });
+      expect(command, 'built from the launch').toMatchObject({ file: 'claude', args: ['-p'], cwd: dir, env: { A: '1' } });
+      fake.failAt.add('processCommand');
+      await expect(environment.processCommand?.({ sessionId: 's1', cwd: dir, args: [] }), 'configured failure').rejects.toThrow('fake provider fails at processCommand');
+      expect(fake.calls.map((call) => call.step), 'recorded steps').toEqual(['prepare', 'processCommand', 'processCommand']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('hands a configured command function the launch of a process without a terminal', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fake-provider-'));
+    try {
+      const fake = new FakeProvider({ sessionFilesDir: dir, command: (launch) => ({ file: 'stand-in', args: [launch.sessionId], cwd: launch.cwd, env: {} }) });
+      const environment = await fake.prepare(spec(dir, undefined));
+      expect(await environment.processCommand?.({ sessionId: 's9', cwd: dir, args: [] }), 'function result').toMatchObject({ file: 'stand-in', args: ['s9'] });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

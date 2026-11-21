@@ -37,6 +37,8 @@ export interface DockerRunInput {
   /** Variables with a fixed value that holds nothing secret. */
   readonly fixedEnv: Readonly<Record<string, string>>;
   readonly claudeArgs: readonly string[];
+  /** Allocates a terminal (`-it`). False runs `-i` for a process that speaks NDJSON on stdin and stdout. Default true. */
+  readonly tty?: boolean;
 }
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -62,7 +64,7 @@ export function mountSpec(mount: Mount): string {
 
 /** Arguments of `docker run` for one launch (0029, container table). */
 export function buildDockerRunArgs(input: DockerRunInput): string[] {
-  const args: string[] = ['run', '-it', CONTAINER_RUN_FLAGS.remove, CONTAINER_RUN_FLAGS.init];
+  const args: string[] = ['run', input.tty === false ? '-i' : '-it', CONTAINER_RUN_FLAGS.remove, CONTAINER_RUN_FLAGS.init];
   args.push('--label', `${CONTAINER_RUN_FLAGS.label}=${input.sessionId}`);
   if (input.ownerId !== undefined) args.push('--label', `${CONTAINER_RUN_FLAGS.ownerLabel}=${input.ownerId}`);
   args.push('--name', containerName(input.sessionId), '--user', input.user, '--add-host', `${input.hostAlias}:host-gateway`);

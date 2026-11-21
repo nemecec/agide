@@ -28,6 +28,11 @@ describe('buildDockerRunArgs', () => {
     expect(args, 'host alias resolves to the host gateway').toEqual(expect.arrayContaining(['--add-host', 'host.docker.internal:host-gateway']));
   });
 
+  it('runs interactive without a terminal for a process that speaks NDJSON on stdin and stdout', () => {
+    expect(buildDockerRunArgs({ ...input, tty: false }).slice(0, 4), 'no -t').toEqual(['run', '-i', '--rm', '--init']);
+    expect(buildDockerRunArgs({ ...input, tty: true }).slice(0, 2), 'explicit terminal').toEqual(['run', '-it']);
+  });
+
   it('mounts every path at the same absolute path, read-only where asked, and puts the image, command and Claude arguments last', () => {
     const args = buildDockerRunArgs(input);
     expect(args, 'workspace mount').toEqual(expect.arrayContaining(['--mount', 'type=bind,src=/work,dst=/work']));

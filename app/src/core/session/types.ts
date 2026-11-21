@@ -33,6 +33,8 @@ export interface SessionInfo {
 }
 
 export interface SessionCreateInput {
+  /** App-chosen session id, for a caller that must know it before the launch (swarm agents). Must be unused. */
+  readonly id?: SessionId;
   readonly folderId: NodeId;
   /** Working directory of the `claude` process. */
   readonly cwd: string;

@@ -48,6 +48,7 @@ export class HookItemMapper {
 
   handle(sessionId: SessionId, hookEvent: string, rawPayload: unknown): void {
     const payload: Payload = rawPayload !== null && typeof rawPayload === 'object' ? (rawPayload as Payload) : {};
+    if (this.answersThroughControlChannel(sessionId, hookEvent, payload)) return;
     switch (hookEvent) {
       case 'UserPromptSubmit':
         return this.promptSubmitted(sessionId, payload);
@@ -65,6 +66,15 @@ export class HookItemMapper {
         return this.notified(sessionId, payload);
       default:
     }
+  }
+
+  /**
+   * A stream-json session gets its approvals from `can_use_tool` (0037 section 7.2), the only source the app can
+   * answer, so the hook items that would duplicate them are left out.
+   */
+  private answersThroughControlChannel(sessionId: SessionId, hookEvent: string, payload: Payload): boolean {
+    if (this.deps.sessions.get(sessionId)?.launchPath !== 'stream-json') return false;
+    return hookEvent === 'PermissionRequest' || (hookEvent === 'Notification' && text(payload['notification_type']) === 'permission_prompt');
   }
 
   /** Forgets the per-session memory of a session that was closed. */
