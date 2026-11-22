@@ -3,7 +3,7 @@ import { InMemoryInboxService } from '../../inbox/InMemoryInboxService';
 import { openStore, type Database } from '../../store/Store';
 import { InMemoryTreeService } from '../../tree/InMemoryTreeService';
 import { catalogueReason, FakeReviewBudget } from '../fakes/fakes';
-import { captureFixture, policySnapshot } from '../fakes/fixtures';
+import { captureFixture, policySnapshot, sha1Of } from '../fakes/fixtures';
 import { reviewPolicySchema } from '../policy/schema';
 import { BASE_ALERT_ORIGIN, REVIEW_ITEM_ORIGIN, type ReviewCaller } from '../types';
 import { persistentRig, type PersistentRig } from './persistentRig';
@@ -263,6 +263,90 @@ describe('the alert for a check that fails on the base commit', () => {
     await rig.manager.submit(green);
     await until(() => alerts(inbox).length === 0, 'the alert to end');
     expect(alerts(inbox, ['done'])[0], 'the alert is resolved, not deleted').toMatchObject({ state: 'done', resolution: 'superseded' });
+  });
+
+  /** A capture on a base of its own: after a merge an agent's changesets stand on its own checkpoint, so one swarm has several bases. */
+  const onBase = (seed: string, agent: string, base: string) => ({ ...captureFixture({ seed, agent, sessionId: `session-${agent}`, policyHash: PASSING.hash }), baseCommit: sha1Of(base) });
+  const everything = ['new', 'seen', 'snoozed', 'done'] as const;
+
+  it('keeps the alert of a red base open while a changeset of another agent runs on a green base, in every round', async () => {
+    const { inbox, until, rig } = setup();
+    const settled = (id: string) => until(() => ['awaiting_human', 'accepted'].includes(rig.store.get(id)?.state ?? ''), `changeset ${id}`);
+    for (const round of [1, 2, 3]) {
+      const red = onBase(`two-red-${round}`, 'worker', 'red-base');
+      rig.checks.set(red.id, 'failed', 'failed');
+      await rig.manager.submit(red);
+      await settled(red.id);
+      const green = onBase(`two-green-${round}`, 'helper', 'green-base');
+      rig.checks.set(green.id, 'passed', 'passed');
+      await rig.manager.submit(green);
+      await settled(green.id);
+      expect([alerts(inbox).length, alerts(inbox, [...everything]).length], `after round ${round}: the alert of the red base is open, and it was posted once`).toEqual([1, 1]);
+    }
+    expect(alerts(inbox)[0]?.payload, 'the open alert is the one of the red base').toMatchObject({ baseCommit: sha1Of('red-base') });
+  });
+
+  it('ends the alert of a green base only, when the base run of that base and policy turns green', async () => {
+    const { inbox, until, rig } = setup();
+    const red = onBase('end-red', 'worker', 'red-base');
+    rig.checks.set(red.id, 'failed', 'failed');
+    await rig.manager.submit(red);
+    const other = onBase('end-other', 'helper', 'other-base');
+    rig.checks.set(other.id, 'failed', 'failed');
+    await rig.manager.submit(other);
+    await until(() => alerts(inbox).length === 2, 'both alerts');
+    const fixed = onBase('end-fixed', 'helper', 'other-base');
+    rig.checks.set(fixed.id, 'passed', 'passed');
+    await rig.manager.submit(fixed);
+    await until(() => alerts(inbox).length === 1, 'the alert of the fixed base to end');
+    expect([alerts(inbox)[0]?.payload, alerts(inbox, ['done'])[0]?.payload], 'the red base is still open, the fixed one is resolved').toMatchObject([{ baseCommit: sha1Of('red-base') }, { baseCommit: sha1Of('other-base') }]);
+  });
+
+  it('ends the alert of a base that no changeset of the swarm stands on any more, when the last changeset on it is superseded', async () => {
+    const { inbox, until, rig } = setup();
+    const red = onBase('gone-red', 'worker', 'red-base');
+    rig.checks.set(red.id, 'failed', 'failed');
+    await rig.manager.submit(red);
+    await until(() => alerts(inbox).length === 1, 'the alert');
+    const merged = onBase('gone-next', 'worker', 'merged-checkpoint');
+    rig.checks.set(merged.id, 'passed', 'passed');
+    await rig.manager.submit(merged);
+    await until(() => alerts(inbox).length === 0, 'the alert of the old base to end');
+    expect([rig.store.get(red.id)?.state, alerts(inbox, ['done'])[0]], 'the changeset on the red base is superseded and its alert is resolved, not deleted').toMatchObject(['superseded', { state: 'done', resolution: 'superseded' }]);
+  });
+
+  it.each(['accept', 'reject'] as const)('ends the alert of a base when the last changeset on it is decided by %s', async (decision) => {
+    const { inbox, until, rig } = setup();
+    const red = onBase(`decided-${decision}`, 'worker', 'red-base');
+    rig.checks.set(red.id, 'failed', 'failed');
+    await rig.manager.submit(red);
+    await until(() => alerts(inbox).length === 1 && rig.store.get(red.id)?.state === 'awaiting_human', 'the alert and the wait for a person');
+    const expectedHash = rig.store.get(red.id)!.contentHash;
+    if (decision === 'accept') await rig.manager.accept({ changesetId: red.id, expectedHash, expectedRung: 'C', withoutReviewer: true }, UI);
+    else await rig.manager.reject({ changesetId: red.id, expectedHash, reason: 'no' }, UI);
+    await until(() => alerts(inbox).length === 0, 'the alert to end');
+    expect(alerts(inbox, ['done'])[0], 'resolved when nothing stands on the base').toMatchObject({ state: 'done', resolution: 'superseded' });
+  });
+
+  it('does not post again for a dismissed alert after the app restarted, and posts for a base that was never alerted', async () => {
+    const { inbox, until, rig } = setup();
+    const first = onBase('restart-1', 'worker', 'red-base');
+    rig.checks.set(first.id, 'failed', 'failed');
+    await rig.manager.submit(first);
+    await until(() => alerts(inbox).length === 1, 'the alert');
+    inbox.resolve(alerts(inbox)[0]!.id, 'dismissed');
+    // A new instance over the same inbox and store: nothing but the inbox items and the rows carries over.
+    rig.manager.subscribe(new ReviewInbox(inbox, rig.store, rig.facts).onEvent);
+    const again = onBase('restart-2', 'helper', 'red-base');
+    rig.checks.set(again.id, 'failed', 'failed');
+    await rig.manager.submit(again);
+    await until(() => rig.store.get(again.id)?.state === 'awaiting_human', 'the second changeset');
+    expect([alerts(inbox).length, alerts(inbox, ['done']).length], 'the dismissed alert stays the only one for the base').toEqual([0, 1]);
+    const other = onBase('restart-3', 'helper', 'other-red-base');
+    rig.checks.set(other.id, 'failed', 'failed');
+    await rig.manager.submit(other);
+    await until(() => alerts(inbox).length === 1, 'the alert of the other base');
+    expect(alerts(inbox, [...everything]).length, 'one dismissed alert and one open alert').toBe(2);
   });
 
   it('posts no alert when the base run did not run or timed out, or the check passes on a green base', async () => {

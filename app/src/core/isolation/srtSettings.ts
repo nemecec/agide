@@ -28,7 +28,7 @@ export interface SrtSettings {
   readonly network: {
     readonly allowedDomains: readonly string[];
     readonly deniedDomains: readonly string[];
-    readonly allowLocalBinding: true;
+    readonly allowLocalBinding: boolean;
   };
   readonly filesystem: {
     readonly denyRead: readonly string[];
@@ -102,6 +102,8 @@ export interface ToolSrtSettingsInput {
   /** Directories the program may write: its checkout and a temporary directory. */
   readonly writeDirs: readonly string[];
   readonly network: 'none' | 'development';
+  /** Loopback binding and connections. srt cannot allow binding alone: it admits connections to every loopback port with it. */
+  readonly loopback: boolean;
   readonly extraDenyRead?: readonly string[];
 }
 
@@ -109,7 +111,7 @@ export interface ToolSrtSettingsInput {
 export function buildToolSrtSettings(input: ToolSrtSettingsInput): SrtSettings {
   return {
     allowPty: true,
-    network: { allowedDomains: input.network === 'development' ? [...DEVELOPMENT_HOSTS] : [], deniedDomains: [], allowLocalBinding: true },
+    network: { allowedDomains: input.network === 'development' ? [...DEVELOPMENT_HOSTS] : [], deniedDomains: [], allowLocalBinding: input.loopback },
     filesystem: { denyRead: [...new Set((input.extraDenyRead ?? []).flatMap(withResolved))], allowRead: [], denyWrite: [], allowWrite: [...new Set(input.writeDirs.flatMap(withResolved))] },
   };
 }

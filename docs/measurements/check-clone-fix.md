@@ -282,7 +282,7 @@ Real `srt` 0.0.83 regression test (`ProcessCheckExecutor.srt.test.ts`, "puts a c
 | The default login's Claude directory | `checkDenyRead` takes `claude` (`claudeConfigPaths`), the module passes it; srt test reads `~/.claude`-shaped transcript and is refused; the comment and the records say so |
 | The two `endStale` branches and `lsof -a` and the time limit | Tests for both branches (earlier run of this app, directory-only attribution), `lsof -a`, a 30 s budget with a test; mutation entries |
 | Environment names | `isScrubbedName` matches whole words for `AUTH`, `AUTHORIZATION` and `OAUTH`, drops bare `TOKEN`, `PASSWORD`, `PASSWD`, `SECRET`, `APIKEY`, `_KEY` and `HEADER` names, `CREDENTIAL` anywhere; `droppedNames` is in the check log; the README lists the names |
-| The word "genuine" and other banned words | One hit left (the quoted title of an earlier finding in this file), now "real"; the added text of the pass has no other banned word |
+| Banned words in the added text | The word list of the writing rules was applied to the added text; one hit in the quoted title of an earlier finding in this file was replaced by "real" |
 
 ### What was checked on the whole surface
 
@@ -325,3 +325,91 @@ Reading what the stopped run had changed: most of the minors were already done, 
 ### Leftovers
 
 Temporary files of this pass were under `/tmp/agide-check-clone-fix-3/` (coverage output, the directory with the `node` symlink, a copy of `src` and of the mutation script for the comparison, a scratch copy of the srt test file) and are removed; the path is gone. The tests remove their own temporary directories. The system temporary directory still holds `agide-cap-*` directories (empty repository roots that full runs of the suites leave, from a suite that this pass did not touch; earlier agents' directories cannot be told from this pass's, so none was removed), `agide-app-*` and the directories named in the task as belonging to earlier agents. Free disk was 9.1 GiB at the start and 8.0 GiB at the end; it did not go below the 3 GiB floor.
+
+## Fourth pass: check-clone-fix-4
+
+Start 2026-11-22 19:56 UTC, end 2026-11-22 22:45 UTC. A narrow pass over the blocker and seven minors of the third independent review; the changes are the diff against the checkpoint commit.
+
+### The blocker: an exit 0 from `srt` is not proof that the check passed
+
+`srt` 0.0.83 forwards SIGINT and SIGTERM to its program and exits 0 when the program ends by either. The executor read that 0 as `passed`. Reproduced first against the real `srt` (plain argv, a stored green base): `echo "tests: 3 failed"; kill -TERM 0; sleep 2; exit 1`, `kill -TERM $$`, `kill -INT 0` and a Node program that sends SIGTERM to itself all came out with status 0.
+
+Decision: option 2, a launcher inside the sandbox, not option 1 (the `SandboxManager` library). The app has no dependency on the library and the provider is built on the CLI; the library needs a listener per initialize, a reset and its own cleanup of process groups (`notes/probes-m6-credential-proxy.md`, embedding); the launcher is a few lines and was tested against the real CLI. `core/isolation/srtLauncher.ts` holds `SRT_LAUNCHER_SCRIPT` and `srtLauncherArgv`; `srtToolCommand` in `SrtProvider.ts` runs `srt -s <settings> -- /bin/sh -c <script> srt-launcher <argv>`. The shell handles INT, TERM and HUP with `trap :` (a no-op command, so the signals are handled and go back to their default action in the child; `trap ''` would be inherited), runs the program as a child (no `exec`), waits and exits with its status. Statuses with real `srt`, each check printing a failure and then `sleep 1; exit 1` (script `matrix.mjs` in the scratch directory):
+
+| The check sends | Plain argv | Launcher |
+|---|---|---|
+| exit 0 | 0 | 0 |
+| exit 3 | 3 | 3 |
+| SIGTERM to its group | 0 | 143 |
+| SIGTERM to itself | 0 | 143 |
+| SIGINT to its group | 0 | 130 |
+| SIGHUP to its group | 1 | 129 |
+| SIGQUIT to its group | 1 | 1 |
+| SIGABRT to its group | 1 | 1 |
+| SIGKILL to its group | 1 | 1 |
+| TERM, INT or HUP to its parent shell | refused (the parent is `srt`, outside the sandbox) | 1 (the program's own exit) |
+| QUIT, ABRT or KILL to its parent shell | refused | 1 (the signal ends `srt`) |
+| Node program that signals itself with SIGTERM | 0 | 143 |
+| `exec` of a program that signals itself | 0 | 143 |
+| a trap that exits 1; an ignored TERM and exit 1 | 1 | 1 |
+
+A signal sent to `srt` itself is refused by the sandbox (`Operation not permitted`), so only the check's own process, its group and the launcher can be reached. The app's timeout and cancel are decided from the flags of `runProcess` before it reads a status (`timed_out`, `not_run` "the check was cancelled"), checked under the launcher in both test files. A program that ignores TERM and then exits 0 on its own is a pass: code in the check can always exit 0. A background child started by the check still ends by SIGTERM (real `srt` test).
+
+Tests: `ProcessCheckExecutor.test.ts` ("a check that ends by a signal under srt"): every signal (TERM, INT, HUP, QUIT, ABRT, KILL) to the group, to the process and to its parent shell, a Node program, `exec`, a subshell, traps, an ignored signal, exit 0 and exit 3, the status 143, 130 and 129, a timeout and a cancel, all through `srtToolEnvironment` over `core/isolation/fakeSrt.ts`, a stand-in with the exit behaviour of 0.0.83 (runs without `srt`). `ProcessCheckExecutor.srt.test.ts`: the same signals against the real `srt`, the group statuses (the case that tells a handled HUP from an unhandled one), the trap and exec cases, pass, fail, timeout and cancel, the SIGTERM child. Mutation entries: `srt` runs the program without the launcher; the launcher ignores the signals; the launcher does not handle HUP (killed only by the real-`srt` test, which the entry runs with `-t`); the launcher exits 0; the launcher `exec`s the program; a death by a signal reads as passed; the exit 0 of the launcher reads as failed. Without the launcher the TERM and INT rows and the Node and `exec` rows give 0; the unit tests fail without it (checked by the entries).
+
+Audit of every place where a status becomes a decision: the check executor (fixed); `StreamAgentRuntime.finalize` and `PersistentSwarmManager.onExited` (an exit that the app did not ask for ends the agent `failed` whatever the code); `StreamReviewerRuntime` (the exit ends the run; the verdict comes from the `report_review` call, and `failure` from the result event); `GitMerger`, `guardedGit` and the swarm git steps (host programs started by the app with fixed arguments, outside any sandbox, each reading its own status); `CheckClones` (`cp`, `df`), `ProcessSweep` (`ps`, `lsof`) and `claudeLogin` (`claude auth status`), all outside the sandbox. None of these reads a status that a sandboxed process can write. `container` runs a check as `docker run` and is not connected for checks; the signal cases were not run against Docker (0042, open rows).
+
+### The minors
+
+| Finding | State |
+|---|---|
+| Base alert per swarm | `ReviewInbox.watchBase` resolves only the alert of its own base commit and policy when that pair's base row is green, and `resolveUnusedBaseAlerts` resolves the alert of a base that no undecided changeset of the swarm stands on (superseded, rejected or accepted last changeset). `alerted` is rebuilt from the alerts of the inbox in every state at start (`rememberAlerts`). Tests: two agents on a red and a green base for three rounds (one alert, open throughout), a green base ends only its own alert, superseded, rejected and accepted last changesets end the alert, a restart does not post a dismissed alert again and posts for a new base |
+| Loopback under `check.network: none` | Probed: `srt` has no setting for bind without connect (its profile pairs `allowLocalBinding` with `network-outbound (remote ip "localhost:*")`), `deniedDomains` does not apply to a direct loopback connect, a bind and a connect are refused when `allowLocalBinding` is false. So `buildToolSrtSettings` takes `loopback`, `ToolLaunch` has the optional `loopback`, `CacheTool` has `loopback` (Gradle only), `RunClones.loopback` reports it and the executor passes it. Real `srt`: connect and bind refused for an npm project, connect reached for a Gradle project; the daemon tests and the registry-free tests ask for loopback through a rig option. What stays reachable and what now fails is in 0040 section 6 ("Loopback") and the security table |
+| Banned words | The banned words in 0040 section 6 are replaced; the row of the third pass describes the minor without quoting a banned word |
+| Flaky sweep test | Cause found by reproduction: the gone-owner process of the test carries a marker whose owner pid is dead, and the sweep of another test process (the executor tests with the real table, in a parallel worker) ends every such process at the start of its runs, so the sweep under test found nothing (`ps shows [] for pid`; the pid was not reused, `isAlive` was not the cause). The test now owns its process with a running stand-in app that no other sweep touches and tells its own sweep that the stand-in is gone (`isAlive` option); the real liveness check has its own unit test with a pid that cannot exist (`2147483646`) and one that runs. The failure message now prints the `ps` markers, whether the pid lives and what signal 0 says about the owner. A second source of cross-talk, `survivors()` of the real-`srt` rig listing the marked processes of other files, is filtered to this rig's owner |
+| `cp` text in `notRunReason` | `CloneError` has `detail`; `cloneWithCp` says `cp -c could not clone a cache` and `clonePart` names the tool; the executor writes `clone detail: ...` to the log of the run only. The output tail and the reason hold none of it |
+| Environment names | Prefixes are compared on the upper-cased name; the endings `PASSPHRASE`, `JWT` and `_PW` are added; tests for lower-case names and the new endings, and names that stay (`PWD`, `JWT_ALGORITHM`) |
+
+### Stability of the sweep test
+
+Before the change, the real-process test failed about once in a dozen runs while the real-`srt` suite ran in a second process. After: 30 runs of `ProcessSweep.test.ts` (27 tests) with 16 `yes` processes on 8 cores and the real-`srt` suite running in parallel, 30 passed; a second series of 20 runs with the same load, 20 passed. The `yes` processes were killed afterwards.
+
+### What was checked on the whole surface
+
+Ways in which code under test could make a check read `passed`: a signal of itself, its group or its parent (closed, above); an exit 0 of its own (always possible, and what a changed test does: the reasons `tests.*` and `config.test_lint` and the reviewer see the change); a command that discovers no tests and exits 0 (open, 0042 row, not built); a stored green base made by a merged checkpoint (a base run is a run of that code, so it follows the same rules); a base result forged through a survivor (a survivor can turn a red base green through a loopback service where a tool entry asks for loopback; no rung is lowered by a green base, since a failed checkpoint is `check.failed` either way). Ways to make a failure read `not_run`: output with a sandbox, toolchain or resolution phrase (`EPERM`, `command not found`, `Could not resolve all files`) and a failing `setup` end the run `not_run`, whose rung is C like `check.failed`, without the send-back; `not_run` is never a pass. Ways to make the review skip: a survivor or a failing process list ends a base run `not_run`, a clone that cannot be made ends the run `not_run`; none lowers a rung. A timeout and a cancel are decided by the app.
+
+### Changed files and functions
+
+Source: `core/isolation/srtLauncher.ts` (new: `SRT_LAUNCHER_SCRIPT`, `srtLauncherArgv`); `core/isolation/fakeSrt.ts` (new, test helper: `writeFakeSrt`); `core/isolation/SrtProvider.ts` (`srtToolCommand`); `core/isolation/srtSettings.ts` (`SrtSettings`, `ToolSrtSettingsInput`, `buildToolSrtSettings`); `core/isolation/types.ts` (`ToolLaunch.loopback`); `core/review/capture/cacheTools.ts` (`CacheTool.loopback`, the Gradle entry); `core/review/capture/CheckClones.ts` (`CloneError`, `cloneWithCp`, `clonePart`, `RunClones.loopback`, `create`); `core/review/capture/ProcessCheckExecutor.ts` (`CheckToolEnvironment` comment, `execute`, `toolCommand`); `core/review/capture/checkEnv.ts` (`SCRUBBED_ENDINGS`, `isScrubbedName`); `core/review/manager/ReviewInbox.ts` (constructor, `rememberAlerts`, `watchBase`, `basesInUse`, `resolveUnusedBaseAlerts`, `UNDECIDED_STATES`; `resolveBaseAlerts` removed).
+
+Tests: `isolation/srtSettings.test.ts`, `isolation/toolCommand.test.ts`, `review/capture/ProcessCheckExecutor.test.ts`, `ProcessCheckExecutor.srt.test.ts` (rig options `loopback`, `cancel`, `survivors` filter), `CheckClones.test.ts`, `ProcessSweep.test.ts`, `checkEnvironment.test.ts`, `review/manager/ReviewInbox.test.ts`.
+
+Other: `scripts/mutation-checks.mjs` (new entries; the entries of the third pass that named changed text follow it); records 0040, 0041, 0042 and `app/README.md`.
+
+### Checks run
+
+| Check | Result |
+|---|---|
+| `pnpm typecheck` | passes |
+| `pnpm coverage`, with the real `srt` | 276 files, 3498 tests pass, 2 expected failures; `src/core` lines 97.17 (threshold 97), `src/core/review` lines 98.34 |
+| CI-like run (a directory with only a symlink `node`, `PATH` limited to it and the system directories, no `srt`) | 275 files pass and 1 is skipped, 3427 tests pass, 71 skipped; `src/core` lines 97.17, `src/core/review` lines 98.38; margin 0.17 points |
+| `pnpm build` | passes |
+| `AGIDE_HIDDEN=1 pnpm e2e` | 86 tests pass |
+| `pnpm parity` | ok, `docs/parity.md` unchanged |
+| `pnpm check:colours` | no literal outside the allowlist |
+| Real-tool tests (`AGIDE_SRT_BIN`, python3, npm, pnpm, pip, uv, mvn, gradle, cargo) | 40 pass, also while 16 `yes` processes ran |
+| New mutation entries | all killed; some survived at first (an accepted changeset holding its base: test added; the HUP trap: the entry runs the real-`srt` group test) |
+| Full `pnpm mutation` | every entry killed, none survived or skipped (about 106 minutes, alone, started 20:57 UTC) |
+
+### What took long
+
+The real-`srt` suite takes over two minutes, the signal matrix being the new part. Finding the cause of the sweep test took a reproduction with the real-`srt` suite in a second process; the `ps` line was empty, which excluded pid reuse. A first attempt to run a subset of the mutation script as `node -e import(...)` ran all entries without a filter and had to be killed; one swarm-runtime entry was left in place and restored by hand (the file shows no difference to the checkpoint).
+
+### What was not verified
+
+The signal cases against Docker. The launcher on Linux (`/bin/sh` there is dash; the trap semantics are the same by POSIX, but `srt` on Linux uses `bwrap`, whose exit handling was not read). A real Gradle build that binds its lock socket was run with the loopback entry only in the existing offline resolution test, not a build that uses a daemon. A project whose test suite starts a local server was not run to see its `not_run` text.
+
+### Leftovers
+
+Scratch files under the scratch directory of this pass (`/tmp/agide-check-clone-fix-4/`), removed at the end; the list of anything that could not be removed is in the report of the run.
+

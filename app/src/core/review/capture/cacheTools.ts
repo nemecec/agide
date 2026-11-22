@@ -39,6 +39,8 @@ export interface CacheTool {
   readonly commands: readonly string[];
   /** File names at the project root that select the tool. */
   readonly markers: readonly string[];
+  /** The tool binds a loopback port (Gradle's lock socket). Under `srt` that also lets the check connect to every loopback service of the host. */
+  readonly loopback?: true;
   parts(host: HostPaths, project: ProjectFacts): readonly CachePart[];
   /** The variables that point the tool at `directory`, its clone directory; `current` is the check environment so far. */
   environment(directory: string, current: Readonly<Record<string, string>>): Record<string, string>;
@@ -80,6 +82,7 @@ const gradle: CacheTool = {
   id: 'gradle',
   commands: ['gradle', 'gradlew'],
   markers: ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'gradlew'],
+  loopback: true,
   parts: (host, project) => {
     const root = fromEnv(host, 'GRADLE_USER_HOME') ?? inHome(host, '.gradle');
     const parts: CachePart[] = [{ from: join(root, 'caches', 'modules-2'), to: join('caches', 'modules-2') }];

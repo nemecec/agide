@@ -25,6 +25,14 @@ export const APFS_TYPE = 26;
 
 export class CloneError extends Error {
   override readonly name = 'CloneError';
+
+  /** Text from outside the app, such as the stderr of `cp`, which names paths of the real cache. It goes to the log of the run and never into the reason that a reviewer reads. */
+  constructor(
+    message: string,
+    readonly detail?: string,
+  ) {
+    super(message);
+  }
 }
 
 /** Clones the directory `source` to the new path `destination`. Rejects when it cannot clone; never copies instead. */
@@ -44,7 +52,7 @@ export const cloneWithCp: CloneFunction = (source, destination, signal) => {
     execFile(command.file, command.args, { signal, timeout: 0 }, (error, _stdout, stderr) => {
       if (error === null) resolve();
       else if (signal.aborted) reject(signal.reason);
-      else reject(new CloneError(`${command.file} could not clone ${source}: ${stderr.trim() || error.message}`.slice(0, 500)));
+      else reject(new CloneError('cp -c could not clone a cache', `${command.file} ${command.args.join(' ')}: ${stderr.trim() || error.message}`.slice(0, 2_000)));
     });
   });
 };
@@ -120,6 +128,8 @@ export interface RunClones {
   readonly environment: Readonly<Record<string, string>>;
   /** The tools that have a clone directory. */
   readonly tools: readonly string[];
+  /** A tool of the run binds a loopback port: the sandbox then admits loopback connections. */
+  readonly loopback: boolean;
   /** Regular files in the clones. */
   readonly files: number;
   readonly milliseconds: number;
@@ -181,7 +191,7 @@ export class CheckClones implements CloneService {
         for (const part of tool.parts(host, request.project)) files += await this.clonePart(tool, toolDirectory, part, signal);
         Object.assign(environment, tool.environment(toolDirectory, { ...request.current, ...environment }));
       }
-      return { directory, environment, tools: selected.map((tool) => tool.id), files, milliseconds: Date.now() - started, remove };
+      return { directory, environment, tools: selected.map((tool) => tool.id), loopback: selected.some((tool) => tool.loopback === true), files, milliseconds: Date.now() - started, remove };
     } catch (error) {
       await remove();
       if (error instanceof CloneError) throw error;
@@ -205,7 +215,12 @@ export class CheckClones implements CloneService {
     if (counted > this.limits.maxFiles) throw new CloneError(`the ${tool.id} cache is too large to clone (more than ${this.limits.maxFiles} files)`);
     const destination = join(toolDirectory, part.to);
     await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
-    await this.clone(source, destination, signal);
+    try {
+      await this.clone(source, destination, signal);
+    } catch (error) {
+      if (error instanceof CloneError && error.detail !== undefined) throw new CloneError(`cp -c could not clone the ${tool.id} cache`, error.detail);
+      throw error;
+    }
     return prune(destination);
   }
 }

@@ -14,7 +14,11 @@ import { OutputRing } from './outputRing';
 import { CHECK_OWNER_VARIABLE, CHECK_RUN_VARIABLE, sweepNote, type CheckProcesses, type SweepOutcome } from './ProcessSweep';
 import { runProcess, type RunningProcess } from './runProcess';
 
-/** `release` removes what `toolCommand` left for a key, such as a settings file; the executor calls it when the run ends. */
+/**
+ * `release` removes what `toolCommand` left for a key, such as a settings file; the executor calls it when the run ends.
+ * The command that `toolCommand` returns must end with status 0 only when the program did: a launcher that turns a
+ * death by a signal into status 0 would make a failing check pass (`srtLauncherArgv` keeps `srt` from doing it).
+ */
 export type CheckToolEnvironment = Pick<AgentEnvironment, 'toolCommand'> & { readonly release?: (key: string) => void };
 
 /** The tool environment a check runs in; the review module resolves it from the profile and the provider (0040 section 6). */
@@ -251,6 +255,7 @@ export class ProcessCheckExecutor implements CheckExecutor {
     let result: Awaited<RunningProcess['result']> | undefined;
     let phase: 'setup' | 'command' = 'command';
     let cloneFailure: string | undefined;
+    let cloneDetail = '';
     let clones: RunClones | undefined;
     let swept: SweepOutcome | undefined;
     let sweepFailed = false;
@@ -268,6 +273,7 @@ export class ProcessCheckExecutor implements CheckExecutor {
           notes.push(`note: cache clones for ${clones.tools.length === 0 ? 'no tool' : clones.tools.join(', ')} made in ${clones.milliseconds} ms\n`);
         } catch (error) {
           cloneFailure = error instanceof CloneError ? error.message : `the cache clone failed: ${(error as Error).message}`;
+          if (error instanceof CloneError && error.detail !== undefined) cloneDetail = `clone detail: ${error.detail}\n`;
         }
       }
       for (const step of cloneFailure === undefined ? steps : []) {
@@ -278,7 +284,7 @@ export class ProcessCheckExecutor implements CheckExecutor {
         }
         const key = `${runId}-${step.phase}`;
         keys.push(key);
-        const command = await this.toolCommand(environment.environment, key, checkout, step.argv, env, check.network, [tempDirectory, ...(clones === undefined ? [] : [clones.directory])]);
+        const command = await this.toolCommand(environment.environment, key, checkout, step.argv, env, check.network, [tempDirectory, ...(clones === undefined ? [] : [clones.directory])], clones?.loopback === true);
         const running = runProcess(command, ring, Math.max(1, deadline - Date.now()));
         state.running = running;
         result = await running.result;
@@ -306,7 +312,7 @@ export class ProcessCheckExecutor implements CheckExecutor {
     const durationMs = Date.now() - started;
     const noteText = notes.join('');
     const tail = ring.tailText(TAIL_CHARACTERS);
-    const log = Buffer.concat([Buffer.from(noteText), ring.contents()]);
+    const log = Buffer.concat([Buffer.from(noteText + cloneDetail), ring.contents()]);
     const outputPath = await this.writeLog(request.swarmId, changesetId ?? `base-${commitId.slice(0, 12)}`, runId, log);
     const common = { durationMs, outputPath, outputTail: (noteText + ring.tailText(Math.max(0, TAIL_CHARACTERS - noteText.length))).slice(0, TAIL_CHARACTERS), truncated: ring.truncated };
     const made = (fields: Partial<CheckRecord> & Pick<CheckRecord, 'outcome'>): CheckRecord => this.record(request, target, commitId, changesetId, { ...fields, ...common }, startedAt);
@@ -331,8 +337,8 @@ export class ProcessCheckExecutor implements CheckExecutor {
     return done(made({ outcome: result.exitCode === 0 ? 'passed' : 'failed', exitCode: result.exitCode, signal: result.signal }), unconfirmed);
   }
 
-  private async toolCommand(environment: CheckToolEnvironment, key: string, checkout: string, argv: readonly string[], env: Record<string, string>, network: 'none' | 'development', ownDirs: readonly string[]): Promise<PtyCommand> {
-    return environment.toolCommand({ key, cwd: checkout, argv, env, network, writeDirs: [...ownDirs, ...(this.deps.writeDirs?.() ?? [])] });
+  private async toolCommand(environment: CheckToolEnvironment, key: string, checkout: string, argv: readonly string[], env: Record<string, string>, network: 'none' | 'development', ownDirs: readonly string[], loopback: boolean): Promise<PtyCommand> {
+    return environment.toolCommand({ key, cwd: checkout, argv, env, network, loopback, writeDirs: [...ownDirs, ...(this.deps.writeDirs?.() ?? [])] });
   }
 
   private async removeCheckout(request: CheckRequest, checkout: string): Promise<void> {

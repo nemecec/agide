@@ -13,6 +13,7 @@ import { DEFAULT_REVIEW_POLICY, type ReviewPolicy } from '../policy/schema';
 import { assess } from '../rules/ruleFixtures';
 import { maxRung } from '../rungs';
 import type { CheckRecord } from '../schemas';
+import type { ToolLaunch } from '../../isolation/types';
 import type { CheckRequest } from '../types';
 import { CheckClones } from './CheckClones';
 import { checkDenyRead, claudeConfigPaths } from './checkDenyRead';
@@ -48,13 +49,14 @@ interface Rig {
   /** What `ps` and `lsof` attribute to the runs of this rig now. */
   survivors(): Promise<readonly { pid: number; name: string }[]>;
   run(command: string[], patch?: Partial<NonNullable<ReviewPolicy['check']>>): ReturnType<ProcessCheckExecutor['run']>;
+  cancel(): Promise<void>;
 }
 
 /** The stored green result of the base: most tests are about the checkpoint run and skip the base run with it; `base: 'run'` runs the base. */
 const greenBase = (commitId: string): CheckRecord => ({ id: 'chk_stored_green', changesetId: null, target: 'base', commitId, policyHash: POLICY_HASH, command: ['x'], outcome: 'passed', notRunReason: null, exitCode: 0, signal: null, durationMs: 1, outputPath: null, outputTail: '', truncated: false, startedAt: '2026-11-21T10:00:00.000Z', endedAt: '2026-11-21T10:00:01.000Z' });
 
 /** An executor over the real srt. `home` is the home directory the check sees: a fixture directory unless a test needs the real toolchains. */
-function rig(files: Record<string, string | Buffer>, options: { home?: string; extraFiles?: Record<string, string>; env?: Record<string, string>; executables?: string[]; base?: 'run' | 'stored' } = {}): Rig {
+function rig(files: Record<string, string | Buffer>, options: { home?: string; extraFiles?: Record<string, string>; env?: Record<string, string>; executables?: string[]; base?: 'run' | 'stored'; loopback?: boolean } = {}): Rig {
   repo = makeRepo({ 'base.txt': 'base\n', ...files });
   for (const path of options.executables ?? []) chmodSync(join(repo.main, path), 0o755);
   for (const [path, content] of Object.entries(options.extraFiles ?? { 'agent.txt': 'agent\n' })) write(join(repo.main, path), content);
@@ -70,7 +72,9 @@ function rig(files: Record<string, string | Buffer>, options: { home?: string; e
   write(siblingFiles.registry, 'the registry of the app\n');
   const srtBinary = findTestSrt()!;
   const settingsDir = join(tempDir('srt-settings'), 'srt');
-  const environment = srtToolEnvironment({ srtBinary, settingsDir, extraDenyRead: checkDenyRead({ agent: undefined, appRoot, appDirs: [], claude: claudeConfigPaths({ configured: undefined, home }), home }) });
+  const srt = srtToolEnvironment({ srtBinary, settingsDir, extraDenyRead: checkDenyRead({ agent: undefined, appRoot, appDirs: [], claude: claudeConfigPaths({ configured: undefined, home }), home }) });
+  // The daemon tests bind loopback ports: they ask for the loopback that only a tool entry (Gradle) grants a check otherwise.
+  const environment = options.loopback === true ? { ...srt, toolCommand: (launch: ToolLaunch) => srt.toolCommand({ ...launch, loopback: true }) } : srt;
   const clonesRoot = join(repo.root, 'clones');
   const r = repo;
   const table = systemProcessTable({ roots: [join(r.root, 'checks'), clonesRoot] });
@@ -90,7 +94,9 @@ function rig(files: Record<string, string | Buffer>, options: { home?: string; e
     clonesRoot,
     dataDir,
     siblingFiles,
-    survivors: async () => (await table.list()).map((entry) => ({ pid: entry.pid, name: entry.name })),
+    // The table is system-wide: processes that other test files started with a marker of their own are not this rig's runs.
+    survivors: async () => (await table.list()).filter((entry) => entry.owner === undefined || entry.owner === process.pid).map((entry) => ({ pid: entry.pid, name: entry.name })),
+    cancel: () => executor.cancel('cs_aaaaaaaaaaaaaaaa'),
     run: (command, patch = {}) =>
       executor.run({
         changesetId: 'cs_aaaaaaaaaaaaaaaa',
@@ -181,6 +187,105 @@ suite(`the check under the real srt${unavailable === undefined ? '' : ` [unavail
     }
   });
 
+  /**
+   * srt 0.0.83 exits 0 when the program ends by SIGINT or SIGTERM. A check that prints a failure and signals itself,
+   * its process group or its parent shell must still be `failed`: the launcher shell of `srtLauncherArgv` handles the
+   * signals and exits with the status of the program.
+   */
+  const FAILS = 'echo "tests: 3 failed";';
+  const signalling = (target: string, signal: string): string => `${FAILS} kill -${signal} ${target}; sleep 1; exit 1`;
+  const SIGNALS = ['TERM', 'INT', 'HUP', 'QUIT', 'ABRT', 'KILL'];
+  const TARGETS: [string, string][] = [
+    ['its process group', '0'],
+    ['itself', '$$'],
+    ['its parent shell', '$PPID'],
+  ];
+
+  it.each(SIGNALS.flatMap((signal) => TARGETS.map(([name, target]) => [`SIG${signal} to ${name}`, signalling(target, signal)] as const)))('reads %s and then a failure as failed, never as passed', async (_name, script) => {
+    const r = rig({});
+    const result = await r.run(['sh', '-c', script]);
+    expect(result.checkpoint.outcome, `the failing test is not reported as passed (exit ${result.checkpoint.exitCode}, signal ${result.checkpoint.signal}): ${result.checkpoint.outputTail}`).toBe('failed');
+    expect(result.checkpoint.exitCode, 'the status that came out of srt is not 0').not.toBe(0);
+  }, 60_000);
+
+  it.each([
+    ['TERM', 143],
+    ['INT', 130],
+    ['HUP', 129],
+  ])('hands out 128 plus the number when SIG%s goes to the whole group, which srt itself cannot be reached by', async (signal, status) => {
+    const r = rig({});
+    const result = await r.run(['sh', '-c', `kill -${signal} 0; sleep 1`]);
+    expect([result.checkpoint.outcome, result.checkpoint.exitCode], 'the status of the death by the signal').toEqual(['failed', status]);
+  }, 60_000);
+
+  it('reads the signals of programs that trap, ignore, exec or end by themselves as the program ends', async () => {
+    const r = rig({});
+    const scripts: Record<string, string> = {
+      'a trap that exits 1': 'trap "exit 1" TERM; kill -TERM 0; sleep 1; exit 1',
+      'an ignored signal and exit 1': 'trap "" TERM; kill -TERM 0; sleep 1; exit 1',
+      'node that signals itself': `${FAILS} node -e 'process.kill(process.pid, "SIGTERM"); setTimeout(() => process.exit(1), 1000)'`,
+      'exec of a program that signals itself': `${FAILS} exec node -e 'process.kill(process.pid, "SIGTERM"); setTimeout(() => {}, 1000)'`,
+      'a signal after which the program would go on': 'kill -TERM $$; echo survived; exit 0',
+    };
+    const outcomes: Record<string, string> = {};
+    for (const [name, script] of Object.entries(scripts)) {
+      const result = await r.run(['sh', '-c', script]);
+      outcomes[name] = `${result.checkpoint.outcome}${result.checkpoint.outputTail?.includes('survived') === true ? ' and survived' : ''}`;
+    }
+    expect(outcomes, 'each is failed; the program does not go on after a SIGTERM it sent itself').toEqual(Object.fromEntries(Object.keys(scripts).map((name) => [name, 'failed'])));
+    expect((await r.run(['sh', '-c', 'trap "" TERM; kill -TERM 0; sleep 1; exit 0'])).checkpoint.outcome, 'an ignored signal and the program\'s own exit 0 is a pass').toBe('passed');
+  }, 120_000);
+
+  it('keeps pass, fail, timeout and cancel as they were', async () => {
+    const r = rig({});
+    const [passed, failed, slow] = [await r.run(['sh', '-c', 'exit 0']), await r.run(['sh', '-c', 'exit 3']), await r.run(['sh', '-c', 'sleep 30'], { timeoutSeconds: 2 })];
+    expect([passed.checkpoint.outcome, passed.checkpoint.exitCode], 'exit 0').toEqual(['passed', 0]);
+    expect([failed.checkpoint.outcome, failed.checkpoint.exitCode], 'exit 3').toEqual(['failed', 3]);
+    expect(slow.checkpoint.outcome, 'the timeout of the app, which ends the group with SIGTERM').toBe('timed_out');
+    const c = rig({});
+    const running = c.run(['sh', '-c', 'sleep 30']);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await c.cancel();
+    expect((await running).checkpoint.notRunReason, 'a cancel ends the run as not_run').toBe('the check was cancelled');
+  }, 120_000);
+
+  it('lets a process that the check started end on SIGTERM, since the launcher handles the signal and the program does not inherit that', async () => {
+    const r = rig({});
+    const result = await r.run(['sh', '-c', 'sleep 60 & child=$!; kill -TERM $child; wait $child; test $? -eq 143']);
+    expect([result.checkpoint.outcome, result.checkpoint.outputTail], 'a background child that needs SIGTERM to stop ends by it').toMatchObject(['passed', expect.any(String)]);
+  }, 60_000);
+
+  /** A TCP server of this process: the stand-in for a service of the host on loopback (a database, a development server, the app's MCP server). */
+  async function withLoopbackService<T>(use: (port: number) => Promise<T>): Promise<T> {
+    const server = createSocketServer((socket) => socket.end('hello\n'));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      return await use((server.address() as { port: number }).port);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }
+  const connectTo = (port: number): string[] => ['node', '-e', `const c = require('net').connect(${port}, '127.0.0.1'); c.on('data', () => { console.log('REACHED'); process.exit(0); }); c.on('error', (e) => { console.log('REFUSED ' + e.code); process.exit(1); });`];
+
+  it('refuses a connection to a loopback service of the host under network none, and to a loopback port the check binds, for a tool that does not need loopback', async () => {
+    await withLoopbackService(async (port) => {
+      const r = rig({ 'package.json': '{}\n' });
+      const result = await r.run(connectTo(port));
+      expect(result.checkpoint.outputTail, 'the sandbox refuses the connect').toContain('REFUSED EPERM');
+      expect(result.checkpoint.outcome, 'and the check is not a pass').not.toBe('passed');
+      const bind = await r.run(['node', '-e', "require('net').createServer().listen(0, '127.0.0.1').on('error', (e) => { console.log('BIND ' + e.code); process.exit(1); })"]);
+      expect(bind.checkpoint.outputTail, 'binding a loopback port is refused too').toContain('BIND EPERM');
+    });
+  }, 120_000);
+
+  it('admits loopback connections for a project whose tool entry needs a loopback port, which reaches the services of the host', async () => {
+    await withLoopbackService(async (port) => {
+      const r = rig({ 'build.gradle': '\n' });
+      const result = await r.run(connectTo(port));
+      expect([result.checkpoint.outcome, result.checkpoint.outputTail], 'the Gradle entry sets allowLocalBinding, and srt pairs it with loopback connections').toMatchObject(['passed', expect.stringContaining('REACHED')]);
+    });
+  }, 120_000);
+
   toolTest('cargo', () => findExecutable('rustup') !== undefined && existsSync(join(homedir(), '.cargo', 'registry')))('runs cargo through rustup with CARGO_HOME at a clone and the real home readable', async () => {
     const r = rig({ 'Cargo.toml': '[package]\nname = "tiny"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': '' }, { home: homedir() });
     const cargoHome = join(homedir(), '.cargo');
@@ -249,7 +354,7 @@ suite(`the check under the real srt${unavailable === undefined ? '' : ` [unavail
   const daemonPid = (output: string | null | undefined): number => Number(/daemon (\d+)/.exec(output ?? '')?.[1]);
 
   toolTest('python3')('ends a daemon that the checkpoint run detached with setsid and bound a port with, so the base run of the next capture does not meet the port', async () => {
-    const r = rig({ 'holder.py': HOLDER }, { base: 'run' });
+    const r = rig({ 'holder.py': HOLDER }, { base: 'run', loopback: true });
     const port = await freePort();
     const result = await r.run(['python3', 'holder.py', String(port), 'port']);
     expect(result.checkpoint.outcome, `the checkpoint run fails with exit 1 after it left a daemon: ${result.checkpoint.outputTail}`).toBe('failed');
@@ -262,7 +367,7 @@ suite(`the check under the real srt${unavailable === undefined ? '' : ` [unavail
   }, 60_000);
 
   toolTest('python3')('ends a detached process whose image hides its environment by its working directory', async () => {
-    const r = rig({ 'holder.py': HOLDER });
+    const r = rig({ 'holder.py': HOLDER }, { loopback: true });
     const result = await r.run(['python3', 'holder.py', '1', 'image']);
     expect(result.checkpoint.outputTail, `/bin/sleep is a system program: ps cannot show its environment, the working directory in the checkout attributes it: ${result.checkpoint.outputTail}`).toContain('left behind by the check and ended');
     expect([alive(daemonPid(result.checkpoint.outputTail)), await r.survivors()], 'the process is dead and no process is attributed to a run').toEqual([false, []]);
@@ -305,7 +410,7 @@ suite(`the check under the real srt${unavailable === undefined ? '' : ` [unavail
   };
 
   toolTest('python3')('puts a changeset at rung C, never B, when a hidden survivor of an earlier capture made its base run fail', async () => {
-    const r = rig({ 'hider.py': HIDER }, { base: 'run' });
+    const r = rig({ 'hider.py': HIDER }, { base: 'run', loopback: true });
     const port = await freePort();
     let daemon = Number.NaN;
     try {

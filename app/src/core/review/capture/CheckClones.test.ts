@@ -173,6 +173,17 @@ describe('when a clone cannot be made', () => {
     expect(existsSync(join(r.root, 'chk_fail')), 'the partial directory is gone').toBe(false);
   });
 
+  it('names the tool in the message and keeps the text of the clone program, which names paths of the real cache, out of it', async () => {
+    const r = rig({
+      clone: async () => {
+        throw new CloneError('cp -c could not clone a cache', 'cp: /home/user/.npm/_cacache/an agent chose this name: Operation not permitted');
+      },
+    });
+    const error = await r.clones.create('chk_detail', r.request()).then(() => undefined, (rejected: unknown) => rejected as CloneError);
+    expect(error?.message, 'the message is the app\'s own and names the tool').toBe('cp -c could not clone the npm cache');
+    expect(error?.detail, 'the text of the program is the detail').toContain('an agent chose this name');
+  });
+
   it('wraps an unexpected error', async () => {
     const r = rig({
       clone: async () => {
@@ -296,7 +307,9 @@ describe('the clone call', () => {
 
   it('fails when the source does not exist, without a copy', async () => {
     const dir = tempDir('clone-missing');
-    await expect(cloneWithCp(join(dir, 'missing'), join(dir, 'to'), never), 'cp fails').rejects.toBeInstanceOf(CloneError);
+    const error = await cloneWithCp(join(dir, 'missing'), join(dir, 'to'), never).then(() => undefined, (rejected: unknown) => rejected as CloneError);
+    expect(error, 'cp fails').toBeInstanceOf(CloneError);
+    expect([error?.message, error?.detail?.includes(join(dir, 'missing'))], 'the message holds no path and the detail holds the text of cp').toEqual(['cp -c could not clone a cache', true]);
     expect(existsSync(join(dir, 'to')), 'nothing was made').toBe(false);
   });
 

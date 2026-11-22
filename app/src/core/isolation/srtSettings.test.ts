@@ -69,7 +69,7 @@ describe('buildToolSrtSettings', () => {
       mkdirSync(join(dir, 'data'));
       const link = join(dir, 'link');
       symlinkSync(dir, link);
-      const settings = buildToolSrtSettings({ writeDirs: ['/work'], network: 'none', extraDenyRead: [join(link, 'data'), '/does/not/exist'] });
+      const settings = buildToolSrtSettings({ writeDirs: ['/work'], network: 'none', loopback: false, extraDenyRead: [join(link, 'data'), '/does/not/exist'] });
       expect(new Set(settings.filesystem.denyRead), 'the link spelling, the resolved spelling and a path that does not exist').toEqual(new Set([join(link, 'data'), join(realpathSync(dir), 'data'), '/does/not/exist']));
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -77,7 +77,13 @@ describe('buildToolSrtSettings', () => {
   });
 
   it('denies nothing without entries and allows no host for network none', () => {
-    const settings = buildToolSrtSettings({ writeDirs: ['/work'], network: 'none' });
+    const settings = buildToolSrtSettings({ writeDirs: ['/work'], network: 'none', loopback: false });
     expect([settings.filesystem.denyRead, settings.network.allowedDomains], 'no deny entries and no hosts').toEqual([[], []]);
+  });
+
+  it('allows loopback binding, which srt pairs with connections to every loopback port, only when the program needs it', () => {
+    expect(buildToolSrtSettings({ writeDirs: ['/work'], network: 'none', loopback: false }).network.allowLocalBinding, 'a program without loopback binding').toBe(false);
+    expect(buildToolSrtSettings({ writeDirs: ['/work'], network: 'development', loopback: false }).network.allowLocalBinding, 'the development hosts do not open loopback').toBe(false);
+    expect(buildToolSrtSettings({ writeDirs: ['/work'], network: 'none', loopback: true }).network.allowLocalBinding, 'a program that binds a loopback port').toBe(true);
   });
 });

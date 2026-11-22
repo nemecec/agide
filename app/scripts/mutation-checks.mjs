@@ -42,6 +42,8 @@ const LEFTOVERS = ['src/core/review/capture/checkLeftovers.test.ts'];
 const INBOX_CARD = ['src/core/review/manager/ReviewInbox.test.ts'];
 const CALLER_VIEW = ['src/core/review/manager/callerView.test.ts'];
 const REVIEW_PANE = ['src/renderer/panes/review', 'src/renderer/panes/inbox'];
+const SIGNALS = ['src/core/review/capture/ProcessCheckExecutor.test.ts', 'src/core/isolation/toolCommand.test.ts'];
+const LOOPBACK = ['src/core/review/capture/ProcessCheckExecutor.test.ts', 'src/core/isolation/toolCommand.test.ts', 'src/core/isolation/srtSettings.test.ts', 'src/core/review/capture/CheckClones.test.ts'];
 const SWARM_FACTS = ['src/core/review/manager/swarmIntegration.test.ts'];
 
 /** `from` must occur exactly once in the file. */
@@ -319,7 +321,7 @@ const mutations = [
   { name: "secrets: fine-grained GitHub tokens are not detected", file: "src/core/review/rules/secrets.ts", from: "|github_pat_[A-Za-z0-9_]{22,}", to: "", tests: SECRETS },
   { name: "secrets: Slack tokens are not detected", file: "src/core/review/rules/secrets.ts", from: "{ id: 'slack-token', pattern: /\\bxox[abprs]-[A-Za-z0-9-]{10,}/ },", to: "", tests: SECRETS },
   { name: "secrets: JWTs are not detected", file: "src/core/review/rules/secrets.ts", from: "{ id: 'jwt', pattern: /\\beyJ", to: "{ id: 'jwt', pattern: /(?!)\\beyJ", tests: SECRETS },
-  { name: "secrets: a check receives the token variables", file: "src/core/review/capture/checkEnv.ts", from: "const SCRUBBED_ENDINGS = ['TOKEN', 'PASSWORD', 'PASSWD', 'SECRET', 'APIKEY', '_KEY', 'HEADER'] as const;", to: "const SCRUBBED_ENDINGS = ['TOKEN'] as const;", tests: SECRETS_ENV },
+  { name: "secrets: a check receives the token variables", file: "src/core/review/capture/checkEnv.ts", from: "const SCRUBBED_ENDINGS = ['TOKEN', 'PASSWORD', 'PASSWD', 'PASSPHRASE', 'SECRET', 'APIKEY', '_KEY', 'HEADER', 'JWT', '_PW'] as const;", to: "const SCRUBBED_ENDINGS = ['TOKEN'] as const;", tests: SECRETS_ENV },
   { name: "secrets: a check receives the Claude credentials", file: "src/core/review/capture/checkEnv.ts", from: "['CLAUDE_CODE', 'ANTHROPIC_', 'GH_', 'GITHUB_', 'AWS_']", to: "['GH_', 'GITHUB_', 'AWS_']", tests: SECRETS_ENV },
   { name: "secrets: the policy lists a scrubbed variable for the check", file: "src/core/review/capture/checkEnv.ts", from: "Object.hasOwn(profileEnv, name) && !isScrubbedName(name)", to: "Object.hasOwn(profileEnv, name)", tests: SECRETS_ENV },
   { name: "check env: a sandboxed local profile runs the check as a plain process", file: "src/core/review/capture/checkEnvironment.ts", from: "if (provider === 'srt' || bashSandbox) {", to: "if (provider === 'srt') {", tests: CHECK_ENV },
@@ -438,7 +440,7 @@ const mutations = [
   { name: "check: a pyenv version that is not installed is not an environment problem", file: "src/core/review/capture/environmentErrors.ts", from: "toolchain('pyenv.version_missing', /pyenv: version", to: "toolchain('pyenv.version_missing', /pyenvX: version", tests: ENV_ERRORS },
   { name: "check: an nvm version that is not installed is not an environment problem", file: "src/core/review/capture/environmentErrors.ts", from: "toolchain('nvm.version_missing', /n\\/a: version", to: "toolchain('nvm.version_missing', /n\\/aX: version", tests: ENV_ERRORS },
   { name: "check: names that carry an authorization are not scrubbed", file: "src/core/review/capture/checkEnv.ts", from: " ||\n    upper.split('_').some((word) => (SCRUBBED_WORDS as readonly string[]).includes(word))", to: "", tests: CHECK_RUNS },
-  { name: "check: a name that ends in HEADER is not scrubbed", file: "src/core/review/capture/checkEnv.ts", from: "'_KEY', 'HEADER']", to: "'_KEY']", tests: CHECK_RUNS },
+  { name: "check: a name that ends in HEADER is not scrubbed", file: "src/core/review/capture/checkEnv.ts", from: "'_KEY', 'HEADER', 'JWT', '_PW']", to: "'_KEY', 'JWT', '_PW']", tests: CHECK_RUNS },
   { name: "check: a name with AUTH inside a longer word is scrubbed (GIT_AUTHOR_NAME)", file: "src/core/review/capture/checkEnv.ts", from: "upper.split('_').some((word) => (SCRUBBED_WORDS as readonly string[]).includes(word))", to: "SCRUBBED_WORDS.some((word) => upper.includes(word))", tests: CHECK_RUNS },
   { name: "check: a name that ends in PASSWD is not scrubbed", file: "src/core/review/capture/checkEnv.ts", from: "'PASSWORD', 'PASSWD', ", to: "'PASSWORD', ", tests: CHECK_RUNS },
   { name: "check: a name that ends in APIKEY is not scrubbed", file: "src/core/review/capture/checkEnv.ts", from: "'SECRET', 'APIKEY', ", to: "'SECRET', ", tests: CHECK_RUNS },
@@ -469,10 +471,10 @@ const mutations = [
   { name: "rung: a base that did not run counts as red", file: "src/core/review/rules/runRules.ts", from: "      if (base?.outcome === 'failed') return baseRed();\n      return [make('check.failed'", to: "      if (base !== undefined && base.outcome !== 'passed') return baseRed();\n      return [make('check.failed'", tests: RED_BASE },
   { name: "rung: the reviewer may accept over a red base", file: "src/core/review/manager/InMemoryReviewManager.ts", from: "['check.failed', 'check.base_red', 'check.timed_out', 'check.not_run']", to: "['check.failed', 'check.timed_out', 'check.not_run']", tests: LADDER_MANAGER },
   { name: "check: a base run that did not run is stored and hides the earlier result", file: "src/core/review/manager/InMemoryReviewManager.ts", from: "if (outcome.base !== undefined && outcome.base.outcome !== 'not_run') store.putCheck(outcome.base);", to: "if (outcome.base !== undefined) store.putCheck(outcome.base);", tests: LADDER_MANAGER },
-  { name: "alert: an alert is posted for every changeset on a red base", file: "src/core/review/manager/ReviewInbox.ts", from: "    if (this.alerted.has(key)) return;\n", to: "", tests: INBOX_CARD },
-  { name: "alert: a green base run does not resolve the alert", file: "src/core/review/manager/ReviewInbox.ts", from: "      this.resolveBaseAlerts(changeset.swarmId);\n      return;", to: "      return;", tests: INBOX_CARD },
+  { name: "alert: an alert is posted for every changeset on a red base", file: "src/core/review/manager/ReviewInbox.ts", from: " && used.has(key) && !this.alerted.has(key)) {", to: " && used.has(key)) {", tests: INBOX_CARD },
+  { name: "alert: a green base run does not resolve the alert", file: "src/core/review/manager/ReviewInbox.ts", from: "      this.alerted.delete(key);\n      this.inbox.resolveByDedupeKey(key, 'superseded');", to: "      this.alerted.delete(key);", tests: INBOX_CARD },
   { name: "alert: the alert has no key of its base commit and policy", file: "src/core/review/manager/ReviewInbox.ts", from: "const key = baseAlertKey(changeset.swarmId, changeset.baseCommit, changeset.policyHash);", to: "const key = baseAlertKey(changeset.swarmId, '', '');", tests: INBOX_CARD },
-  { name: "alert: a base that did not run raises the alert", file: "src/core/review/manager/ReviewInbox.ts", from: "    if (base?.outcome !== 'failed') return;", to: "    if (base === undefined) return;", tests: INBOX_CARD },
+  { name: "alert: a base that did not run raises the alert", file: "src/core/review/manager/ReviewInbox.ts", from: "} else if (base?.outcome === 'failed' &&", to: "} else if (base !== undefined &&", tests: INBOX_CARD },
   { name: "alert: the output of the check is in the alert", file: "src/core/review/manager/ReviewInbox.ts", from: "details: `The check fails on the base commit: ${command}. Reviews", to: "details: `${base.outputTail ?? ''} The check fails on the base commit: ${command}. Reviews", tests: INBOX_CARD },
   { name: "store: the first base run of a pair is the one that is found", file: "src/core/review/store/InMemoryChangesetStore.ts", from: "const found = [...this.checkRows.values()].findLast((check) => check.target === 'base'", to: "const found = [...this.checkRows.values()].find((check) => check.target === 'base'", tests: STORE },
   { name: "store: the first base run of a pair is the one that is found in the database", file: "src/core/review/store/SqliteChangesetStore.ts", from: "AND policy_hash = ? ORDER BY rowid DESC LIMIT 1", to: "AND policy_hash = ? ORDER BY rowid LIMIT 1", tests: STORE },
@@ -509,6 +511,34 @@ const mutations = [
   { name: "card: a send-back without new work gets the generic message", file: "src/core/review/manager/ReviewInbox.ts", from: "if (last?.action === 'no_new_capture') return", to: "if (false) return", tests: INBOX_CARD },
   { name: "telemetry: the denials of an earlier run count in the next one", file: "src/core/swarm/manager/PersistentSwarmManager.ts", from: "    if (ENDED_RUN_STATES.includes(agent.state)) {\n      agent.denials = 0;\n      agent.deniedTools = [];\n    }\n", to: "", tests: SWARM_FACTS },
   { name: "telemetry: a resumed run loses the denials of its first part", file: "src/core/swarm/manager/PersistentSwarmManager.ts", from: "    if (ENDED_RUN_STATES.includes(agent.state)) {\n      agent.denials = 0;", to: "    if (true) {\n      agent.denials = 0;", tests: SWARM_FACTS },
+  // Signals: srt 0.0.83 exits 0 for a program that ends by SIGINT or SIGTERM
+  { name: "signals: srt runs the check program without the launcher shell", file: "src/core/isolation/SrtProvider.ts", from: "'--', ...srtLauncherArgv(launch.argv)]", to: "'--', ...launch.argv]", tests: SIGNALS },
+  { name: "signals: the launcher ignores INT, TERM and HUP instead of handling them", file: "src/core/isolation/srtLauncher.ts", from: "'trap : INT TERM HUP'", to: "\"trap '' INT TERM HUP\"", tests: SIGNALS },
+  { name: "signals: the launcher does not handle HUP", file: "src/core/isolation/srtLauncher.ts", from: "'trap : INT TERM HUP'", to: "'trap : INT TERM'", tests: ['src/core/review/capture/ProcessCheckExecutor.srt.test.ts', '-t', 'goes to the whole group'] },
+  { name: "signals: the launcher exits 0 whatever the program did", file: "src/core/isolation/srtLauncher.ts", from: "'exit \"$status\"'", to: "'exit 0'", tests: SIGNALS },
+  { name: "signals: the launcher replaces itself with the program", file: "src/core/isolation/srtLauncher.ts", from: "['trap : INT TERM HUP', '\"$@\"', 'status=$?', 'exit \"$status\"']", to: "['trap : INT TERM HUP', 'exec \"$@\"']", tests: SIGNALS },
+  { name: "signals: a death by a signal reads as passed", file: "src/core/review/capture/ProcessCheckExecutor.ts", from: "outcome: result.exitCode === 0 ? 'passed' : 'failed'", to: "outcome: (result.exitCode ?? 0) === 0 ? 'passed' : 'failed'", tests: SIGNALS },
+  { name: "signals: an exit 0 of the launcher reads as failed", file: "src/core/review/capture/ProcessCheckExecutor.ts", from: "outcome: result.exitCode === 0 ? 'passed' : 'failed'", to: "outcome: 'failed'", tests: SIGNALS },
+  // Loopback
+  { name: "loopback: every check tool launch binds loopback", file: "src/core/isolation/srtSettings.ts", from: "allowLocalBinding: input.loopback },", to: "allowLocalBinding: true },", tests: LOOPBACK },
+  { name: "loopback: the srt command forgets the launch's loopback flag", file: "src/core/isolation/SrtProvider.ts", from: "loopback: launch.loopback === true,", to: "", tests: LOOPBACK },
+  { name: "loopback: the executor allows loopback for every tool", file: "src/core/review/capture/ProcessCheckExecutor.ts", from: "clones?.loopback === true);", to: "true);", tests: LOOPBACK },
+  { name: "loopback: the Gradle entry does not need loopback", file: "src/core/review/capture/cacheTools.ts", from: "  loopback: true,\n", to: "", tests: LOOPBACK },
+  { name: "loopback: the clones report no loopback tool", file: "src/core/review/capture/CheckClones.ts", from: "loopback: selected.some((tool) => tool.loopback === true),", to: "loopback: false,", tests: LOOPBACK },
+  // Base alerts per base
+  { name: "alert: a green base run ends the alerts of every base of the swarm", file: "src/core/review/manager/ReviewInbox.ts", from: "      this.alerted.delete(key);\n      this.inbox.resolveByDedupeKey(key, 'superseded');", to: "      this.alerted.delete(key);\n      this.resolveUnusedBaseAlerts(changeset.swarmId, new Set());", tests: INBOX_CARD },
+  { name: "alert: the alert of a base that nothing stands on stays open", file: "src/core/review/manager/ReviewInbox.ts", from: "    this.resolveUnusedBaseAlerts(changeset.swarmId, used);\n", to: "", tests: INBOX_CARD },
+  { name: "alert: an accepted changeset still holds its base in use", file: "src/core/review/manager/ReviewInbox.ts", from: "state !== 'accepted' && !FINAL_STATES.includes(state)", to: "!FINAL_STATES.includes(state)", tests: INBOX_CARD },
+  { name: "alert: a superseded changeset still holds its base in use", file: "src/core/review/manager/ReviewInbox.ts", from: "state !== 'accepted' && !FINAL_STATES.includes(state)", to: "state !== 'accepted' && state !== 'rejected'", tests: INBOX_CARD },
+  { name: "alert: the posted alerts are forgotten at start", file: "src/core/review/manager/ReviewInbox.ts", from: "    this.safely(() => this.rememberAlerts());\n", to: "", tests: INBOX_CARD },
+  { name: "alert: only the open alerts are remembered at start", file: "src/core/review/manager/ReviewInbox.ts", from: "this.inbox.list({ kinds: ['alert'] })) if (item.origin", to: "this.inbox.list({ kinds: ['alert'], states: ['new', 'seen', 'snoozed'] })) if (item.origin", tests: INBOX_CARD },
+  // Clone errors, owners of swept processes, names of variables
+  { name: "clones: the text of cp is in the reason", file: "src/core/review/capture/CheckClones.ts", from: "`cp -c could not clone the ${tool.id} cache`, error.detail)", to: "`cp -c could not clone the ${tool.id} cache: ${error.detail}`, error.detail)", tests: CLONES },
+  { name: "clones: the text of cp is not in the log of the run", file: "src/core/review/capture/ProcessCheckExecutor.ts", from: "cloneDetail = `clone detail: ${error.detail}\\n`;", to: "cloneDetail = '';", tests: CLONES },
+  { name: "clones: the text of cp is in the message of the clone function", file: "src/core/review/capture/CheckClones.ts", from: "new CloneError('cp -c could not clone a cache', `${command.file}", to: "new CloneError(`cp -c could not clone a cache ${stderr}`, `${command.file}", tests: CLONES },
+  { name: "sweep: an owner that cannot exist counts as alive", file: "src/core/review/capture/ProcessSweep.ts", from: "return (error as NodeJS.ErrnoException).code === 'EPERM';", to: "return true;", tests: SWEEP },
+  { name: "secrets: the prefixes are compared with the case of the name", file: "src/core/review/capture/checkEnv.ts", from: "SCRUBBED_PREFIXES.some((prefix) => upper.startsWith(prefix))", to: "SCRUBBED_PREFIXES.some((prefix) => name.startsWith(prefix))", tests: CHECK_RUNS },
+  { name: "secrets: names that end in PASSPHRASE, JWT or _PW reach the check", file: "src/core/review/capture/checkEnv.ts", from: "'PASSWD', 'PASSPHRASE', 'SECRET'", to: "'PASSWD', 'SECRET'", tests: CHECK_RUNS },
 ];
 
 const filter = process.argv[2];

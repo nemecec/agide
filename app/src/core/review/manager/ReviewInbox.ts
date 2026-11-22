@@ -1,7 +1,7 @@
 import { cleanLine, MESSAGE_MAX, type InboxService, type NewItem, type Resolution } from '../../inbox/index';
 import type { SwarmId } from '../../swarm/types';
 import { rungIndex } from '../rungs';
-import { BLOCKING_SEVERITIES, type ChangesetRecord, type DecisionRecord, type Reason } from '../schemas';
+import { BLOCKING_SEVERITIES, CHANGESET_STATES, FINAL_STATES, type ChangesetRecord, type DecisionRecord, type Reason } from '../schemas';
 import { BASE_ALERT_ORIGIN, REPO_ALERT_ORIGIN, REVIEW_ITEM_ORIGIN, type ChangesetStore, type ReviewEvent, type ReviewItemPayload, type ReviewSwarmFacts } from '../types';
 
 const SOURCE = 'app';
@@ -10,6 +10,8 @@ export const repositoryAlertKey = (swarmId: SwarmId): string => `review:repo:${s
 export const baseAlertKey = (swarmId: SwarmId, baseCommit: string, policyHash: string): string => `review:base:${swarmId}:${baseCommit}:${policyHash}`;
 export const reviewItemKey = (swarmId: SwarmId, agent: string): string => `review:${swarmId}:${agent}`;
 const COMMAND_SHOWN = 70;
+/** A changeset in one of these states still has its base in use; a decided one (`accepted` included, which a merge follows with a new base) does not. */
+const UNDECIDED_STATES = CHANGESET_STATES.filter((state) => state !== 'accepted' && !FINAL_STATES.includes(state));
 const capped = (message: string): string => {
   const line = cleanLine(message);
   return line.length > MESSAGE_MAX ? `${line.slice(0, MESSAGE_MAX - 1)}…` : line;
@@ -21,14 +23,21 @@ const capped = (message: string): string => {
  * changeset tables, so it is rebuilt from the next event after a restart and its state is the inbox's own.
  */
 export class ReviewInbox {
-  /** The bases an alert was posted for, so a base that stays red does not post again, not even after the user dismissed the alert. */
+  /** The bases an alert was posted for, so a base that stays red does not post again, not even after the user dismissed the alert or the app restarted. */
   private readonly alerted = new Set<string>();
 
   constructor(
     private readonly inbox: InboxService,
     private readonly store: ChangesetStore,
     private readonly facts: ReviewSwarmFacts,
-  ) {}
+  ) {
+    this.safely(() => this.rememberAlerts());
+  }
+
+  /** The alerts of every state, a dismissed one included, are the record of the bases that were posted. */
+  private rememberAlerts(): void {
+    for (const item of this.inbox.list({ kinds: ['alert'] })) if (item.origin === BASE_ALERT_ORIGIN && item.dedupeKey !== undefined) this.alerted.add(item.dedupeKey);
+  }
 
   /** Listener for `ReviewManager.subscribe`. */
   onEvent = (event: ReviewEvent): void => {
@@ -38,40 +47,47 @@ export class ReviewInbox {
   };
 
   /**
-   * One alert for each base commit and policy whose check is red, and no alert for each changeset; a green base run
-   * resolves the alerts of the swarm. The text is the app's own, with the command of the policy and nothing from the
-   * output of the check.
+   * One alert for each swarm, base commit and policy whose check is red, and no alert for each changeset. Bases are per
+   * agent, since a merge gives an agent's next changesets its own checkpoint as the base: a green base run ends the
+   * alert of its own base and policy only, and the alert of a base that no undecided changeset of the swarm uses any
+   * more ends too. The text is the app's own, with the command of the policy and nothing from the output of the check.
    */
   private watchBase(changesetId: string): void {
     const changeset = this.store.get(changesetId);
     if (changeset === undefined) return;
+    const used = this.basesInUse(changeset.swarmId);
+    const key = baseAlertKey(changeset.swarmId, changeset.baseCommit, changeset.policyHash);
     const base = this.store.baseCheck(changeset.baseCommit, changeset.policyHash);
     if (base?.outcome === 'passed') {
-      this.resolveBaseAlerts(changeset.swarmId);
-      return;
+      this.alerted.delete(key);
+      this.inbox.resolveByDedupeKey(key, 'superseded');
+    } else if (base?.outcome === 'failed' && used.has(key) && !this.alerted.has(key)) {
+      this.alerted.add(key);
+      const command = base.command.join(' ');
+      const shown = command.length > COMMAND_SHOWN ? `${command.slice(0, COMMAND_SHOWN - 1)}…` : command;
+      this.item({
+        kind: 'alert',
+        urgency: 'high',
+        origin: BASE_ALERT_ORIGIN,
+        message: `The check fails on the base commit: ${shown}`,
+        details: `The check fails on the base commit: ${command}. Reviews stay at rung C until the base is green: fix the base, or change check.command in the policy.`,
+        payload: { swarmId: changeset.swarmId, baseCommit: changeset.baseCommit, policyHash: changeset.policyHash },
+        dedupeKey: key,
+        swarmId: changeset.swarmId,
+      });
     }
-    if (base?.outcome !== 'failed') return;
-    const key = baseAlertKey(changeset.swarmId, changeset.baseCommit, changeset.policyHash);
-    if (this.alerted.has(key)) return;
-    this.alerted.add(key);
-    const command = base.command.join(' ');
-    const shown = command.length > COMMAND_SHOWN ? `${command.slice(0, COMMAND_SHOWN - 1)}…` : command;
-    this.item({
-      kind: 'alert',
-      urgency: 'high',
-      origin: BASE_ALERT_ORIGIN,
-      message: `The check fails on the base commit: ${shown}`,
-      details: `The check fails on the base commit: ${command}. Reviews stay at rung C until the base is green: fix the base, or change check.command in the policy.`,
-      payload: { swarmId: changeset.swarmId, baseCommit: changeset.baseCommit, policyHash: changeset.policyHash },
-      dedupeKey: key,
-      swarmId: changeset.swarmId,
-    });
+    this.resolveUnusedBaseAlerts(changeset.swarmId, used);
   }
 
-  private resolveBaseAlerts(swarmId: SwarmId): void {
-    for (const key of [...this.alerted]) if (key.startsWith(`review:base:${swarmId}:`)) this.alerted.delete(key);
+  /** The alert keys of the bases that the undecided changesets of the swarm stand on. */
+  private basesInUse(swarmId: SwarmId): Set<string> {
+    return new Set(this.store.list({ swarmId, states: UNDECIDED_STATES }).map((changeset) => baseAlertKey(swarmId, changeset.baseCommit, changeset.policyHash)));
+  }
+
+  /** The key stays in `alerted`: the same base red again later is the same alert, not a new one. */
+  private resolveUnusedBaseAlerts(swarmId: SwarmId, used: ReadonlySet<string>): void {
     for (const open of this.inbox.list({ kinds: ['alert'], states: ['new', 'seen', 'snoozed'] })) {
-      if (open.origin === BASE_ALERT_ORIGIN && (open.payload as { swarmId?: unknown } | undefined)?.swarmId === swarmId) this.inbox.resolve(open.id, 'superseded');
+      if (open.origin === BASE_ALERT_ORIGIN && open.dedupeKey?.startsWith(`review:base:${swarmId}:`) === true && !used.has(open.dedupeKey)) this.inbox.resolve(open.id, 'superseded');
     }
   }
 

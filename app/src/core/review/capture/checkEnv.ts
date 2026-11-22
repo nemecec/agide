@@ -7,8 +7,8 @@
  */
 
 const SCRUBBED_PREFIXES = ['CLAUDE_CODE', 'ANTHROPIC_', 'GH_', 'GITHUB_', 'AWS_'] as const;
-/** A name that equals one of these or ends in one is scrubbed (`TOKEN`, `DEPLOY_TOKEN`, `OPENAI_APIKEY`, `SIGNING_KEY`, `NVM_AUTH_HEADER`). */
-const SCRUBBED_ENDINGS = ['TOKEN', 'PASSWORD', 'PASSWD', 'SECRET', 'APIKEY', '_KEY', 'HEADER'] as const;
+/** A name that equals one of these or ends in one is scrubbed (`TOKEN`, `DEPLOY_TOKEN`, `OPENAI_APIKEY`, `SIGNING_KEY`, `NVM_AUTH_HEADER`, `GPG_PASSPHRASE`, `CI_JOB_JWT`, `KEYCHAIN_PW`). Every rule compares the upper-cased name. */
+const SCRUBBED_ENDINGS = ['TOKEN', 'PASSWORD', 'PASSWD', 'PASSPHRASE', 'SECRET', 'APIKEY', '_KEY', 'HEADER', 'JWT', '_PW'] as const;
 /** A name with one of these as a whole word is scrubbed (`SSH_AUTH_SOCK`, `NPM_CONFIG_AUTH`), and `GIT_AUTHOR_NAME` is not. */
 const SCRUBBED_WORDS = ['AUTH', 'AUTHORIZATION', 'OAUTH'] as const;
 /** A name that contains this anywhere is scrubbed (`DOCKER_CREDENTIAL_HELPER`, `GIT_CREDENTIALS`). */
@@ -17,7 +17,7 @@ const SCRUBBED_FRAGMENT = 'CREDENTIAL';
 export const isScrubbedName = (name: string): boolean => {
   const upper = name.toUpperCase();
   return (
-    SCRUBBED_PREFIXES.some((prefix) => name.startsWith(prefix)) ||
+    SCRUBBED_PREFIXES.some((prefix) => upper.startsWith(prefix)) ||
     SCRUBBED_ENDINGS.some((ending) => upper.endsWith(ending)) ||
     upper.split('_').some((word) => (SCRUBBED_WORDS as readonly string[]).includes(word)) ||
     upper.includes(SCRUBBED_FRAGMENT)

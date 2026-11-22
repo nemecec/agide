@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { srtLauncherArgv } from '../../isolation/srtLauncher';
 import { resolveCheckEnvironment, type CheckEnvironmentInput } from './checkEnvironment';
 import { removeTempDirs, tempDir } from './gitFixtures';
 
@@ -41,7 +42,7 @@ describe('resolveCheckEnvironment', () => {
     expect(resolved.enforcesNetwork, 'srt enforces the network of the check').toBe(true);
     const command = await resolved.environment.toolCommand({ key: 'run-1', cwd: '/w/checkout', argv: ['pnpm', 'test'], env: { A: '1' }, network: 'none', writeDirs: [] });
     expect(command.file, 'srt is the program').toBe(binary);
-    expect(command.args.slice(0, 1).concat(command.args.slice(2)), 'settings flag, separator, then the command').toEqual(['-s', '--', 'pnpm', 'test']);
+    expect(command.args.slice(0, 1).concat(command.args.slice(2)), 'settings flag, separator, then the command under the launcher shell').toEqual(['-s', '--', ...srtLauncherArgv(['pnpm', 'test'])]);
   });
 
   it('limits the writes of the check to its checkout and its temporary directory, and its network to nothing', async () => {

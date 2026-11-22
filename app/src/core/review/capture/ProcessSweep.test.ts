@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { mkdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -220,6 +220,21 @@ describe('ending the processes of earlier runs', () => {
     expect(outcome.names, 'the names in the evidence').toEqual(['by-directory', 'of-a-dead-app', 'of-this-app']);
   });
 
+  it('asks the system whether the app is alive: a pid that cannot exist is gone, a pid that runs is not', async () => {
+    const IMPOSSIBLE_PID = 2_147_483_646;
+    const fake = fakeTable([
+      { pid: 130, pgid: 130, runId: OTHER, owner: IMPOSSIBLE_PID, name: 'of-a-gone-app' },
+      { pid: 131, pgid: 131, runId: OTHER, owner: process.ppid, name: 'of-a-live-app' },
+    ]);
+    const killed: number[] = [];
+    const kill = (pid: number): void => {
+      killed.push(pid);
+      fake.processes.splice(0, fake.processes.length, ...fake.processes.filter((entry) => entry.pid !== pid));
+    };
+    await new CheckProcessSweep({ table: fake.table, kill, killGroup: () => undefined, settle: async () => undefined, own: { pid: 1000, pgid: 1000 } }).endStale(new Set());
+    expect(killed, 'the process of the app that cannot exist is ended, the process of the app that runs is not').toEqual([130]);
+  });
+
   it('ends the processes of an earlier run of this app although the app is alive, since no run of it is live', async () => {
     const fake = fakeTable([{ pid: 120, pgid: 120, runId: OTHER, owner: 1000, name: 'earlier-run' }]);
     const { sweep, killed } = sweepOver(fake.table, { fake, alive: () => true });
@@ -333,6 +348,12 @@ describe('real processes', () => {
     return !alive(pid);
   };
   const posix = process.platform === 'darwin' || process.platform === 'linux';
+  /** What the sweep reads for the process of the gone app, for the message of a failed test: its line in `ps` and whether its owner counts as alive. */
+  const diagnose = async (pid: number, owner: number): Promise<string> => {
+    const listing = await new Promise<string>((resolve) => execFile('ps', environmentListing(process.platform, pid), (_error, stdout) => resolve(stdout)));
+    const marker = /AGIDE_CHECK_(?:RUN|OWNER)=\S+/g;
+    return ` (ps shows ${JSON.stringify(listing.match(marker) ?? [])} for pid ${pid}, which is ${alive(pid) ? 'alive' : 'gone'}; owner ${owner} is ${alive(owner) ? 'alive' : 'gone'} by signal 0)`;
+  };
 
   it.skipIf(!posix)('ends a detached process by the marker in its environment and by its working directory, and leaves a process of another run', async () => {
     const root = realpathSync(tempDir('sweep-real'));
@@ -361,26 +382,31 @@ describe('real processes', () => {
     expect((await sweep.endRun(RUN)).count, 'a second sweep finds nothing').toBe(0);
   }, 20_000);
 
+  /**
+   * The sweep of any other test process (the executor tests with the real table run one) ends every marked process
+   * whose owner is gone, so an owner that is really gone would let it win the race for the process of this test. The
+   * owner here is a process that runs, which no other sweep touches, and this sweep is told it is gone.
+   */
   it.skipIf(!posix)('ends the process of an app that is gone at the start of a run and leaves the process of an app that lives', async () => {
     const root = realpathSync(tempDir('sweep-stale'));
-    const finished = spawn(process.execPath, ['-e', '0'], { stdio: 'ignore' });
-    await new Promise((resolve) => finished.once('exit', resolve));
+    const standIn = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });
     const spawnOwned = (run: string, owner: number) =>
       spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore', env: { PATH: process.env['PATH'] ?? '', AGIDE_CHECK_RUN: run, AGIDE_CHECK_OWNER: String(owner) } });
-    const ofGoneApp = spawnOwned(RUN, finished.pid!);
+    const ofGoneApp = spawnOwned(RUN, standIn.pid!);
     const ofLiveApp = spawnOwned(OTHER, process.ppid);
-    for (const child of [ofGoneApp, ofLiveApp]) {
+    for (const child of [standIn, ofGoneApp, ofLiveApp]) {
       child.unref();
       live.push(child.pid!);
     }
-    const sweep = new CheckProcessSweep({ table: systemProcessTable({ roots: [root] }) });
+    const sweep = new CheckProcessSweep({ table: systemProcessTable({ roots: [root] }), isAlive: (pid) => pid !== standIn.pid && alive(pid) });
     let found = 0;
     // A loaded machine shows a new process late: wait by the clock, not by the number of listings.
     for (const deadline = Date.now() + 12_000; Date.now() < deadline && found === 0; ) {
       await new Promise((resolve) => setTimeout(resolve, 100));
       found = (await sweep.endStale(new Set())).count;
     }
-    expect(found, 'the process of the gone app was found').toBe(1);
-    expect([await gone(ofGoneApp.pid!), alive(ofLiveApp.pid!)], 'it is dead; the process of an app that lives is untouched').toEqual([true, true]);
+    const diagnosis = found === 1 ? '' : await diagnose(ofGoneApp.pid!, standIn.pid!);
+    expect(found, `the process of the gone app was found${diagnosis}`).toBe(1);
+    expect([await gone(ofGoneApp.pid!), alive(ofLiveApp.pid!), alive(standIn.pid!)], 'it is dead; the process of an app that lives and the stand-in app are untouched').toEqual([true, true, true]);
   }, 20_000);
 });

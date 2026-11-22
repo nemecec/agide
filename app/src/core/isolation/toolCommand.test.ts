@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ContainerProvider } from './ContainerProvider';
 import { LocalProvider } from './LocalProvider';
 import { SrtProvider } from './SrtProvider';
+import { srtLauncherArgv } from './srtLauncher';
 import { IsolationError, type AgentEnvironment, type EnvironmentSpec, type ToolLaunch } from './types';
 
 /** `toolCommand` runs a program of the user's project, such as the review check, with no more power than the agent had. */
@@ -54,13 +55,25 @@ describe('srt', () => {
     const environment = await provider().prepare(spec);
     const command = await environment.toolCommand(launch());
     const settingsPath = join(dir, 'srt', 'check-1', 'srt.json');
-    expect([command.file, command.args], 'srt, settings, separator, the program').toEqual(['srt', ['-s', settingsPath, '--', 'pnpm', 'test', '--run']]);
+    expect([command.file, command.args], 'srt, settings, separator, the launcher shell with the program as its arguments').toEqual(['srt', ['-s', settingsPath, '--', ...srtLauncherArgv(['pnpm', 'test', '--run'])]]);
+    expect(command.args.slice(-3), 'the program and its arguments end the argv').toEqual(['pnpm', 'test', '--run']);
     expect(statSync(settingsPath).mode & 0o777, 'settings file mode').toBe(0o600);
     const settings = JSON.parse(readFileSync(settingsPath, 'utf8')) as { filesystem: { allowWrite: string[] }; network: { allowedDomains: string[] } };
     expect(settings.filesystem.allowWrite, 'the checkout and the temporary directory only').toEqual([join(dir, 'checkout'), join(dir, 'tmp')]);
     expect(settings.filesystem.allowWrite.includes(join(dir, 'claude')), 'the Claude configuration of the profile is not writable').toBe(false);
     expect(settings.network.allowedDomains, 'network none allows no host').toEqual([]);
     expect(command.env, 'the launch environment').toEqual({ PATH: '/usr/bin', CI: '1' });
+  });
+
+  it('allows loopback binding only when the launch says the program needs it', async () => {
+    const environment = await provider().prepare(spec);
+    const binding = async (patch: Partial<ToolLaunch>): Promise<boolean> => {
+      await environment.toolCommand(launch(patch));
+      return (JSON.parse(readFileSync(join(dir, 'srt', 'check-1', 'srt.json'), 'utf8')) as { network: { allowLocalBinding: boolean } }).network.allowLocalBinding;
+    };
+    expect(await binding({}), 'a launch without the flag').toBe(false);
+    expect(await binding({ loopback: false }), 'a launch that says no').toBe(false);
+    expect(await binding({ loopback: true }), 'a launch that says yes').toBe(true);
   });
 
   it('allows the development hosts when the launch asks for them', async () => {

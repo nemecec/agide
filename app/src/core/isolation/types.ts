@@ -172,6 +172,8 @@ export interface ToolLaunch {
   readonly network: 'none' | 'development';
   /** Host directories the program may write besides `cwd`. */
   readonly writeDirs: readonly string[];
+  /** The program binds a loopback port or connects to one. Under `srt` that also reaches every loopback service of the host. */
+  readonly loopback?: boolean;
 }
 
 export interface PtyCommand {
