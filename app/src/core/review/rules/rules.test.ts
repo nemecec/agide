@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { POLICY_PATH } from '../policy/schema';
 import { REASON_CATALOGUE, type ReasonId } from '../reasonCatalogue';
@@ -7,13 +8,18 @@ import { assess, ids, otherChangeset, reasonOf, type FileSpec, type InputOptions
 
 /** Every reason of the catalogue that the rules own: a diff that triggers it and one that does not (0040 sections 7 and 19). */
 
-/** Placeholder secrets of the secret detector's tests. They are put together at run time, so that secret scanners do not flag this file. */
+/**
+ * Placeholder secrets of the secret detector's tests. They are put together from parts or made at run time from the hash
+ * of a label, so that the source holds no secret-shaped literal for secret scanners and their generic detectors to flag.
+ */
+const derived = (label: string, length: number): string => createHash('sha256').update(label).digest('base64url').slice(0, length);
+const base64url = (value: object): string => Buffer.from(JSON.stringify(value)).toString('base64url');
 const AWS_KEY_ID = ['AKIA', 'ABCDEFGHIJKLMNOP'].join('');
 const AWS_TEMP_KEY_ID = ['ASIA', 'ABCDEFGHIJKLMNOP'].join('');
 const SLACK_TOKEN = ['xoxb', '1234567890', 'abcdefghij'].join('-');
-const JWT = ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk'].join('.');
-const RANDOM_LITERAL = ['q8Zr3LmX7vB2', 'nKd9Wp5tYh1c'].join('');
-const PASSWORD_VALUE = ['Xk9#mP2$', 'vL8nQ4wZ7rT1yB5c'].join('');
+const JWT = [base64url({ alg: 'HS256' }), base64url({ sub: '1234567890' }), derived('jwt signature', 43)].join('.');
+const RANDOM_LITERAL = derived('long random literal', 24);
+const PASSWORD_VALUE = `${derived('password literal', 20)}#$x`;
 
 type Row = readonly [name: string, options: InputOptions, expected: boolean];
 
