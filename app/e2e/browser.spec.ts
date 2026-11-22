@@ -619,7 +619,16 @@ test('hides the native view behind a still of its page during a drag and shows i
   const tab = await createTab(page, folderId, `${origin}/`);
   await openLeaf(page, fixtureTab());
   await expect.poll(() => tabTitleOf(page, tab)).toBe('Fixture page');
-  await expect.poll(async () => (await invoke<{ stills: unknown[] }>(page, 'browser_views_suspend')).ok && (await invoke(page, 'browser_views_resume')).ok, { message: 'the view is placed in the window' }).toBe(true);
+  await expect
+    .poll(
+      async () => {
+        const suspended = await invoke<{ stills: unknown[] }>(page, 'browser_views_suspend');
+        await invoke(page, 'browser_views_resume');
+        return suspended.ok ? suspended.value.stills.length : 0;
+      },
+      { message: 'the suspend call returns a still for the placed view' },
+    )
+    .toBeGreaterThan(0);
 
   await page.evaluate(() => (globalThis as unknown as { document: { dispatchEvent(event: unknown): void } }).document.dispatchEvent(new (globalThis as unknown as { Event: new (type: string) => unknown }).Event('dragstart')));
   await expect(page.locator('.browser-still'), 'a still of the page, or a placeholder when the capture is unavailable, takes the place of the view while the drag runs').toBeVisible();
