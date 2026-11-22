@@ -7,6 +7,11 @@ import { assess, ids, otherChangeset, reasonOf, type FileSpec, type InputOptions
 
 /** Every reason of the catalogue that the rules own: a diff that triggers it and one that does not (0040 sections 7 and 19). */
 
+/** Placeholder key ids and a token of the secret detector's tests. They are put together at run time, so that secret scanners do not flag this file. */
+const AWS_KEY_ID = ['AKIA', 'ABCDEFGHIJKLMNOP'].join('');
+const AWS_TEMP_KEY_ID = ['ASIA', 'ABCDEFGHIJKLMNOP'].join('');
+const SLACK_TOKEN = ['xoxb', '1234567890', 'abcdefghij'].join('-');
+
 type Row = readonly [name: string, options: InputOptions, expected: boolean];
 
 function table(id: ReasonId, rows: readonly Row[]): void {
@@ -287,11 +292,11 @@ describe('secret.added', () => {
   const secrets: [name: string, line: string][] = [
     ['an RSA private key header', '-----BEGIN RSA PRIVATE KEY-----'],
     ['an OpenSSH private key header', '-----BEGIN OPENSSH PRIVATE KEY-----'],
-    ['an AWS access key id', 'const id = "AKIAABCDEFGHIJKLMNOP";'],
-    ['an AWS temporary access key id', 'const id = "ASIAABCDEFGHIJKLMNOP";'],
+    ['an AWS access key id', `const id = "${AWS_KEY_ID}";`],
+    ['an AWS temporary access key id', `const id = "${AWS_TEMP_KEY_ID}";`],
     ['a GitHub token', `token: ghp_${'a1B2c3D4e5'.repeat(4)}`],
     ['a fine-grained GitHub token', `x = github_pat_${'A1b2C3d4E5f6G7h8I9j0K1'}_rest`],
-    ['a Slack token', 'SLACK=xoxb-1234567890-abcdefghij'],
+    ['a Slack token', `SLACK=${SLACK_TOKEN}`],
     ['an Anthropic key', `key = "sk-ant-${'api03-Abcdefghijklmnopqrstuv'}"`],
     ['an OpenAI key', `OPENAI=sk-proj-${'Abcdefghijklmnopqrstuvwxyz012345'}`],
     ['a JWT', 'auth: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk'],
@@ -306,8 +311,8 @@ describe('secret.added', () => {
   });
 
   it.each([
-    ['a removed line', one({ path: 'a.ts', bodies: ['-const id = "AKIAABCDEFGHIJKLMNOP";\n+const id = process.env.ID;'] })],
-    ['a context line', one({ path: 'a.ts', bodies: [' const id = "AKIAABCDEFGHIJKLMNOP";\n+const x = 1;'] })],
+    ['a removed line', one({ path: 'a.ts', bodies: [`-const id = "${AWS_KEY_ID}";\n+const id = process.env.ID;`] })],
+    ['a context line', one({ path: 'a.ts', bodies: [` const id = "${AWS_KEY_ID}";\n+const x = 1;`] })],
     ['a low-entropy placeholder', one({ path: 'a.ts', add: ['const apiSecret = "aaaaaaaaaaaaaaaaaaaaaaaa";'] })],
     ['a short value', one({ path: 'a.ts', add: ['token = "abc123"'] })],
     ['an environment reference', one({ path: 'a.ts', add: ['const token = process.env.API_TOKEN;'] })],
@@ -318,7 +323,7 @@ describe('secret.added', () => {
   });
 
   it('reads the added lines of a symbolic link', () => {
-    const reasons = assess(one({ path: 'src/link', kind: 'symlink', add: ['const id = "AKIAABCDEFGHIJKLMNOP";'] }));
+    const reasons = assess(one({ path: 'src/link', kind: 'symlink', add: [`const id = "${AWS_KEY_ID}";`] }));
     expect(ids(reasons), 'the link text is searched').toContain('secret.added');
   });
 
@@ -463,7 +468,7 @@ describe('hard floors', () => {
 
   it('keeps the hard reasons of the catalogue hard in what the rules produce', () => {
     const everything = assess({
-      files: [{ path: '.git/hooks/x', add: ['x'] }, { path: 'CLAUDE.md', add: ['x'] }, { path: '.gitattributes', add: ['x'] }, { path: POLICY_PATH, add: ['x'] }, { path: 'db/m.sql', add: ['AKIAABCDEFGHIJKLMNOP'] }],
+      files: [{ path: '.git/hooks/x', add: ['x'] }, { path: 'CLAUDE.md', add: ['x'] }, { path: '.gitattributes', add: ['x'] }, { path: POLICY_PATH, add: ['x'] }, { path: 'db/m.sql', add: [AWS_KEY_ID] }],
       policy: { paths: { migrations: ['db/**'] } },
     });
     for (const reason of everything) expect(reason.hard, `${reason.id} is ${REASON_CATALOGUE[reason.id as ReasonId].hard ? 'hard' : 'soft'} in the catalogue`).toBe(REASON_CATALOGUE[reason.id as ReasonId].hard);
