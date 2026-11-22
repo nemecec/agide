@@ -193,3 +193,24 @@ Claude Code 2.1.330 (earlier probes: 2.1.326). Details in `notes/probes-m4-swarm
 Reviewed by a second agent against the logs and the headless, permission-mode and SDK approval docs; P37, P35 `after_budget` and P31 `pending_permission_control` re-ran and reproduced.
 
 New scripts: `p_swarm_lib.mjs`, `p30_stream_agent.mjs`, `p31_interrupt.mjs`, `p32_control_requests.mjs`, `p33_resume.mjs`, `p34_concurrency.mjs`, `p35_budgets.mjs`, `p36_worktrees.mjs`, `p37_bare.mjs`.
+
+## Milestone 5 review probes P40 to P43 (2026-11-21)
+
+Claude Code 2.1.330, git 2.54.0. Details in `notes/probes-m5-review.md`; evidence in `probes/out/p40_*` to `p43_*`. Haiku, `--max-budget-usd 0.25`, `--setting-sources user` and `--strict-mcp-config` except where a probe compares, fresh directories under `/tmp/agide-p-review/` removed afterwards, at most three concurrent processes, subscription login. Every run cost under one cent; the stored logs of the final runs sum to about 0.17 USD.
+
+| Probe | Result | Short finding |
+|---|---|---|
+| P40 settings isolation | pass (flags), partial (tamper) | `--setting-sources user` drops the project `CLAUDE.md`, skills, `.mcp.json`, hooks and rules; the default launch loads all of them. `--strict-mcp-config` removes every connector and plugin server but leaves `CLAUDE.md` and skills. In an untrusted workspace project `permissions.allow` is ignored (stderr says so) while project deny rules and project hooks apply. A `--settings` file is read at session start: an in-session rewrite did not lift a deny rule (the docs' settings reload does not cover `--settings`). The agent could rewrite the file under `bypassPermissions` in some runs, inside a read-only checkout through `chmod` and outside the working directory through Bash; under `acceptEdits` with the file outside the working directory its attempts were refused, though the one Bash write was chained with the denied `date`. |
+| P41 report tool | pass | `--tools Read,Grep,Glob` leaves exactly those tools plus the MCP tool; `--disallowedTools` removes only the named tools; `--allowedTools` alone leaves Bash and the write tools offered but denied under `-p`. Bash with prefix allow rules runs the allowed commands only. The reviewer calls `report_review` once and then writes a prose recap. A schema violation returns `MCP error -32602 ... Input validation error` as a tool error and the model corrects the call. A denied tool, a server that failed at start and a server that dies mid-session all end with `result.subtype: success` and no report, the model falls back to prose. |
+| P42 checkpoint and diff | pass | Checkpoint with `-c core.hooksPath=/dev/null -c commit.gpgsign=false -c core.fsmonitor=false`, `--no-verify` and an environment author ignores failing hooks and signing, in a repo and in a worktree. A 20 MB file costs about 0.1 s and 21 MB of diff text; thousands of lines over many files cost about 20 ms. Naive parsing loses quoted names and the names of binary, empty and mode-only files; a type change appears as two entries; header-like content lines need hunk-count parsing. `git diff -z --raw` gives unquoted names. A clean filter, an external diff, the fsmonitor program, a hook and textconv run from agent-controlled `.gitattributes` and config unless switched off: `--no-ext-diff --no-textconv`, the `-c` overrides, and `--attr-source` or blanked `filter.*` names for clean filters. |
+| P43 injection and anchoring | pass (small sample) | Over repeated runs no injection changed a verdict in the direction it asked: a hidden bug was still reported as blocker or major, the demanded reject and invented finding did not appear, the canary file was never read. The injection text was reported as a finding and moved a correct diff to revise. No finding named a file outside the diff; in the final run every finding sat on an added line. |
+
+### Design effects
+
+1. The reviewer launch is `--setting-sources user --strict-mcp-config --mcp-config <app file> --tools Read,Grep,Glob --allowedTools <report tool> --permission-mode default` with the app's `--settings` file outside the checkout.
+2. A missing or invalid report is the failure signal; the result subtype is not.
+3. Checkpoint and diff commands need the override set and a clean-filter measure; the diff file list comes from `-z --raw`, the body from a hunk-count parser.
+
+Reviewed by a second agent against the logs and the CLI reference, settings and permissions docs; P42, P41 and the P40 project-rule cases re-ran one process at a time and reproduced.
+
+New scripts: `p_review_lib.mjs`, `p40_settings_isolation.mjs`, `p41_report_tool.mjs`, `p42_diff_parse.mjs`, `p42_checkpoint_diff.mjs`, `p43_injection_anchoring.mjs`.
