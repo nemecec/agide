@@ -140,7 +140,7 @@ export class InMemoryChangesetStore implements ChangesetStore {
   }
 
   baseCheck(commitId: string, policyHash: string): CheckRecord | undefined {
-    const found = [...this.checkRows.values()].find((check) => check.target === 'base' && check.commitId === commitId && check.policyHash === policyHash);
+    const found = [...this.checkRows.values()].findLast((check) => check.target === 'base' && check.commitId === commitId && check.policyHash === policyHash);
     return found === undefined ? undefined : structuredClone(found);
   }
 

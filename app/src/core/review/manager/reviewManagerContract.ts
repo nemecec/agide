@@ -34,7 +34,7 @@ export const WITH_CHECK = policySnapshot(reviewPolicySchema.parse({ version: 1, 
 export const NO_CHECK = policySnapshot();
 /** No send-back on its own, and a contradicted claim and a timed-out check at rung B, so only the accept rule holds them back. */
 export const STRICT = policySnapshot(
-  reviewPolicySchema.parse({ version: 1, retryLimit: 0, check: { command: ['pnpm', 'test'] }, rungs: { 'reviewer.claim_contradicted': 'B', 'check.timed_out': 'B' } }),
+  reviewPolicySchema.parse({ version: 1, retryLimit: 0, check: { command: ['pnpm', 'test'] }, rungs: { 'reviewer.claim_contradicted': 'B', 'check.timed_out': 'B', 'check.base_red': 'B' } }),
   'strict',
 );
 
@@ -115,22 +115,52 @@ export function describeReviewManagerContract(name: string, setup: () => Promise
       await h.manager.submit(timedOut);
       const waiting = await reach(timedOut.id, 'awaiting_human');
       expect(waiting.rung, 'the policy keeps check.timed_out at B').toBe('B');
+
+      const red = capture('base-red', { agent: 'helper', sessionId: 'session-helper', policyHash: STRICT.hash });
+      h.checks.set(red.id, 'failed', 'failed');
+      await h.manager.submit(red);
+      const heldRed = await reach(red.id, 'awaiting_human');
+      expect(heldRed.rung, 'the policy keeps check.base_red at B, and the reviewer still does not accept over a check that fails').toBe('B');
     });
 
-    it('sends a failed check back while attempts remain, and reviews a failure the base shares', async () => {
+    it('sends a failed check back while attempts remain, and holds a check that fails on the base too for the user at rung C', async () => {
       const failing = capture('fail');
-      h.checks.set(failing.id, 'failed');
+      h.checks.set(failing.id, 'failed', 'passed');
       await h.manager.submit(failing);
       await reach(failing.id, 'sent_back');
       expect(h.sendBack.sent.map((sent) => sent.agent), 'the message went to the agent').toEqual(['worker']);
       expect(h.sendBack.sent[0]?.message, 'app text that names the check').toContain('The project check failed');
-      const shared = capture('shared', { agent: 'helper', sessionId: 'session-helper' });
-      h.checks.set(shared.id, 'failed', 'failed');
+      const red = capture('red', { agent: 'helper', sessionId: 'session-helper' });
+      h.checks.set(red.id, 'failed', 'failed');
       h.setReviewer(accepting);
-      await h.manager.submit(shared);
-      const done = await reach(shared.id, 'accepted');
-      expect(done.rung, 'check.failed_on_base keeps rung B').toBe('B');
-      expect(detail(shared.id).decisions.at(-1)?.actor, 'the reviewer accepted').toBe('reviewer');
+      await h.manager.submit(red);
+      const waiting = await reach(red.id, 'awaiting_human');
+      expect(waiting.rung, 'check.base_red is rung C, as check.failed is: a red base never lowers the rung').toBe('C');
+      expect(h.sendBack.sent.map((sent) => sent.agent), 'a check that fails on the base too is not sent back').toEqual(['worker']);
+      expect(detail(red.id).reasons.map((reason) => reason.id), 'the reason is check.base_red').toContain('check.base_red');
+      expect(detail(red.id).checks.map((check) => `${check.target}:${check.outcome}`), 'the card compares the checkpoint run with the base run').toEqual(['checkpoint:failed', 'base:failed']);
+    });
+
+    it('stores a base run that passed or failed and leaves out one that did not run, so it cannot hide an earlier result', async () => {
+      const fine = capture('base-fine');
+      h.checks.set(fine.id, 'passed', 'passed');
+      await h.manager.submit(fine);
+      await reach(fine.id, 'accepted');
+      const unsure = capture('base-unsure', { agent: 'helper', sessionId: 'session-helper' });
+      h.checks.set(unsure.id, 'failed', 'not_run');
+      h.setReviewer(accepting);
+      await h.manager.submit(unsure);
+      await reach(unsure.id, 'sent_back');
+      expect(detail(unsure.id).checks.map((check) => `${check.target}:${check.outcome}`), 'the card shows the checkpoint run and the latest stored base run of the pair, which is the green one').toEqual(['checkpoint:failed', 'base:passed']);
+    });
+
+    it('does not send a checkpoint that did not run back when the base is red either, and holds it at rung C', async () => {
+      const unsure = capture('unsure');
+      h.checks.set(unsure.id, 'not_run', 'failed');
+      h.setReviewer(accepting);
+      await h.manager.submit(unsure);
+      const waiting = await reach(unsure.id, 'awaiting_human');
+      expect([waiting.rung, h.sendBack.sent.length], 'rung C and nothing sent back').toEqual(['C', 0]);
     });
 
     it('lets the reviewer accept at rung B only, and waits for the user when a finding is major', async () => {

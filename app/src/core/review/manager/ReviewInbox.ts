@@ -2,12 +2,14 @@ import { cleanLine, MESSAGE_MAX, type InboxService, type NewItem, type Resolutio
 import type { SwarmId } from '../../swarm/types';
 import { rungIndex } from '../rungs';
 import { BLOCKING_SEVERITIES, type ChangesetRecord, type DecisionRecord, type Reason } from '../schemas';
-import { REPO_ALERT_ORIGIN, REVIEW_ITEM_ORIGIN, type ChangesetStore, type ReviewEvent, type ReviewItemPayload, type ReviewSwarmFacts } from '../types';
+import { BASE_ALERT_ORIGIN, REPO_ALERT_ORIGIN, REVIEW_ITEM_ORIGIN, type ChangesetStore, type ReviewEvent, type ReviewItemPayload, type ReviewSwarmFacts } from '../types';
 
 const SOURCE = 'app';
 
 export const repositoryAlertKey = (swarmId: SwarmId): string => `review:repo:${swarmId}`;
+export const baseAlertKey = (swarmId: SwarmId, baseCommit: string, policyHash: string): string => `review:base:${swarmId}:${baseCommit}:${policyHash}`;
 export const reviewItemKey = (swarmId: SwarmId, agent: string): string => `review:${swarmId}:${agent}`;
+const COMMAND_SHOWN = 70;
 const capped = (message: string): string => {
   const line = cleanLine(message);
   return line.length > MESSAGE_MAX ? `${line.slice(0, MESSAGE_MAX - 1)}…` : line;
@@ -19,6 +21,9 @@ const capped = (message: string): string => {
  * changeset tables, so it is rebuilt from the next event after a restart and its state is the inbox's own.
  */
 export class ReviewInbox {
+  /** The bases an alert was posted for, so a base that stays red does not post again, not even after the user dismissed the alert. */
+  private readonly alerted = new Set<string>();
+
   constructor(
     private readonly inbox: InboxService,
     private readonly store: ChangesetStore,
@@ -28,8 +33,47 @@ export class ReviewInbox {
   /** Listener for `ReviewManager.subscribe`. */
   onEvent = (event: ReviewEvent): void => {
     if (event.type !== 'review.changed') return;
+    this.safely(() => this.watchBase(event.changesetId));
     this.safely(() => this.follow(event.changesetId));
   };
+
+  /**
+   * One alert for each base commit and policy whose check is red, and no alert for each changeset; a green base run
+   * resolves the alerts of the swarm. The text is the app's own, with the command of the policy and nothing from the
+   * output of the check.
+   */
+  private watchBase(changesetId: string): void {
+    const changeset = this.store.get(changesetId);
+    if (changeset === undefined) return;
+    const base = this.store.baseCheck(changeset.baseCommit, changeset.policyHash);
+    if (base?.outcome === 'passed') {
+      this.resolveBaseAlerts(changeset.swarmId);
+      return;
+    }
+    if (base?.outcome !== 'failed') return;
+    const key = baseAlertKey(changeset.swarmId, changeset.baseCommit, changeset.policyHash);
+    if (this.alerted.has(key)) return;
+    this.alerted.add(key);
+    const command = base.command.join(' ');
+    const shown = command.length > COMMAND_SHOWN ? `${command.slice(0, COMMAND_SHOWN - 1)}…` : command;
+    this.item({
+      kind: 'alert',
+      urgency: 'high',
+      origin: BASE_ALERT_ORIGIN,
+      message: `The check fails on the base commit: ${shown}`,
+      details: `The check fails on the base commit: ${command}. Reviews stay at rung C until the base is green: fix the base, or change check.command in the policy.`,
+      payload: { swarmId: changeset.swarmId, baseCommit: changeset.baseCommit, policyHash: changeset.policyHash },
+      dedupeKey: key,
+      swarmId: changeset.swarmId,
+    });
+  }
+
+  private resolveBaseAlerts(swarmId: SwarmId): void {
+    for (const key of [...this.alerted]) if (key.startsWith(`review:base:${swarmId}:`)) this.alerted.delete(key);
+    for (const open of this.inbox.list({ kinds: ['alert'], states: ['new', 'seen', 'snoozed'] })) {
+      if (open.origin === BASE_ALERT_ORIGIN && (open.payload as { swarmId?: unknown } | undefined)?.swarmId === swarmId) this.inbox.resolve(open.id, 'superseded');
+    }
+  }
 
   private follow(changesetId: string): void {
     const changeset = this.store.get(changesetId);

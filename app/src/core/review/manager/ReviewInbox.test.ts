@@ -5,7 +5,7 @@ import { InMemoryTreeService } from '../../tree/InMemoryTreeService';
 import { catalogueReason, FakeReviewBudget } from '../fakes/fakes';
 import { captureFixture, policySnapshot } from '../fakes/fixtures';
 import { reviewPolicySchema } from '../policy/schema';
-import { REVIEW_ITEM_ORIGIN, type ReviewCaller } from '../types';
+import { BASE_ALERT_ORIGIN, REVIEW_ITEM_ORIGIN, type ReviewCaller } from '../types';
 import { persistentRig, type PersistentRig } from './persistentRig';
 import { reportStep } from './reviewManagerContract';
 import { describeRepoChange, ReviewInbox } from './ReviewInbox';
@@ -198,6 +198,86 @@ describe('review items in the inbox', () => {
     }, 'every call swallows the failure').not.toThrow();
     expect(warn, 'each failure is logged').toHaveBeenCalledTimes(4);
     warn.mockRestore();
+  });
+});
+
+describe('the alert for a check that fails on the base commit', () => {
+  const alerts = (inbox: InMemoryInboxService, states: ('new' | 'seen' | 'snoozed' | 'done')[] = ['new', 'seen', 'snoozed']) => inbox.list({ kinds: ['alert'], states }).filter((item) => item.origin === BASE_ALERT_ORIGIN);
+
+  it('posts one alert for the base, with the command of the policy, and none for a second or third changeset on it', async () => {
+    const { inbox, until, rig } = setup();
+    const first = captureFixture({ seed: 'red-1', policyHash: PASSING.hash });
+    rig.checks.set(first.id, 'failed', 'failed');
+    await rig.manager.submit(first);
+    await until(() => alerts(inbox).length === 1, 'the alert');
+    const second = captureFixture({ seed: 'red-2', agent: 'helper', sessionId: 'session-helper', policyHash: PASSING.hash });
+    rig.checks.set(second.id, 'passed', 'failed');
+    await rig.manager.submit(second);
+    await until(() => rig.store.get(second.id)?.state === 'in_review' || rig.store.get(second.id)?.state === 'awaiting_human' || rig.store.get(second.id)?.state === 'accepted', 'the second changeset');
+    const [alert] = alerts(inbox);
+    expect(alert, 'an alert of the app in the folder of the swarm').toMatchObject({ kind: 'alert', origin: BASE_ALERT_ORIGIN, urgency: 'high', textAuthor: 'app', source: 'app', occurrences: 1 });
+    expect(alerts(inbox).length, 'one alert for the base, not one per changeset').toBe(1);
+    expect(alert!.message, 'the headline names the command').toBe('The check fails on the base commit: pnpm test');
+    expect(alert!.details, 'the text of the decision').toBe('The check fails on the base commit: pnpm test. Reviews stay at rung C until the base is green: fix the base, or change check.command in the policy.');
+    expect(alert!.payload, 'the payload names the swarm, the base commit and the policy').toEqual({ swarmId: 'sw1', baseCommit: rig.store.get(first.id)!.baseCommit, policyHash: PASSING.hash });
+    expect(`${alert!.message} ${alert!.details}`, 'nothing of the output of the check is in the alert').not.toContain('FAIL one test');
+  });
+
+  it('does not post again for a base that stays red after the user dismissed the alert', async () => {
+    const { inbox, until, rig } = setup();
+    const first = captureFixture({ seed: 'dismissed-1', policyHash: PASSING.hash });
+    rig.checks.set(first.id, 'failed', 'failed');
+    await rig.manager.submit(first);
+    await until(() => alerts(inbox).length === 1, 'the alert');
+    inbox.resolve(alerts(inbox)[0]!.id, 'dismissed');
+    const again = captureFixture({ seed: 'dismissed-2', policyHash: PASSING.hash });
+    rig.checks.set(again.id, 'failed', 'failed');
+    await rig.manager.submit(again);
+    await until(() => rig.store.get(again.id)?.state === 'awaiting_human', 'the second changeset');
+    expect([alerts(inbox).length, alerts(inbox, ['done']).length], 'no open alert and one dismissed one').toEqual([0, 1]);
+  });
+
+  it('posts again for another base commit or policy that is red', async () => {
+    const { inbox, until, rig } = setup();
+    const first = captureFixture({ seed: 'pair-1', policyHash: PASSING.hash });
+    rig.checks.set(first.id, 'failed', 'failed');
+    await rig.manager.submit(first);
+    await until(() => alerts(inbox).length === 1, 'the first alert');
+    const other = policySnapshot(reviewPolicySchema.parse({ version: 1, check: { command: ['pnpm', 'lint'] } }), 'inbox-other');
+    rig.store.putPolicy(other);
+    const second = captureFixture({ seed: 'pair-2', agent: 'helper', sessionId: 'session-helper', policyHash: other.hash });
+    rig.checks.set(second.id, 'failed', 'failed');
+    await rig.manager.submit(second);
+    await until(() => alerts(inbox).length === 2, 'the second alert');
+    expect(alerts(inbox).map((item) => item.message).sort(), 'one alert per policy, each with its command').toEqual(['The check fails on the base commit: pnpm lint', 'The check fails on the base commit: pnpm test']);
+  });
+
+  it('resolves the alert when a later base run is green', async () => {
+    const { inbox, until, rig } = setup();
+    const red = captureFixture({ seed: 'turn-1', policyHash: PASSING.hash });
+    rig.checks.set(red.id, 'failed', 'failed');
+    await rig.manager.submit(red);
+    await until(() => alerts(inbox).length === 1, 'the alert');
+    const green = captureFixture({ seed: 'turn-2', agent: 'helper', sessionId: 'session-helper', policyHash: PASSING.hash });
+    rig.checks.set(green.id, 'passed', 'passed');
+    await rig.manager.submit(green);
+    await until(() => alerts(inbox).length === 0, 'the alert to end');
+    expect(alerts(inbox, ['done'])[0], 'the alert is resolved, not deleted').toMatchObject({ state: 'done', resolution: 'superseded' });
+  });
+
+  it('posts no alert when the base run did not run or timed out, or the check passes on a green base', async () => {
+    const { inbox, rig } = setup();
+    const unsure = captureFixture({ seed: 'none-1', policyHash: PASSING.hash });
+    rig.checks.set(unsure.id, 'failed', 'not_run');
+    await rig.manager.submit(unsure);
+    const slow = captureFixture({ seed: 'none-3', policyHash: PASSING.hash });
+    rig.checks.set(slow.id, 'passed', 'timed_out');
+    await rig.manager.submit(slow);
+    const fine = captureFixture({ seed: 'none-2', agent: 'helper', sessionId: 'session-helper', policyHash: PASSING.hash });
+    rig.checks.set(fine.id, 'passed', 'passed');
+    await rig.manager.submit(fine);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(alerts(inbox, ['new', 'seen', 'snoozed', 'done']).length, 'a base that did not run or timed out is not red').toBe(0);
   });
 });
 

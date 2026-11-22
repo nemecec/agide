@@ -74,7 +74,7 @@ export class FakeCheckExecutor implements CheckExecutor {
 
 /**
  * Rules that return the reasons set per changeset id (or per agent), plus `check.failed` for a failed checkpoint
- * that the base does not share, `check.failed_on_base` when it does, and `check.none` without a check command,
+ * that the base does not share, `check.base_red` when it does (also for a checkpoint that did not run), and `check.none` without a check command,
  * each at the policy's `rungs` entry when it has one.
  */
 export class FakeRiskRules implements RiskRules {
@@ -93,9 +93,9 @@ export class FakeRiskRules implements RiskRules {
     const rungs = input.policy.effective.rungs;
     const fromPolicy = (id: ReasonId): Reason => catalogueReason(id, rungs[id] === undefined ? {} : { minRung: rungs[id] });
     if (input.policy.effective.check === undefined) reasons.push(fromPolicy('check.none'));
-    else if (check?.checkpoint.outcome === 'failed') reasons.push(fromPolicy(check.base?.outcome === 'failed' ? 'check.failed_on_base' : 'check.failed'));
+    else if (check?.checkpoint.outcome === 'failed') reasons.push(fromPolicy(check.base?.outcome === 'failed' ? 'check.base_red' : 'check.failed'));
     else if (check?.checkpoint.outcome === 'timed_out') reasons.push(fromPolicy('check.timed_out'));
-    else if (check?.checkpoint.outcome === 'not_run') reasons.push(fromPolicy('check.not_run'));
+    else if (check?.checkpoint.outcome === 'not_run') reasons.push(fromPolicy(check.base?.outcome === 'failed' ? 'check.base_red' : 'check.not_run'));
     return reasons;
   }
 }

@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -9,8 +9,8 @@ import type { Caller } from '../../core/commands/types';
 import { catalogueReason, FakeCheckExecutor, FakeRiskRules } from '../../core/review/fakes/fakes';
 import { captureFixture, policySnapshot } from '../../core/review/fakes/fixtures';
 import { REVIEW_COMMANDS, ReviewError, reviewPolicySchema, type CaptureResult, type CaptureService, type Reason } from '../../core/review/index';
-import { checkCacheDirectory } from '../../core/review/capture/index';
 import { repoDifferenceHash } from '../../core/review/capture/GitCaptureService';
+import { DEFAULT_PROFILE_ID, FileProfileStore, profilePaths } from '../../core/profile/index';
 import { startAppModules, type AppModules } from '../appForTests';
 import type { SwarmModuleService } from './swarm';
 
@@ -21,7 +21,7 @@ let app: AppModules | undefined;
 const NO_CHECK = policySnapshot(reviewPolicySchema.parse({ version: 1 }), 'module');
 
 async function until<T>(read: () => T | false | undefined, what: string): Promise<T> {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 15_000;
   for (;;) {
     const found = read();
     if (found !== false && found !== undefined) return found;
@@ -166,6 +166,101 @@ describe('review module in the real module graph', () => {
     expect([store.checks(unit.id)[0]?.outcome, store.checks(unit.id)[0]?.notRunReason], 'the check did not run with more power than the agent had').toEqual(['not_run', 'the sandbox runtime is not installed']);
     expect(store.reasons(unit.id).map((reason) => reason.id), 'a check that did not run is a reason').toContain('check.not_run');
   });
+
+  it('runs the check of a confined profile under srt with the data directory, the profile tools and the home credentials denied for reads', async () => {
+    const copy = join(taskBase, 'srt-settings-copy.json');
+    const fakeSrt = join(taskBase, 'fake-srt');
+    writeFileSync(fakeSrt, `#!/bin/sh\ncp "$2" '${copy}'\nexit 0\n`, { mode: 0o755 });
+    process.env['AGIDE_SRT_BIN'] = fakeSrt;
+    const repo = join(taskBase, 'repo');
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, env: { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't.invalid', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't.invalid' }, encoding: 'utf8' }).trim();
+    mkdirSync(join(repo, '.agide'), { recursive: true });
+    git('init', '-q', '-b', 'main');
+    writeFileSync(join(repo, 'a.txt'), 'one\n');
+    writeFileSync(join(repo, '.agide', 'review-policy.json'), JSON.stringify({ version: 1, check: { command: ['true'] } }));
+    git('add', '-A');
+    git('commit', '-q', '-m', 'base');
+    app = await startAppModules({ dataDir: dir });
+    app.services.profile.store.updateSettings(app.services.profile.id, { permissions: { defaultMode: 'auto', network: { bashSandbox: true, allow: [], deny: [] }, trustAppCreatedFolders: false } } as never);
+    const started = (await invoke('swarm_start', { definition: { version: 1, goal: 'denied reads', repository: { path: repo, base: 'main' }, budget: { usdTotal: 2 }, agents: [{ name: 'worker', workspace: 'worktree', prompt: '/sleep 600\n/text done' }] } })) as { ok: boolean; value: { swarmId: string } };
+    const swarmId = started.value.swarmId;
+    const cwd = await until(() => app!.services.swarm.manager.status(swarmId, { kind: 'ui' }).agents[0]?.cwd, 'the worktree');
+    writeFileSync(join(cwd, 'b.ts'), 'export const work = 1;\n');
+    const { store } = app.services.review;
+    const unit = await until(() => store.list({ swarmId })[0], 'the capture');
+    await until(() => (store.checks(unit.id).length > 0 && store.checks(unit.id)[0]?.outcome !== 'running' ? true : undefined), 'the check record');
+    const settings = JSON.parse(readFileSync(copy, 'utf8')) as { filesystem: { denyRead: string[]; allowWrite: string[] } };
+    const denied = settings.filesystem.denyRead;
+    expect(denied, 'the data directory of the profile, with the review store and the patches of other swarms').toContain(dir);
+    expect(denied.some((path) => join(dir, 'profiles', DEFAULT_PROFILE_ID, 'tools').startsWith(`${path}/`)), 'the credentials of the profile are below a denied directory').toBe(true);
+    expect(denied, 'the credential locations of the home directory').toContain(join(homedir(), '.ssh'));
+    const inherited = process.env['CLAUDE_CONFIG_DIR'];
+    const claude = inherited?.startsWith('/') === true ? [inherited] : [join(homedir(), '.claude'), join(homedir(), '.claude.json')];
+    expect(denied, 'the Claude directory of the default login (and its file beside it), which holds the transcripts of the agents and reviewers').toEqual(expect.arrayContaining(claude));
+    expect(settings.filesystem.allowWrite.some((path) => path === dir || path === homedir()), 'the data directory and the home directory are not writable').toBe(false);
+  });
+
+  it('denies the check the app root, so the data, tools and registry of the other profiles are unreadable too', async () => {
+    const root = join(taskBase, 'app-root');
+    const store = new FileProfileStore({ root, ownerId: DEFAULT_PROFILE_ID });
+    store.create({ id: DEFAULT_PROFILE_ID, name: 'Default', colour: '#5b7fa6' });
+    const copy = join(taskBase, 'srt-settings-copy.json');
+    const fakeSrt = join(taskBase, 'fake-srt');
+    writeFileSync(fakeSrt, `#!/bin/sh\ncp "$2" '${copy}'\nexit 0\n`, { mode: 0o755 });
+    process.env['AGIDE_SRT_BIN'] = fakeSrt;
+    const repo = join(taskBase, 'repo');
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, env: { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't.invalid', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't.invalid' }, encoding: 'utf8' }).trim();
+    mkdirSync(join(repo, '.agide'), { recursive: true });
+    git('init', '-q', '-b', 'main');
+    writeFileSync(join(repo, 'a.txt'), 'one\n');
+    writeFileSync(join(repo, '.agide', 'review-policy.json'), JSON.stringify({ version: 1, check: { command: ['true'] } }));
+    git('add', '-A');
+    git('commit', '-q', '-m', 'base');
+    app = await startAppModules({ dataDir: profilePaths(root, DEFAULT_PROFILE_ID).data, profile: { root, id: DEFAULT_PROFILE_ID } });
+    app.services.profile.store.updateSettings(app.services.profile.id, { permissions: { defaultMode: 'auto', network: { bashSandbox: true, allow: [], deny: [] }, trustAppCreatedFolders: false } } as never);
+    const started = (await invoke('swarm_start', { definition: { version: 1, goal: 'app root', repository: { path: repo, base: 'main' }, budget: { usdTotal: 2 }, agents: [{ name: 'worker', workspace: 'worktree', prompt: '/sleep 600\n/text done' }] } })) as { ok: boolean; value: { swarmId: string } };
+    const swarmId = started.value.swarmId;
+    const cwd = await until(() => app!.services.swarm.manager.status(swarmId, { kind: 'ui' }).agents[0]?.cwd, 'the worktree');
+    writeFileSync(join(cwd, 'b.ts'), 'export const work = 1;\n');
+    const { store: reviewStore } = app.services.review;
+    const unit = await until(() => reviewStore.list({ swarmId })[0], 'the capture');
+    await until(() => (reviewStore.checks(unit.id).length > 0 && reviewStore.checks(unit.id)[0]?.outcome !== 'running' ? true : undefined), 'the check record');
+    const denied = (JSON.parse(readFileSync(copy, 'utf8')) as { filesystem: { denyRead: string[] } }).filesystem.denyRead;
+    const covered = (path: string): boolean => denied.some((entry) => path === entry || path.startsWith(`${entry}/`));
+    expect(denied, 'the app root itself, not only the data directory of this profile').toContain(root);
+    expect([covered(join(root, 'profiles', 'sibling', 'data', 'review', 'swarm', 'patch')), covered(join(root, 'profiles', 'sibling', 'claude')), covered(join(root, 'registry', 'profiles.json'))], 'the data and Claude directories of a sibling profile and the registry').toEqual([true, true, true]);
+    expect(covered(join(taskBase, 'review-checks')), 'the checkouts of the check live below the task base, which stays readable').toBe(false);
+  });
+
+  it('starts no check before the leftovers of a killed app are removed', async () => {
+    // The first `lsof` is slow, which is the one of the sweep at module start: it stays busy for longer than the swarm needs to reach its first check, and the sweep of the first run (the second call) is fast.
+    const bin = join(taskBase, 'slow-bin');
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, 'lsof'), `#!/bin/sh\nif mkdir '${join(bin, 'first-call')}' 2>/dev/null; then sleep 4; fi\nexec /usr/sbin/lsof "$@"\n`, { mode: 0o755 });
+    process.env['PATH'] = `${bin}:${process.env['PATH'] ?? ''}`;
+    const leftover = join(taskBase, 'review-checks', DEFAULT_PROFILE_ID, 'sw1', 'chk_0123456789abcdef');
+    mkdirSync(leftover, { recursive: true });
+    const seen = join(taskBase, 'leftover-seen-by-the-check');
+    const fakeSrt = join(taskBase, 'fake-srt');
+    writeFileSync(fakeSrt, `#!/bin/sh\nif [ -e '${leftover}' ]; then echo present > '${seen}'; else echo absent > '${seen}'; fi\nexit 0\n`, { mode: 0o755 });
+    process.env['AGIDE_SRT_BIN'] = fakeSrt;
+    const repo = join(taskBase, 'repo');
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, env: { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't.invalid', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't.invalid' }, encoding: 'utf8' }).trim();
+    mkdirSync(join(repo, '.agide'), { recursive: true });
+    git('init', '-q', '-b', 'main');
+    writeFileSync(join(repo, 'a.txt'), 'one\n');
+    writeFileSync(join(repo, '.agide', 'review-policy.json'), JSON.stringify({ version: 1, check: { command: ['true'] } }));
+    git('add', '-A');
+    git('commit', '-q', '-m', 'base');
+    app = await startAppModules({ dataDir: dir });
+    app.services.profile.store.updateSettings(app.services.profile.id, { permissions: { defaultMode: 'auto', network: { bashSandbox: true, allow: [], deny: [] }, trustAppCreatedFolders: false } } as never);
+    const started = (await invoke('swarm_start', { definition: { version: 1, goal: 'leftovers', repository: { path: repo, base: 'main' }, budget: { usdTotal: 2 }, agents: [{ name: 'worker', workspace: 'worktree', prompt: '/sleep 600\n/text done' }] } })) as { ok: boolean; value: { swarmId: string } };
+    const cwd = await until(() => app!.services.swarm.manager.status(started.value.swarmId, { kind: 'ui' }).agents[0]?.cwd, 'the worktree');
+    writeFileSync(join(cwd, 'b.ts'), 'export const work = 1;\n');
+    const deadline = Date.now() + 25_000;
+    while (!existsSync(seen) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(readFileSync(seen, 'utf8').trim(), 'the leftover checkout was gone when the first check started').toBe('absent');
+  }, 40_000);
 
   it('sends a changeset to the person without a reviewer run when a user skill changed after the swarm started', async () => {
     const claude = join(taskBase, 'claude-config');
@@ -431,17 +526,22 @@ describe('review module in the real module graph', () => {
       expect((alert.payload as { repoDifferenceHash?: string }).repoDifferenceHash, 'the alert carries the hash the accept needs').toBe(repoDifferenceHash([armed]));
     });
 
-    it('removes the check cache directory of a swarm when the swarm is removed', async () => {
-      const { service } = capturing({});
-      const running = await connected(service);
-      const started = (await invoke('swarm_start', { definition: definition(repository()) })) as { ok: boolean; value: { swarmId: string } };
-      const swarmId = started.value.swarmId;
-      const cache = checkCacheDirectory(dir, swarmId);
-      mkdirSync(join(cache, 'npm'), { recursive: true });
-      writeFileSync(join(cache, 'npm', 'entry'), 'cached\n');
-      await invoke('swarm_stop', { swarmId });
-      expect(await (running.services.swarm as SwarmModuleService).manager.remove(swarmId, {}, { kind: 'ui' }), 'the swarm is removed').toMatchObject({ removed: true });
-      await until(() => (existsSync(cache) ? undefined : true), 'the cache directory to go');
+    it('removes the clones, the checkouts with their temporary directories and the settings files a killed app left behind when the module starts', async () => {
+      const leftover = join(taskBase, 'review-check-caches', DEFAULT_PROFILE_ID, 'chk_killed');
+      mkdirSync(join(leftover, 'npm', '_cacache'), { recursive: true });
+      writeFileSync(join(leftover, 'npm', '_cacache', 'entry'), 'cached\n');
+      const checkout = join(taskBase, 'review-checks', DEFAULT_PROFILE_ID, 'sw1', 'chk_0123456789abcdef');
+      mkdirSync(checkout, { recursive: true });
+      mkdirSync(`${checkout}-tmp`);
+      writeFileSync(join(`${checkout}-tmp`, 'scratch'), 'what the check wrote\n');
+      const settings = join(dir, 'isolation', 'srt-checks', 'chk_0123456789abcdef-command.json');
+      mkdirSync(join(dir, 'isolation', 'srt-checks'), { recursive: true });
+      writeFileSync(settings, '{}\n');
+      const otherProfile = join(taskBase, 'review-checks', 'other', 'sw1', 'chk_fedcba9876543210');
+      mkdirSync(otherProfile, { recursive: true });
+      app = await startAppModules({ dataDir: dir });
+      await until(() => (existsSync(leftover) || existsSync(checkout) || existsSync(`${checkout}-tmp`) || existsSync(settings) ? undefined : true), 'the leftover directories and the settings file to go');
+      expect(existsSync(otherProfile), 'the checkouts of another profile are not this profile\'s to remove').toBe(true);
     });
 
     it('raises no repository alert for a change the user already accepted', async () => {

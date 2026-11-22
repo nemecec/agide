@@ -460,7 +460,7 @@ export class SqliteChangesetStore implements ChangesetStore {
   }
 
   baseCheck(commitId: string, policyHash: string): CheckRecord | undefined {
-    const row = this.one("SELECT * FROM review_checks WHERE target = 'base' AND commit_id = ? AND policy_hash = ? ORDER BY rowid LIMIT 1", [commitId, policyHash]);
+    const row = this.one("SELECT * FROM review_checks WHERE target = 'base' AND commit_id = ? AND policy_hash = ? ORDER BY rowid DESC LIMIT 1", [commitId, policyHash]);
     return row === undefined ? undefined : checkOf(row);
   }
 

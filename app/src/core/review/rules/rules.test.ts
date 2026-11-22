@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { POLICY_PATH } from '../policy/schema';
 import { REASON_CATALOGUE, type ReasonId } from '../reasonCatalogue';
-import { computeRung } from '../rungs';
-import type { StoredReason } from '../schemas';
+import { computeRung, rungIndex } from '../rungs';
+import type { Rung, StoredReason } from '../schemas';
 import { assess, ids, otherChangeset, reasonOf, type FileSpec, type InputOptions } from './ruleFixtures';
 
 /** Every reason of the catalogue that the rules own: a diff that triggers it and one that does not (0040 sections 7 and 19). */
@@ -43,14 +43,41 @@ describe('check reasons', () => {
   table('check.failed', [
     ['the check failed and the base passed', { check: { checkpoint: 'failed', base: 'passed' } }, true],
     ['the check failed and no base run exists', { check: { checkpoint: 'failed' } }, true],
+    ['the check failed and the base did not run', { check: { checkpoint: 'failed', base: 'not_run' } }, true],
     ['the check failed on the base too', { check: { checkpoint: 'failed', base: 'failed' } }, false],
     ['the check passed', { check: { checkpoint: 'passed' } }, false],
     ['the check was not run yet', {}, false],
   ]);
-  table('check.failed_on_base', [
+  table('check.base_red', [
     ['failed on both', { check: { checkpoint: 'failed', base: 'failed' } }, true],
+    ['not run on the checkpoint, failed on the base', { check: { checkpoint: 'not_run', base: 'failed' } }, true],
     ['failed only on the checkpoint', { check: { checkpoint: 'failed', base: 'passed' } }, false],
+    ['passed on the checkpoint, failed on the base: the change made the base green', { check: { checkpoint: 'passed', base: 'failed' } }, false],
+    ['timed out on the checkpoint, failed on the base', { check: { checkpoint: 'timed_out', base: 'failed' } }, false],
+    ['failed on the checkpoint, the base did not run', { check: { checkpoint: 'failed', base: 'not_run' } }, false],
   ]);
+  it('gives check.base_red the rung of check.failed, with a card text that says the base fails and the user decides', () => {
+    const red = reasonOf(assess({ check: { checkpoint: 'failed', base: 'failed' } }), 'check.base_red')!;
+    const own = reasonOf(assess({ check: { checkpoint: 'failed', base: 'passed' } }), 'check.failed')!;
+    expect([red.minRung, red.source, red.hard], 'rung C from the check, not hard').toEqual(['C', 'check', false]);
+    expect(red.minRung, 'the same rung as a failure the base does not share').toBe(own.minRung);
+    expect(red.subject, 'the card says that the check fails on the base commit as well, why that matters and that the user decides').toMatch(/fails on the base commit as well.*cannot tell good changes from bad.*user decides/);
+  });
+  it('raises no check reason for a checkpoint that passes, whatever the base did', () => {
+    for (const base of [undefined, 'passed', 'failed', 'timed_out', 'not_run'] as const) {
+      const reasons = ids(assess({ check: { checkpoint: 'passed', ...(base === undefined ? {} : { base }) } }));
+      expect(reasons.filter((id) => id.startsWith('check.')), `no check reason for base ${base}`).toEqual([]);
+    }
+  });
+  it('keeps a changeset whose check did not pass at rung C or higher for every combination of outcomes, so no base run lowers the rung', () => {
+    const outcomes = ['passed', 'failed', 'timed_out', 'not_run', 'running'] as const;
+    for (const checkpoint of outcomes.filter((outcome) => outcome !== 'passed' && outcome !== 'running')) {
+      for (const base of [undefined, ...outcomes]) {
+        const reasons = assess({ check: { checkpoint, ...(base === undefined ? {} : { base }) } });
+        expect(rungIndex(computeRungOf(reasons) as Rung), `rung of a checkpoint that ${checkpoint} with a base that ${base ?? 'is missing'}`).toBeGreaterThanOrEqual(rungIndex('C'));
+      }
+    }
+  });
   table('check.timed_out', [
     ['timed out', { check: { checkpoint: 'timed_out' } }, true],
     ['passed', { check: { checkpoint: 'passed' } }, false],

@@ -28,6 +28,8 @@ export interface ModuleContext {
    * module then runs one in-memory `default` profile on `dataDir`.
    */
   readonly profile?: ResolvedProfile;
+  /** The app's logs and crash dump directories, which sandboxed programs of the app may not read. Absent in tests. */
+  readonly protectedReadDirs?: readonly string[];
   /** Notifications and the dock badge. Absent in tests that run without Electron. */
   readonly desktop?: Desktop;
   /** Browser views of `browser-tab` leaves (0026). Absent in tests that run without Electron. */

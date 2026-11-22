@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { ANTHROPIC_HOSTS, buildSrtSettings, claudeTempDir, DEVELOPMENT_HOSTS, srtAllowedDomains } from './srtSettings';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ANTHROPIC_HOSTS, buildSrtSettings, buildToolSrtSettings, claudeTempDir, DEVELOPMENT_HOSTS, srtAllowedDomains } from './srtSettings';
 
 const base = { writeDirs: ['/work/project'], claudeConfigDir: '/data/claude', network: { mode: 'unrestricted' } as const, home: '/home/u', uid: 501, platform: 'darwin' as const };
 
@@ -56,5 +59,25 @@ describe('srtAllowedDomains', () => {
 
   it('uses the development hosts for an unrestricted policy, because srt has no allow-everything entry', () => {
     expect(srtAllowedDomains({ mode: 'unrestricted' }), 'development hosts').toEqual(expect.arrayContaining([...DEVELOPMENT_HOSTS]));
+  });
+});
+
+describe('buildToolSrtSettings', () => {
+  it('denies reads for each path in both spellings, since Seatbelt matches resolved paths', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'srt-deny-'));
+    try {
+      mkdirSync(join(dir, 'data'));
+      const link = join(dir, 'link');
+      symlinkSync(dir, link);
+      const settings = buildToolSrtSettings({ writeDirs: ['/work'], network: 'none', extraDenyRead: [join(link, 'data'), '/does/not/exist'] });
+      expect(new Set(settings.filesystem.denyRead), 'the link spelling, the resolved spelling and a path that does not exist').toEqual(new Set([join(link, 'data'), join(realpathSync(dir), 'data'), '/does/not/exist']));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('denies nothing without entries and allows no host for network none', () => {
+    const settings = buildToolSrtSettings({ writeDirs: ['/work'], network: 'none' });
+    expect([settings.filesystem.denyRead, settings.network.allowedDomains], 'no deny entries and no hosts').toEqual([[], []]);
   });
 });

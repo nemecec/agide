@@ -4,20 +4,25 @@ import { untrusted } from './reasons';
 
 /** Reasons from the check, the run telemetry, the claim and the retry count (0040 section 7.2). */
 
+/** The card text of `check.base_red`: the rung is the one of `check.failed`; only the automatic send-back is left out. */
+const BASE_RED = 'the check fails on the base commit as well, so it cannot tell good changes from bad; the code is not sent back for it, and the user decides';
+
 export function checkReasons(ctx: RuleContext): Reason[] {
   const { policy, input, make } = ctx;
   if (policy.check === undefined) return [make('check.none', { evidence: { policyHash: input.policy.hash } })];
   const check = input.check;
   if (check === undefined) return [];
   const { checkpoint, base } = check;
+  // A red base never lowers a rung: it only keeps the code from being sent back for a failure that it did not cause. A checkpoint that passes on a red base needs no reason, and the card says that the change made the base green.
+  const baseRed = (): Reason[] => [make('check.base_red', { subject: BASE_RED, evidence: { checkpointCheck: checkpoint.id, ...(base === undefined ? {} : { baseCheck: base.id }) } })];
   switch (checkpoint.outcome) {
     case 'failed':
-      if (base?.outcome === 'failed') return [make('check.failed_on_base', { evidence: { checkpointCheck: checkpoint.id, baseCheck: base.id } })];
+      if (base?.outcome === 'failed') return baseRed();
       return [make('check.failed', { evidence: { checkId: checkpoint.id, exitCode: checkpoint.exitCode, command: checkpoint.command, outputTail: untrusted(checkpoint.outputTail ?? '', 2_000) } })];
     case 'timed_out':
       return [make('check.timed_out', { evidence: { checkId: checkpoint.id, limitSeconds: policy.check.timeoutSeconds } })];
     case 'not_run':
-      return [make('check.not_run', { evidence: { checkId: checkpoint.id, why: checkpoint.notRunReason } })];
+      return base?.outcome === 'failed' ? baseRed() : [make('check.not_run', { evidence: { checkId: checkpoint.id, why: checkpoint.notRunReason } })];
     default:
       return [];
   }

@@ -2,7 +2,13 @@ export { GitCaptureService, type GitCaptureServiceDeps } from './GitCaptureServi
 export { ProcessCheckExecutor, type CheckEnvironment, type CheckExecutorDeps } from './ProcessCheckExecutor';
 export { InMemoryCaptureState, SqliteCaptureState, type CaptureJob, type CaptureStateStore, type StoredSnapshot } from './captureState';
 export { checkpointRef, commitCheckpoint, readDiff, snapshotTree, type CapturedDiff, type WorktreeTree } from './checkpoint';
-export { cacheEnvironment, checkCacheDirectory, checkEnvironment, isScrubbedName } from './checkEnv';
+export { CHECK_ENV_NAMES, CHECK_ENV_PREFIXES, checkEnvironment, isScrubbedName } from './checkEnv';
+export { CheckClones, CloneError, DEFAULT_CLONE_LIMITS, type CheckClonesOptions, type CloneService, type RunClones } from './CheckClones';
+export { CACHE_TOOLS, EXCLUDED_DIRECTORIES, EXCLUDED_FILES, selectTools, type CacheTool } from './cacheTools';
+export { checkDenyRead, claudeConfigPaths, HOME_CREDENTIAL_PATHS } from './checkDenyRead';
+export { ENVIRONMENT_PATTERNS, findEnvironmentProblem, findUnconfirmedProblem, type EnvironmentPattern } from './environmentErrors';
+export { CHECK_OWNER_VARIABLE, CHECK_RUN_VARIABLE, CheckProcessSweep, sweepNote, systemProcessTable, type CheckProcess, type CheckProcesses, type ProcessTable, type SweepOutcome } from './ProcessSweep';
+export { sweepCheckLeftovers, type LeftoverOptions } from './checkLeftovers';
 export { GuardedGit, ReviewGitError, DIFF_FLAGS, EMPTY_TREE, worktreeGitDir } from './guardedGit';
 export { DEFAULT_DIFF_LIMITS, DiffParseError, parseDiff, parseRaw, type DiffLimits, type ParsedDiff } from './parseDiff';
 export { compareSnapshots, takeSnapshot, type RepoSnapshot, type SnapshotDifference } from './repoSnapshot';

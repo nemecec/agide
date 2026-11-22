@@ -84,6 +84,7 @@ async function start(): Promise<void> {
     commands,
     db,
     dataDir,
+    protectedReadDirs: [app.getPath('logs'), app.getPath('crashDumps')],
     desktop,
     browserViews,
     ...(profile ? { profile } : {}),

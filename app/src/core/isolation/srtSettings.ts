@@ -105,11 +105,11 @@ export interface ToolSrtSettingsInput {
   readonly extraDenyRead?: readonly string[];
 }
 
-/** Settings for a program without an agent (0040 section 6): writes limited to `writeDirs`, no hosts or the development hosts. */
+/** Settings for a program without an agent (0040 section 6): writes limited to `writeDirs`, no hosts or the development hosts, reads denied for `extraDenyRead` in both spellings of each path. */
 export function buildToolSrtSettings(input: ToolSrtSettingsInput): SrtSettings {
   return {
     allowPty: true,
     network: { allowedDomains: input.network === 'development' ? [...DEVELOPMENT_HOSTS] : [], deniedDomains: [], allowLocalBinding: true },
-    filesystem: { denyRead: [...(input.extraDenyRead ?? [])], allowRead: [], denyWrite: [], allowWrite: [...new Set(input.writeDirs.flatMap(withResolved))] },
+    filesystem: { denyRead: [...new Set((input.extraDenyRead ?? []).flatMap(withResolved))], allowRead: [], denyWrite: [], allowWrite: [...new Set(input.writeDirs.flatMap(withResolved))] },
   };
 }

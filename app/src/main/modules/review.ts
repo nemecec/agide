@@ -1,11 +1,10 @@
-import { rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { CommandError, type Caller } from '../../core/commands/index';
 import type { InboxService } from '../../core/inbox/index';
 import type { AppMcpServer } from '../../core/mcp/index';
 import { DEFAULT_PROFILE_ID, profilePaths, type ProfileService } from '../../core/profile/index';
-import { checkCacheDirectory, GitCaptureService, ProcessCheckExecutor, resolveCheckEnvironment, SqliteCaptureState, userConfigPaths, type CheckEnvironment } from '../../core/review/capture/index';
+import { checkDenyRead, claudeConfigPaths, CheckClones, CheckProcessSweep, GitCaptureService, ProcessCheckExecutor, resolveCheckEnvironment, SqliteCaptureState, sweepCheckLeftovers, systemProcessTable, userConfigPaths, type CheckEnvironment } from '../../core/review/capture/index';
 import { repoDifferenceHash } from '../../core/review/capture/GitCaptureService';
 import { permissionSettingsOf } from '../../core/permissions/index';
 import { readIsolationOptions } from '../../core/isolation/providerOptions';
@@ -249,10 +248,6 @@ export function init(
     }),
     // Capture runs when a worktree agent's run ends: its turn is over and its worktree holds the work (0040 section 4.1).
     swarm.manager.subscribe((event) => {
-      if (event.type === 'swarm.removed') {
-        void rm(checkCacheDirectory(ctx.dataDir, event.swarmId), { recursive: true, force: true }).catch((error: unknown) => console.warn('review: check cache', error));
-        return;
-      }
       if (event.type !== 'swarm.agent_changed' || !ENDED_RUN_STATES.includes(event.state) || connectedCapture === undefined) return;
       const agent = facts.swarm(event.swarmId)?.agents.find((candidate) => candidate.name === event.agent);
       if (agent?.workspace !== 'worktree') return;
@@ -312,14 +307,27 @@ function pipelineServices(
       provider: settings.isolation.provider,
       bashSandbox: permissionSettingsOf(settings, { isDefaultProfile: profile.id === DEFAULT_PROFILE_ID }).network.bashSandbox,
       profileEnv: Object.fromEntries(Object.entries(launch().env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
-      srt: { binary: options.srtBinary ?? process.env['AGIDE_SRT_BIN'] ?? 'srt', settingsDir: join(ctx.dataDir, 'isolation', 'srt-checks'), extraDenyRead: options.extraDenyRead },
+      srt: {
+        binary: options.srtBinary ?? process.env['AGIDE_SRT_BIN'] ?? 'srt',
+        settingsDir: join(ctx.dataDir, 'isolation', 'srt-checks'),
+        extraDenyRead: checkDenyRead({ agent: options.extraDenyRead, appRoot, appDirs: ctx.protectedReadDirs ?? [], claude: claudeConfigPaths({ configured: launch().claudeConfigDir, home: homedir() }), home: homedir() }),
+      },
     });
   };
+  // Every check run clones the caches it needs below the task base, on the volume of the real caches.
+  const clonesRoot = join(taskBaseDir(), 'review-check-caches', profile.id);
+  const checkoutRoot = join(taskBaseDir(), 'review-checks', profile.id);
+  const clones = new CheckClones({ root: clonesRoot });
+  const processes = new CheckProcessSweep({ table: systemProcessTable({ roots: [checkoutRoot, clonesRoot] }) });
+  // What a killed app left (processes, checkouts, settings files, clones) goes before the first run starts.
+  const ready = sweepCheckLeftovers({ processes, checkoutRoot, settingsDir: join(ctx.dataDir, 'isolation', 'srt-checks'), clones }).catch((error: unknown) => console.warn('review: check leftovers', error));
   const checks = new ProcessCheckExecutor({
     environment,
-    checkoutRoot: (swarmId, runId) => join(taskBaseDir(), 'review-checks', swarmId, runId),
+    checkoutRoot: (swarmId, runId) => join(checkoutRoot, swarmId, runId),
     dataDir: ctx.dataDir,
-    cacheDirectory: (swarmId) => checkCacheDirectory(ctx.dataDir, swarmId),
+    clones,
+    processes,
+    ready,
     store: parts.store,
     maxConcurrent: () => parts.settings().maxConcurrentChecks,
   });

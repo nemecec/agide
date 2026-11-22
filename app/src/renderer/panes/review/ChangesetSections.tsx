@@ -79,6 +79,16 @@ function Evidence({ evidence }: { readonly evidence: Readonly<Record<string, unk
   );
 }
 
+/** What the base run says about the checkpoint run: a red base cannot tell good changes from bad, and a change that makes it green is worth saying. */
+function baseSentence(checkpoint: CheckRecord, base: CheckRecord): string {
+  if (base.outcome === 'failed') {
+    return checkpoint.outcome === 'passed'
+      ? 'The same check fails on the base commit, and this change made it pass.'
+      : 'The same check fails on the base commit as well, so it cannot tell good changes from bad. You decide.';
+  }
+  return `On the base commit the same check ${CHECK_CHIPS[base.outcome].label.replace('Check ', '')}.`;
+}
+
 export function CheckBlock({ checks }: { readonly checks: readonly CheckRecord[] }) {
   const checkpoint = checks.filter((check) => check.target === 'checkpoint').at(-1);
   const base = checks.filter((check) => check.target === 'base').at(-1);
@@ -93,7 +103,7 @@ export function CheckBlock({ checks }: { readonly checks: readonly CheckRecord[]
         {checkpoint.exitCode !== null && <span className="review-muted">exit code {checkpoint.exitCode}</span>}
       </div>
       {checkpoint.notRunReason !== null && <p className="review-muted">{plainText(checkpoint.notRunReason)}</p>}
-      {base !== undefined && <p className="review-muted">On the base commit the same check {CHECK_CHIPS[base.outcome].label.replace('Check ', '')}.</p>}
+      {base !== undefined && <p className="review-muted" data-testid="review-check-base">{baseSentence(checkpoint, base)}</p>}
       {checkpoint.outputTail !== null && checkpoint.outputTail !== '' && (
         <>
           <pre className="review-output" tabIndex={0} aria-label="End of the check output" data-testid="review-check-output">

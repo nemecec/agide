@@ -154,6 +154,16 @@ export function describeChangesetStoreContract(name: string, setup: () => Promis
       expect(h.store.baseCheck(changeset.baseCommit, sha256Of('other')), 'another policy has no base run').toBeUndefined();
     });
 
+    it('finds the latest base run of a pair, so a base that turned green is the one that is reused', () => {
+      const changeset = insert('one');
+      const red = { id: 'chk_red', changesetId: null, target: 'base' as const, commitId: changeset.baseCommit, policyHash: policy.hash, command: ['pnpm', 'test'], outcome: 'failed' as const, notRunReason: null, exitCode: 1, signal: null, durationMs: 10, outputPath: null, outputTail: 'boom', truncated: false, startedAt: T(1), endedAt: T(2) };
+      h.store.putCheck(red);
+      h.store.putCheck({ ...red, id: 'chk_green', outcome: 'passed', exitCode: 0, outputTail: '', startedAt: T(3), endedAt: T(4) });
+      expect(h.store.baseCheck(changeset.baseCommit, policy.hash)?.id, 'the green run that followed the red one').toBe('chk_green');
+      h.store.putCheck(red);
+      expect(h.store.baseCheck(changeset.baseCommit, policy.hash)?.id, 'a run that is stored again keeps its place').toBe('chk_green');
+    });
+
     it('keeps one run per attempt and session, and one report per run', () => {
       const changeset = insert('one');
       h.store.putRun(run(changeset.id, 1, 'rev-1'));

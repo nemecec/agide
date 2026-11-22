@@ -14,7 +14,7 @@ export interface ReasonDefinition {
 export const REASON_CATALOGUE = {
   'check.none': { source: 'policy', rung: 'B', hard: false },
   'check.failed': { source: 'check', rung: 'C', hard: false },
-  'check.failed_on_base': { source: 'check', rung: 'B', hard: false },
+  'check.base_red': { source: 'check', rung: 'C', hard: false },
   'check.timed_out': { source: 'check', rung: 'C', hard: false },
   'check.not_run': { source: 'check', rung: 'C', hard: false },
   'size.medium': { source: 'rule', rung: 'B', hard: false },

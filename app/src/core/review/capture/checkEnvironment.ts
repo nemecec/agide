@@ -12,7 +12,7 @@ export interface CheckEnvironmentInput {
 
 /**
  * Where the project check runs (0040 sections 6 and 17): never with more power than the agent had. A profile with the
- * Bash sandbox on, or the `srt` provider, runs the check under `srt` with writes limited to its checkout, and the
+ * Bash sandbox on, or the `srt` provider, runs the check under `srt` with writes limited to its checkout, its temporary directory and its cache clones, and the
  * check is `not_run` when `srt` is not installed. Only a profile without the sandbox runs it as a plain process.
  */
 export function resolveCheckEnvironment(input: CheckEnvironmentInput): CheckEnvironment {

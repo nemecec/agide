@@ -13,6 +13,7 @@ import {
   type ChangesetId,
   type ChangesetRecord,
   type ChangesetState,
+  type CheckRecord,
   type CommentRecord,
   type DecisionActor,
   type DecisionRecord,
@@ -224,7 +225,8 @@ export class InMemoryReviewManager implements ReviewManager {
         policy: policy.effective,
       });
       store.putCheck(outcome.checkpoint);
-      if (outcome.base !== undefined) store.putCheck(outcome.base);
+      // A base run that did not run says nothing about the base, and the store returns the latest row of the pair: it must not hide an earlier result.
+      if (outcome.base !== undefined && outcome.base.outcome !== 'not_run') store.putCheck(outcome.base);
       changeset = this.require(changesetId);
       if (changeset.state !== 'checking') return;
     }
@@ -454,7 +456,7 @@ export class InMemoryReviewManager implements ReviewManager {
     if (changeset.state !== 'in_review') return;
     const policy = store.policy(changeset.policyHash)!.effective;
     const reasonIds = new Set(store.reasons(changeset.id).map((reason) => reason.id));
-    const checkBlocks = ['check.failed', 'check.timed_out', 'check.not_run'].some((reasonId) => reasonIds.has(reasonId));
+    const checkBlocks = ['check.failed', 'check.base_red', 'check.timed_out', 'check.not_run'].some((reasonId) => reasonIds.has(reasonId));
     const accept = rungs.toRung === 'B' && report.verdict === 'accept' && blocking.length === 0 && !droppedBlocking && report.claimCheck !== 'contradicted' && !checkBlocks;
     if (accept) {
       this.move(changeset, 'report', 'reviewer', 'accepted', rungs);
@@ -499,13 +501,19 @@ export class InMemoryReviewManager implements ReviewManager {
       files: store.files(changeset.id),
       ...(input.hunks ? { hunks } : {}),
       reasons: store.reasons(changeset.id),
-      checks: store.checks(changeset.id),
+      checks: this.checksOf(changeset),
       runs: store.runs(changeset.id),
       ...(report === undefined ? {} : { report }),
       decisions: store.decisions(changeset.id),
       comments: store.comments(changeset.id),
       seen: this.seenState(changeset),
     };
+  }
+
+  /** The checkpoint runs of the changeset and the base run of its base commit and policy, which the card compares them with. */
+  private checksOf(changeset: ChangesetRecord): CheckRecord[] {
+    const base = this.deps.store.baseCheck(changeset.baseCommit, changeset.policyHash);
+    return [...this.deps.store.checks(changeset.id), ...(base === undefined ? [] : [base])];
   }
 
   private visible(changeset: ChangesetRecord, caller: ReviewCaller): boolean {

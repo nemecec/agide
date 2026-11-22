@@ -206,7 +206,7 @@ export interface CheckRequest {
   readonly policy: ReviewPolicy;
 }
 
-/** The checkpoint run, and the base run when the checkpoint failed (0040 section 6, base comparison). */
+/** The checkpoint run and the base run, which ran first or is the stored green result of the pair (0040 section 6, base comparison). */
 export interface CheckOutcomeSet {
   readonly checkpoint: CheckRecord;
   readonly base?: CheckRecord;
@@ -398,7 +398,7 @@ export interface ChangesetStore {
 
   putCheck(check: CheckRecord): void;
   checks(id: ChangesetId): CheckRecord[];
-  /** The stored base run for (commit, policy), shared by every changeset on that base. */
+  /** The latest base run for (commit, policy), shared by every changeset on that base. */
   baseCheck(commitId: string, policyHash: string): CheckRecord | undefined;
 
   putRun(run: ReviewRunRecord): void;
@@ -541,6 +541,9 @@ export interface ReviewService {
 
 /** Inbox origin of the alert for a changed repository; its payload is `{ swarmId, repoDifferenceHash? }`. */
 export const REPO_ALERT_ORIGIN = 'review:repo';
+
+/** Inbox origin of the alert for a check that fails on the base commit; its payload is `{ swarmId, baseCommit, policyHash }`. */
+export const BASE_ALERT_ORIGIN = 'review:base';
 
 /** Inbox origin of review items (0040 section 12). */
 export const REVIEW_ITEM_ORIGIN = 'review:changeset';

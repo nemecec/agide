@@ -70,7 +70,15 @@ describe('ChangesetView content', () => {
     expect(text('review-check-output'), 'output as characters').toContain('<script>1</script>');
     expect(document.querySelector('script'), 'no element came from the output').toBeNull();
     expect(text('review-check'), 'untrusted note').toContain('untrusted');
-    expect(text('review-check'), 'the base outcome').toContain('On the base commit the same check failed');
+    expect(text('review-check-base'), 'a failing check on a red base cannot tell good changes from bad, and the user decides').toBe('The same check fails on the base commit as well, so it cannot tell good changes from bad. You decide.');
+  });
+
+  it('says that a change made a red base green, and what a green base showed', async () => {
+    await mount({ checks: [checkRecord({ outcome: 'passed' }), checkRecord({ id: 'b', target: 'base', changesetId: null, outcome: 'failed' })] });
+    expect(text('review-check-base'), 'the change made the base pass').toBe('The same check fails on the base commit, and this change made it pass.');
+    await rendered?.unmount();
+    await mount({ checks: [checkRecord({ outcome: 'failed', exitCode: 1 }), checkRecord({ id: 'b', target: 'base', changesetId: null, outcome: 'passed' })] });
+    expect(text('review-check-base'), 'the base passed, so the failure is the change').toBe('On the base commit the same check passed.');
   });
 
   it('says that no check ran when there is none', async () => {
