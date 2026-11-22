@@ -214,3 +214,32 @@ Claude Code 2.1.330, git 2.54.0. Details in `notes/probes-m5-review.md`; evidenc
 Reviewed by a second agent against the logs and the CLI reference, settings and permissions docs; P42, P41 and the P40 project-rule cases re-ran one process at a time and reproduced.
 
 New scripts: `p_review_lib.mjs`, `p40_settings_isolation.mjs`, `p41_report_tool.mjs`, `p42_diff_parse.mjs`, `p42_checkpoint_diff.mjs`, `p43_injection_anchoring.mjs`.
+
+## Milestone 6 credential-proxy probes P44 (2026-11-22)
+
+srt 0.0.83 (`srt --version`), macOS, Node 22.22.3 and Electron 45.3.3 as Node, npm 10.9.8, pnpm 11.21.0, cargo 1.99.0, Gradle 9.5.1, Maven 3.9.16, uv 0.11.17. Details in `notes/probes-m6-credential-proxy.md`; evidence in `probes/out/p44_*` (calibrate, `p44_tool_<tool>_<mech>`, `p44_safety_<group>`, `p44_embed_*`). A local HTTPS test registry (npm, Maven, Cargo sparse, PyPI layouts, `/echo`) with a throwaway CA and random per-run secrets; no real credential was read; no model was started. Mechanism A is the srt `credentials.envVars` mask (CLI settings file), A2 is A with a prebuilt Authorization header, B is an own placeholder swapped by `network.filterRequest` with `SandboxManager` as a library.
+
+| Probe | Result | Short finding |
+|---|---|---|
+| P44.0 setup and srt rules | pass | `*.localhost` names need no loopback entry, but srt sets `NO_PROXY=localhost,...` and curl skips the proxy for every such name (cleared in the probes). `tlsTerminate.extraCaCertPaths` only extends the sandbox-side bundle; the proxy verifies the upstream with Node's roots plus `NODE_EXTRA_CA_CERTS` (or `tls.setDefaultCACertificates`). `~` in srt paths follows the HOME of the srt process. |
+| P44.1 tool by mechanism | partial | npm, pnpm, cargo: A and B pass. Gradle, Maven, uv: A fails (Basic header, the sentinel sits inside base64, 401); B passes; A2 (whole Basic blob masked) passes for Gradle and Maven. Trust: Node and cargo take srt's variables; JVM tools need a truststore built from `$SSL_CERT_FILE`; Gradle needs `allowLocalBinding`; Maven needs a `<proxies>` entry (the Java agent is not enough). No tool validated the placeholder shape; npm (`#`, `;`, `${}`) and cargo (`"`) fail only on config syntax. |
+| P44.2 secret not readable in the sandbox | fail for A through the plain CLI, pass for B | `ps` is refused, but `sysctl(KERN_PROCARGS2)` returns the arguments and the exec-time environment of all same-user processes (not of Apple platform binaries), and `proc_pidinfo` the working directory and open files: the real secret was read from the srt process environment (A, CLI). No Seatbelt rule tried blocks the arguments and environment, and srt 0.0.83 has no setting that adds a rule. Not found when the secret is set into `process.env` at run time (A through the library, A through a CLI wrapper) and in B. Files, temp, caches and verbose tool logs: no hit. The proxy CA key in the srt temp directory is readable. |
+| P44.3 non-inject host | pass | Only the placeholder arrives at other hosts, subdomains and the IP literal; host spellings are canonicalized. A with `injectHosts` omitted substitutes at every allowed host. |
+| P44.4 echo endpoint | fail | The reflected header and the body return the real value to the sandbox in A and B. `stripResponseHeaders` removes headers only; `onResponse` sees status and headers, no body, and cannot change anything. Path and method scoping in the filter (B) stops it for other paths and for writes; nothing stops a body reflection on an allowed path. |
+| P44.5 plaintext | pass | Placeholder or sentinel only by default; a filter that sets headers on plain HTTP gets `403`; the plaintext opt-ins send the real value in cleartext. |
+| P44.6 opaque tunnels, host match | pass | `refuseOpaqueTunnels` refuses CONNECT to excluded hosts, SOCKS and non-TLS CONNECT; `requireHostMatch` answers `421` or breaks the minted certificate. Without them these paths carry the placeholder only. |
+| P44.7 other routes | partial | Query and path are not substituted; A substitutes bodies and any header, B only what the filter sets; redirects across hosts keep the placeholder; `TRACE` is forwarded by A and refused (`405`) with `filterRequest`; credential gating per host works in A; the credential is usable for writes (B can limit methods). |
+| P44.8 derived values and logs | pass | An HMAC over the placeholder is not repaired; verbose npm, cargo, Gradle and Maven logs show neither placeholder nor secret. |
+| P44.9 library embedding | pass | `initialize` about 60 to 90 ms, `wrapWithSandbox` about 7 ms, `reset` about 2 ms; one TCP listener per initialize, no descriptor growth over repeated rounds; works under Electron's Node. After any host exit the listener is gone, sandboxed children keep running without a proxy, and SIGKILL leaves the CA directory (with `ca.key`) in the temp directory. The library appends `<sandbox_violations>` to stderr with a `commandId`; the CLI does not. |
+| P44.10 cost | pass | CLI adds about 0.2 to 0.3 s per command; the library adds little after one initialize (tool times in the notes). |
+
+### Design effects
+
+1. Use mechanism B (library with `filterRequest`) for the first slice: it covers Basic, keeps the real value out of every environment and argument list, and scopes substitution by host, path and method.
+2. Never put a real secret into the environment or arguments of any process, and start the app's host with a clean environment; the macOS profile lets sandboxed code read arguments and environment of all processes of the user (not of Apple platform binaries), nothing tried blocks it, and tokens exported in a shell or an editor are exposed the same way.
+3. Always set explicit hosts, keep TLS-only, `refuseOpaqueTunnels`, `requireHostMatch` and plaintext opt-ins off, and give the app its own CA outside the readable area.
+4. Tools that sign or digest the credential, mTLS registries and token-exchange flows stay `not_run` with a reason.
+
+Not run: pip, go, git over HTTPS, Docker, uv with a header option, `credentials.sigv4`, a real Electron main process, Linux and Windows, real remote registries (see the notes).
+
+New scripts: `p_cred_lib.mjs`, `p44_calibrate.mjs`, `p44_tools.mjs`, `p44_safety.mjs`, `p44_embed.mjs`.
