@@ -7,10 +7,13 @@ import { assess, ids, otherChangeset, reasonOf, type FileSpec, type InputOptions
 
 /** Every reason of the catalogue that the rules own: a diff that triggers it and one that does not (0040 sections 7 and 19). */
 
-/** Placeholder key ids and a token of the secret detector's tests. They are put together at run time, so that secret scanners do not flag this file. */
+/** Placeholder secrets of the secret detector's tests. They are put together at run time, so that secret scanners do not flag this file. */
 const AWS_KEY_ID = ['AKIA', 'ABCDEFGHIJKLMNOP'].join('');
 const AWS_TEMP_KEY_ID = ['ASIA', 'ABCDEFGHIJKLMNOP'].join('');
 const SLACK_TOKEN = ['xoxb', '1234567890', 'abcdefghij'].join('-');
+const JWT = ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk'].join('.');
+const RANDOM_LITERAL = ['q8Zr3LmX7vB2', 'nKd9Wp5tYh1c'].join('');
+const PASSWORD_VALUE = ['Xk9#mP2$', 'vL8nQ4wZ7rT1yB5c'].join('');
 
 type Row = readonly [name: string, options: InputOptions, expected: boolean];
 
@@ -299,9 +302,9 @@ describe('secret.added', () => {
     ['a Slack token', `SLACK=${SLACK_TOKEN}`],
     ['an Anthropic key', `key = "sk-ant-${'api03-Abcdefghijklmnopqrstuv'}"`],
     ['an OpenAI key', `OPENAI=sk-proj-${'Abcdefghijklmnopqrstuvwxyz012345'}`],
-    ['a JWT', 'auth: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk'],
-    ['a long random literal assigned to a secret name', 'const apiSecret = "q8Zr3LmX7vB2nKd9Wp5tYh1c";'],
-    ['a password literal', "password: 'Xk9#mP2$vL8nQ4wZ7rT1yB5c'"],
+    ['a JWT', `auth: ${JWT}`],
+    ['a long random literal assigned to a secret name', `const apiSecret = "${RANDOM_LITERAL}";`],
+    ['a password literal', `password: '${PASSWORD_VALUE}'`],
   ];
   it.each(secrets)('flags %s on an added line', (_name, line) => {
     const reasons = assess(one({ path: 'src/config.ts', add: ['ok', line] }));
@@ -316,7 +319,7 @@ describe('secret.added', () => {
     ['a low-entropy placeholder', one({ path: 'a.ts', add: ['const apiSecret = "aaaaaaaaaaaaaaaaaaaaaaaa";'] })],
     ['a short value', one({ path: 'a.ts', add: ['token = "abc123"'] })],
     ['an environment reference', one({ path: 'a.ts', add: ['const token = process.env.API_TOKEN;'] })],
-    ['a name without a secret word', one({ path: 'a.ts', add: ['const colour = "q8Zr3LmX7vB2nKd9Wp5tYh1c";'] })],
+    ['a name without a secret word', one({ path: 'a.ts', add: [`const colour = "${RANDOM_LITERAL}";`] })],
     ['a large file that was not read', one({ path: 'a.ts', kind: 'large', bodies: [] })],
   ])('does not flag %s', (_name, options) => {
     expect(ids(assess(options)), 'no secret reason').not.toContain('secret.added');
