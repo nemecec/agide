@@ -3,9 +3,9 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ContainerProvider, ownerIdOf, type ContainerProviderOptions } from './ContainerProvider';
-import { containerName } from './dockerArgs';
+import { CONTAINER_RUN_FLAGS, containerName } from './dockerArgs';
 import { hookCommand } from '../session/hooks';
 import { runInPty } from './ptyHarness';
 import { containerTestsUnavailable, TEST_IMAGE } from './testRuntimes';
@@ -24,6 +24,30 @@ const provider = (extra: Partial<ContainerProviderOptions> = {}) =>
     ...extra,
   });
 const containerExists = (name: string): boolean => execFileSync('docker', ['ps', '-aq', '--filter', `name=^${name}$`], { encoding: 'utf8' }).trim() !== '';
+
+interface FakeDockerBehaviour {
+  /** Subcommands that exit with status 1. */
+  readonly failing?: readonly string[];
+  /** Container ids that `ps` prints, one per line. */
+  readonly containers?: readonly string[];
+}
+
+/** A `docker` executable that logs its arguments, prints the given container ids for `ps` and exits 0 except for the failing subcommands. */
+function fakeDocker({ failing = [], containers = [] }: FakeDockerBehaviour = {}): { binary: string; calls: () => string[] } {
+  const binary = join(dir, 'fake-docker');
+  const log = join(dir, 'fake-docker-calls.log');
+  const lines = [
+    '#!/bin/sh',
+    `printf '%s\\n' "$*" >> '${log}'`,
+    'case "$1" in',
+    ...failing.map((subcommand) => `  ${subcommand}) exit 1 ;;`),
+    `  ps) ${containers.length === 0 ? ':' : `printf '%s\\n' ${containers.join(' ')}`} ;;`,
+    'esac',
+  ];
+  writeFileSync(binary, `${lines.join('\n')}\n`);
+  chmodSync(binary, 0o755);
+  return { binary, calls: () => (existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean) : []) };
+}
 
 beforeEach(() => {
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'container-provider-')));
@@ -58,6 +82,108 @@ describe('ContainerProvider check', () => {
     expect(check, 'check result').toMatchObject({ ok: false, reason: `The image ${image} is not present locally`, fix: expect.stringContaining('never pulls') });
     const found = execFileSync('docker', ['images', '-q', image], { encoding: 'utf8' }).trim();
     expect(found, 'the check left no image behind').toBe('');
+  });
+});
+
+describe('ContainerProvider check with a fake docker', () => {
+  const image = 'agide-fake-image:0';
+
+  it('is ready when the engine answers and the image is local', async () => {
+    const docker = fakeDocker();
+    const check = await provider({ dockerBinary: docker.binary, image }).check();
+    expect(check, 'check result').toEqual({ ok: true });
+    expect(docker.calls(), 'the engine version, then the image by name').toEqual(['version --format {{.Server.Version}}', `image inspect --format {{.Id}} ${image}`]);
+  });
+
+  it('says that an image that is not local is missing and does not pull it', async () => {
+    const docker = fakeDocker({ failing: ['image'] });
+    const check = await provider({ dockerBinary: docker.binary, image }).check();
+    expect(check, 'check result').toMatchObject({ ok: false, reason: `The image ${image} is not present locally`, fix: expect.stringContaining('never pulls') });
+    expect(docker.calls(), 'the image is looked up and nothing is pulled').toEqual(['version --format {{.Server.Version}}', `image inspect --format {{.Id}} ${image}`]);
+  });
+
+  it('does not look for the image when the engine is not running', async () => {
+    const docker = fakeDocker({ failing: ['version'] });
+    const check = await provider({ dockerBinary: docker.binary, image }).check();
+    expect(check, 'check result').toMatchObject({ ok: false, reason: expect.stringContaining('not running') });
+    expect(docker.calls(), 'only the engine is asked').toEqual(['version --format {{.Server.Version}}']);
+  });
+});
+
+describe('ContainerProvider removeOrphans with a fake docker', () => {
+  const ownerFilter = (owner: string): string => `ps -aq --filter label=${CONTAINER_RUN_FLAGS.ownerLabel}=${owner}`;
+
+  it('removes the containers that carry the label of its owner', async () => {
+    const docker = fakeDocker({ containers: ['c1', 'c2'] });
+    await provider({ dockerBinary: docker.binary, ownerId: 'o1' }).removeOrphans();
+    expect(docker.calls(), 'the owner label selects the containers and one forced removal takes them all').toEqual([ownerFilter('o1'), 'rm -f c1 c2']);
+  });
+
+  it('removes nothing when no container carries the label', async () => {
+    const docker = fakeDocker();
+    await provider({ dockerBinary: docker.binary, ownerId: 'o1' }).removeOrphans();
+    expect(docker.calls(), 'the list is asked for and no removal follows').toEqual([ownerFilter('o1')]);
+  });
+
+  it('does not call docker without an owner, because it could not tell its containers from others', async () => {
+    const docker = fakeDocker({ containers: ['c1'] });
+    await provider({ dockerBinary: docker.binary }).removeOrphans();
+    expect(docker.calls(), 'no docker call').toEqual([]);
+  });
+
+  it('lets start-up go on when docker fails', async () => {
+    const docker = fakeDocker({ failing: ['ps'], containers: ['c1'] });
+    await expect(provider({ dockerBinary: docker.binary, ownerId: 'o1' }).removeOrphans(), 'removeOrphans resolves').resolves.toBeUndefined();
+    expect(docker.calls(), 'the list failed and nothing was removed').toEqual([ownerFilter('o1')]);
+  });
+});
+
+describe('ContainerProvider terminate with a fake docker', () => {
+  /** Above the process id range of any host: a signal that got past the recorder would find no process. */
+  const CLIENT_PID = 2_147_000_000;
+
+  /** Ends the session `s1` and returns the signals the provider sent, each with the docker calls made before it. */
+  async function terminated(docker: ReturnType<typeof fakeDocker>, signal: 'SIGTERM' | 'SIGKILL', clientAttached = true): Promise<{ pid: number; signal: string | number | undefined; dockerCalls: string[] }[]> {
+    const sent: { pid: number; signal: string | number | undefined; dockerCalls: string[] }[] = [];
+    const recorder = vi.spyOn(process, 'kill').mockImplementation((pid, sentSignal) => {
+      sent.push({ pid, signal: sentSignal, dockerCalls: docker.calls() });
+      return true;
+    });
+    try {
+      const environment = await provider({ dockerBinary: docker.binary }).prepare({ ...spec, key: { profileId: 'default', sessionId: 's1' } });
+      if (clientAttached) environment.attach('s1', CLIENT_PID);
+      await environment.terminate('s1', signal);
+    } finally {
+      recorder.mockRestore();
+    }
+    return sent;
+  }
+
+  it('signals the client with SIGTERM and leaves the removal of the container to the client', async () => {
+    const docker = fakeDocker();
+    const sent = await terminated(docker, 'SIGTERM');
+    expect(sent, 'one SIGTERM to the client, with no docker call before it').toEqual([{ pid: CLIENT_PID, signal: 'SIGTERM', dockerCalls: [] }]);
+    expect(docker.calls(), 'docker was not called').toEqual([]);
+  });
+
+  it('runs docker kill on the container before it signals the client with SIGKILL', async () => {
+    const docker = fakeDocker();
+    const sent = await terminated(docker, 'SIGKILL');
+    expect(sent, 'one SIGKILL to the client, after docker kill').toEqual([{ pid: CLIENT_PID, signal: 'SIGKILL', dockerCalls: [`kill ${containerName('s1')}`] }]);
+  });
+
+  it('signals the client with SIGKILL even when docker kill fails', async () => {
+    const docker = fakeDocker({ failing: ['kill'] });
+    const sent = await terminated(docker, 'SIGKILL');
+    expect(docker.calls(), 'docker kill was tried').toEqual([`kill ${containerName('s1')}`]);
+    expect(sent.map((item) => [item.pid, item.signal]), 'the client was signalled').toEqual([[CLIENT_PID, 'SIGKILL']]);
+  });
+
+  it('runs docker kill for SIGKILL when no client is attached and signals no process', async () => {
+    const docker = fakeDocker();
+    const sent = await terminated(docker, 'SIGKILL', false);
+    expect(docker.calls(), 'docker kill ran').toEqual([`kill ${containerName('s1')}`]);
+    expect(sent, 'no process was signalled').toEqual([]);
   });
 });
 
@@ -106,6 +232,14 @@ describe('ContainerProvider command', () => {
     const environment = await provider().prepare({ ...spec, profile: { ...spec.profile, ghConfigDir: gh } });
     const command = await environment.ptyCommand({ sessionId: 's1', cwd: join(dir, 'work'), args: [], cols: 80, rows: 24 });
     expect(command.args, 'gh directory read-only').toEqual(expect.arrayContaining(['--mount', `type=bind,src=${gh},dst=${gh},readonly`]));
+  });
+
+  it('mounts a tool file read-only and does not create its path as a directory', async () => {
+    const toolFile = join(dir, 'gitconfig');
+    const environment = await provider().prepare({ ...spec, profile: { ...spec.profile, toolFiles: [{ hostPath: toolFile, envVar: 'GIT_CONFIG_GLOBAL' }] } });
+    const command = await environment.ptyCommand({ sessionId: 's1', cwd: join(dir, 'work'), args: [], cols: 80, rows: 24 });
+    expect(command.args, 'tool file read-only').toEqual(expect.arrayContaining(['--mount', `type=bind,src=${toolFile},dst=${toolFile},readonly`]));
+    expect(existsSync(toolFile), 'the file path stays as the host has it').toBe(false);
   });
 
   it('says that the inspector hook cannot run in the image, so the permission module leaves it out', () => {
