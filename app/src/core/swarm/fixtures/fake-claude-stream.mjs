@@ -27,13 +27,15 @@
 // - $FAKE_CLAUDE_NOISE=1 adds a line of an unknown event type and a line that is not JSON before each assistant message.
 // - $FAKE_CLAUDE_STUBBORN=1 ignores SIGTERM and does not end when stdin closes, so only SIGKILL stops it.
 // - $FAKE_CLAUDE_IGNORE_STDIN_CLOSE=1 stays alive when stdin closes, but ends on SIGTERM.
-// - $FAKE_CLAUDE_CHILD_PID_FILE=<file> starts a child process in the same process group and writes its pid there.
+//   Both modes end by themselves when the parent process is gone, and at the latest at the lifetime cap of standIn.mjs.
+// - $FAKE_CLAUDE_CHILD_PID_FILE=<file> starts a stand-in (standIn.mjs) in the same process group and writes its pid
+//   there. The stand-in ends when the process of $FAKE_CLAUDE_CHILD_WATCH_PID (default: this process) is gone.
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
+import { endWithParent, spawnStandIn } from './standIn.mjs';
 
 const args = process.argv.slice(2);
 const flag = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
@@ -90,11 +92,9 @@ if (resumed && !existsSync(marker)) {
 writeFileSync(marker, '');
 
 if (stubborn) process.on('SIGTERM', () => undefined);
-if (ignoreStdinClose) setInterval(() => undefined, 1000);
+if (ignoreStdinClose) endWithParent(process.ppid);
 if (process.env.FAKE_CLAUDE_CHILD_PID_FILE) {
-  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
-    stdio: 'ignore',
-  });
+  const child = spawnStandIn({ parentPid: Number(process.env.FAKE_CLAUDE_CHILD_WATCH_PID ?? process.pid) });
   writeFileSync(process.env.FAKE_CLAUDE_CHILD_PID_FILE, String(child.pid));
 }
 

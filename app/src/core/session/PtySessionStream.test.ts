@@ -1,8 +1,9 @@
-import { spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
+import { spawnStandIn } from '../swarm/fixtures/standIn.mjs';
 import { PtySessionService } from './PtySessionService';
 import { StreamSpawners, type StreamSpawnRequest } from './streamSpawner';
 import type { SessionEvent } from './types';
@@ -17,14 +18,17 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-/** A spawner that starts an idle node process and records what the session service handed it. */
+/** A spawner that starts an idle stand-in and records what the session service handed it. The test's end kills what is left. */
 function idleSpawner() {
   const requests: StreamSpawnRequest[] = [];
   const texts: string[] = [];
+  const children: ChildProcess[] = [];
+  onTestFinished(() => void children.forEach((child) => child.kill('SIGKILL')));
   const spawner = {
     spawn: async (request: StreamSpawnRequest) => {
       requests.push(request);
-      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+      const child = spawnStandIn();
+      children.push(child);
       await new Promise((resolve) => child.once('spawn', resolve));
       return {
         pid: child.pid!,
