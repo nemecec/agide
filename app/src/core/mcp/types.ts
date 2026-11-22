@@ -1,4 +1,5 @@
 import type { SessionId } from '../session/types';
+import type { ToolSet } from '../commands/types';
 import type { NodeId } from '../tree/types';
 
 /**
@@ -57,6 +58,8 @@ export const BROWSER_MCP_SERVER_NAME = 'agide-browser';
 export interface McpGrantOptions {
   /** `Host` header values the session's environment sends besides the loopback names (`McpEndpoint.hostHeader`). */
   readonly hostHeaders?: readonly string[];
+  /** The tools the session's grant lists and runs (0040 section 10.2); the declared set, else `default`. */
+  readonly toolSet?: ToolSet;
 }
 
 export interface AppMcpServer {
@@ -65,6 +68,11 @@ export interface AppMcpServer {
   stop(): Promise<void>;
   /** Issues or replaces the grant of a session. Call before launching `claude` for that session. */
   grant(sessionId: SessionId, folderId: NodeId, options?: McpGrantOptions): McpGrant;
+  /**
+   * Sets the tool set of the session's grant, and of every grant issued for it later, until it is revoked. The
+   * runtime calls it before a launch whose spec names a tool set.
+   */
+  declareToolSet(sessionId: SessionId, toolSet: ToolSet): void;
   /** Changes the folder of an existing grant, for example after the session leaf moved. */
   rescope(sessionId: SessionId, folderId: NodeId): void;
   revoke(sessionId: SessionId): void;

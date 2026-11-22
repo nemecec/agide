@@ -141,7 +141,7 @@ describe('swarm menu entries', () => {
   it('offers the group controls on a swarm folder, with only the fitting ones enabled', async () => {
     await prime();
     const entries = swarmMenuEntries(folder('folder-s1'));
-    expect(labels(entries), 'folder entries').toEqual(['Pause swarm', 'Resume swarm', 'Results', 'Show definition', 'Stop swarm…']);
+    expect(labels(entries), 'folder entries').toEqual(['Pause swarm', 'Resume swarm', 'Results', 'Review work', 'Show definition', 'Stop swarm…']);
     expect([entry(entries, 'Pause swarm').disabled, entry(entries, 'Resume swarm').disabled, entry(entries, 'Stop swarm…').disabled], 'running: pause and stop on, resume off').toEqual([false, true, false]);
     expect(entry(entries, 'Stop swarm…').danger, 'stop is destructive').toBe(true);
     await act(async () => entry(entries, 'Pause swarm').run());
@@ -159,7 +159,7 @@ describe('swarm menu entries', () => {
   it('offers the agent controls on an agent leaf', async () => {
     await prime();
     const entries = swarmMenuEntries(leaf('session-impl'));
-    expect(labels(entries), 'leaf entries').toEqual(['Send message…', 'Interrupt', 'Open swarm', 'Stop agent…']);
+    expect(labels(entries), 'leaf entries').toEqual(['Send message…', 'Interrupt', 'Open swarm', 'Review work', 'Stop agent…']);
     await act(async () => entry(entries, 'Interrupt').run());
     expect(fake.invoke, 'interrupt one agent').toHaveBeenCalledWith('swarm_interrupt', { swarmId: 's1', agent: 'impl' });
     const queued = swarmMenuEntries(leaf('session-review'));

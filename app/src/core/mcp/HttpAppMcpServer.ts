@@ -4,7 +4,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { CommandRegistry } from '../commands/CommandRegistry';
-import type { Caller } from '../commands/types';
+import type { Caller, ToolSet } from '../commands/types';
 import type { SessionId } from '../session/types';
 import type { NodeId } from '../tree/types';
 import { GrantStore } from './grants';
@@ -64,8 +64,12 @@ export class HttpAppMcpServer implements AppMcpServer {
 
   grant(sessionId: SessionId, folderId: NodeId, options: McpGrantOptions = {}): McpGrant {
     if (!this.http) throw new Error('the app MCP server is not listening; call start() before grant()');
-    const token = this.grants.issue(sessionId, folderId, options.hostHeaders);
+    const token = this.grants.issue(sessionId, folderId, options.hostHeaders, options.toolSet);
     return { sessionId, folderId, url: sessionUrl(this.port, sessionId), token };
+  }
+
+  declareToolSet(sessionId: SessionId, toolSet: ToolSet): void {
+    this.grants.declareToolSet(sessionId, toolSet);
   }
 
   rescope(sessionId: SessionId, folderId: NodeId): void {
@@ -110,14 +114,14 @@ export class HttpAppMcpServer implements AppMcpServer {
       return reply(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'request body is not valid JSON' } });
     }
     const caller: Caller = { kind: 'mcp', sessionId: guard.sessionId, folderId: auth.folderId };
-    await this.serve(req, res, body, caller, guard.server);
+    await this.serve(req, res, body, caller, guard.server, auth.toolSet);
   }
 
-  private async serve(req: IncomingMessage, res: ServerResponse, body: unknown, caller: Caller & { kind: 'mcp' }, which: McpServerName): Promise<void> {
+  private async serve(req: IncomingMessage, res: ServerResponse, body: unknown, caller: Caller & { kind: 'mcp' }, which: McpServerName, toolSet: ToolSet): Promise<void> {
     const server = new Server({ name: which === 'app' ? APP_MCP_SERVER_NAME : which, version: '0.1.0' }, { capabilities: { tools: {} } });
-    server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: toolsFrom(this.registry, which) }));
+    server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: toolsFrom(this.registry, which, toolSet) }));
     server.setRequestHandler(CallToolRequestSchema, (request) =>
-      callTool(this.registry, request.params.name, request.params.arguments, caller, which),
+      callTool(this.registry, request.params.name, request.params.arguments, caller, which, toolSet),
     );
     const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
     const transports = this.open.get(caller.sessionId) ?? new Set<OpenTransport>();

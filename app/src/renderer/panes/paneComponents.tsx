@@ -6,6 +6,7 @@ import { ObservationLogPane } from './ObservationLogPane';
 import type { PaneProps } from './paneTypes';
 import { PlaceholderPane } from './PlaceholderPane';
 import { ProfileRail } from './ProfileRail';
+import { ReviewPane } from './review/ReviewPane';
 import { SurfaceHostBlock } from './SurfaceHostBlock';
 import { SwarmPane } from './swarm/SwarmPane';
 import { TranscriptViewerPane } from './TranscriptViewerPane';
@@ -29,4 +30,5 @@ export const PANE_COMPONENTS: Partial<Record<FirstPartyPaneType, ComponentType<P
   'agide/transcript-viewer': TranscriptViewerPane,
   'agide/observation-log': ObservationLogPane,
   'agide/swarm': SwarmPane,
+  'agide/review': ReviewPane,
 };

@@ -5,7 +5,7 @@ import type { SessionId } from '../session/types';
 import { HostEnvironment, signalProcess } from './HostEnvironment';
 import { launchEnv } from './launchEnv';
 import { SessionFiles } from './SessionFiles';
-import { buildSrtSettings } from './srtSettings';
+import { buildSrtSettings, buildToolSrtSettings } from './srtSettings';
 import {
   IsolationError,
   type AgentEnvironment,
@@ -16,6 +16,7 @@ import {
   type ProcessLaunch,
   type ProviderCheck,
   type PtyCommand,
+  type ToolLaunch,
 } from './types';
 
 export interface SrtProviderOptions {
@@ -103,6 +104,23 @@ export class SrtProvider implements IsolationProvider {
   }
 }
 
+/** `srt -s <settings> -- <argv>` for a program that is not the CLI, with writes limited to its directory and `writeDirs`. */
+function srtToolCommand(options: Pick<SrtProviderOptions, 'srtBinary' | 'extraDenyRead'>, settings: SessionFiles, launch: ToolLaunch): PtyCommand {
+  if (launch.argv.length === 0) throw new IsolationError('invalid', 'a tool launch needs a command');
+  const content = buildToolSrtSettings({ writeDirs: [launch.cwd, ...launch.writeDirs], network: launch.network, ...(options.extraDenyRead === undefined ? {} : { extraDenyRead: options.extraDenyRead }) });
+  const settingsPath = settings.writePrivate(launch.key, SETTINGS_FILE, JSON.stringify(content));
+  return { file: options.srtBinary, args: ['-s', settingsPath, '--', ...launch.argv], cwd: launch.cwd, env: { ...launch.env } };
+}
+
+/**
+ * Runs programs under srt without a provider or a session, for the project check of a review. The settings files go
+ * to `settingsDir`, which only this caller writes; `release` removes the files of one key.
+ */
+export function srtToolEnvironment(options: Pick<SrtProviderOptions, 'srtBinary' | 'extraDenyRead' | 'settingsDir'>): Pick<AgentEnvironment, 'toolCommand'> & { release(key: string): void } {
+  const settings = new SessionFiles(options.settingsDir);
+  return { toolCommand: (launch) => Promise.resolve(srtToolCommand(options, settings, launch)), release: (key) => settings.remove(key) };
+}
+
 class SrtEnvironment extends HostEnvironment {
   readonly provider = 'srt';
   private readonly settings: SessionFiles;
@@ -141,6 +159,12 @@ class SrtEnvironment extends HostEnvironment {
       cwd: launch.cwd,
       env: launchEnv(profile, this.paths.toEnv, launch.env),
     };
+  }
+
+  override async toolCommand(launch: ToolLaunch): Promise<PtyCommand> {
+    const command = srtToolCommand(this.options, this.settings, launch);
+    this.sessions.add(launch.key);
+    return command;
   }
 
   /**

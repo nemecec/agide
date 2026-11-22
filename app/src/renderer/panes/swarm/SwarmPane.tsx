@@ -11,6 +11,8 @@ import { Tab, TabList, TabPanel, Tabs } from '../../ui/Tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../ui/Table';
 import { Toolbar, ToolbarItem } from '../../ui/Toolbar';
 import type { PaneProps } from '../paneTypes';
+import { ChangesetList } from '../review/ChangesetList';
+import { openReviewPane } from '../review/openReviewPane';
 import { BudgetMeter } from './BudgetMeter';
 import { interruptAgent, pauseSwarm, resumeSwarm } from './swarmActions';
 import { openSwarmDialog } from './swarmDialogStore';
@@ -20,7 +22,7 @@ import './swarm.css';
 
 /**
  * `agide/swarm` (0037 section 10): the goal, the swarm's state, the budget meter, the group controls, a Banner for
- * a paused or stopped swarm, and the Agents and Results tabs. Every string an agent wrote renders as plain text.
+ * a paused or stopped swarm, and the Agents, Results and Review tabs. Every string an agent wrote renders as plain text.
  */
 export function SwarmPane({ instanceId, config }: PaneProps) {
   const swarmId = typeof config['swarmId'] === 'string' ? config['swarmId'] : '';
@@ -125,12 +127,18 @@ function SwarmView({ swarm }: { readonly swarm: SwarmStatus }) {
           <Tab value="results" data-testid="swarm-tab-results">
             Results
           </Tab>
+          <Tab value="review" data-testid="swarm-tab-review">
+            Review
+          </Tab>
         </TabList>
         <TabPanel value="agents">
           <AgentsTable swarm={swarm} run={run} />
         </TabPanel>
         <TabPanel value="results">
           <Results swarm={swarm} />
+        </TabPanel>
+        <TabPanel value="review">
+          <ChangesetList swarmId={swarm.id} onOpen={(changesetId) => void openReviewPane(swarm.id, changesetId).then(setFailure)} />
         </TabPanel>
       </Tabs>
     </>

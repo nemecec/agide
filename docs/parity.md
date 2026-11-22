@@ -68,6 +68,19 @@ A command with a UI binding must be an MCP tool unless it declares `mcpExempt` w
 | `reminder_create` | none | yes | ok |
 | `reminder_delete` | none | yes | ok |
 | `reminder_list` | none | yes | ok |
+| `report_outcome` | none | worker set only | ok |
+| `report_review` | none | reviewer set only | ok |
+| `review_accept` | bound | no | exempt: agents never decide reviews |
+| `review_accept_repo_change` | bound | no | exempt: agents never accept changes outside their worktrees |
+| `review_comment` | bound | no | exempt: line comments are the user's words to the agent |
+| `review_demote` | bound | no | exempt: agents never decide reviews |
+| `review_escalate` | bound | no | exempt: agents use review_request_escalation |
+| `review_get` | bound | yes | ok |
+| `review_list` | bound | yes | ok |
+| `review_reject` | bound | no | exempt: agents never decide reviews |
+| `review_request_escalation` | none | yes | ok |
+| `review_seen` | bound | no | exempt: seen marks record what the user looked at |
+| `review_send_back` | bound | no | exempt: agents never decide reviews |
 | `session_close` | none | no | ok |
 | `session_create` | menu tree-node | no | exempt: Agents do not start Claude sessions; the user does. |
 | `session_get` | none | yes | ok |
@@ -83,6 +96,7 @@ A command with a UI binding must be an MCP tool unless it declares `mcpExempt` w
 | `swarm_approval_answer` | bound | no | exempt: agents never answer approvals |
 | `swarm_interrupt` | bound | yes | ok |
 | `swarm_list` | bound | yes | ok |
+| `swarm_merge` | bound | yes | ok |
 | `swarm_results` | bound | yes | ok |
 | `swarm_send` | bound | yes | ok |
 | `swarm_start` | menu tree-node | yes | ok |

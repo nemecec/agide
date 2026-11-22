@@ -50,7 +50,8 @@ export class SwarmAlerts {
   }
 
   rateLimit(window: string, resetsAt: string, status: string): void {
-    this.post(null, 'normal', `swarm:rate:${window}:${resetsAt}`, `The plan reports ${status}; swarms are paused`, '', ['open', 'resume'], '');
+    const warning = status === 'allowed_warning';
+    this.post(null, 'normal', `swarm:rate:${window}:${resetsAt}`, warning ? `The plan reports ${status} for the ${window} window; swarms keep running` : `The plan reports ${status}; swarms are paused`, '', warning ? ['open'] : ['open', 'resume'], '');
   }
 
   capWait(swarmId: SwarmId, folderId: NodeId | null, goal: string, agent: string): void {

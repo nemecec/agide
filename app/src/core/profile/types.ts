@@ -1,6 +1,7 @@
 import type { Unsubscribe } from '../events/EventBus';
 import type { AgentSettingsInput } from '../agents/settings';
 import type { PermissionSettings } from '../permissions/types';
+import type { ReviewSettingsInput } from '../review/settings';
 import type { SwarmSettingsInput } from '../swarm/settings';
 
 /**
@@ -61,6 +62,8 @@ export interface ProfileSettings {
   readonly agents?: AgentSettingsInput;
   /** Tier table, approval timeout, spawn depth and active swarms per session (0037). Absent keys read as the defaults. */
   readonly swarm?: SwarmSettingsInput;
+  /** Daily review budget, check concurrency, seen dwell and the user-level policy overlay (0040). Absent keys read as the defaults. */
+  readonly review?: ReviewSettingsInput;
 }
 
 export interface NewProfileInput {

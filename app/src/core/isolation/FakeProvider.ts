@@ -17,12 +17,13 @@ import {
   type ProcessLaunch,
   type PtyCommand,
   type SessionFileName,
+  type ToolLaunch,
 } from './types';
 
 export type FakeStep = 'check' | 'prepare' | 'writeSessionFile' | 'ptyCommand' | 'processCommand' | 'terminate';
 
 export interface FakeCall {
-  readonly step: FakeStep | 'attach' | 'releaseSession' | 'removeSessionFile' | 'dispose';
+  readonly step: FakeStep | 'toolCommand' | 'attach' | 'releaseSession' | 'removeSessionFile' | 'dispose';
   readonly environmentId?: string;
   readonly sessionId?: SessionId;
   readonly detail?: unknown;
@@ -138,6 +139,12 @@ class FakeEnvironment implements AgentEnvironment {
     const configured = this.fake.options.command;
     if (typeof configured === 'function') return configured({ ...launch, cols: 0, rows: 0 }, this.spec);
     return configured ?? { file: 'claude', args: [...launch.args], cwd: launch.cwd, env: launchEnv(this.spec.profile, this.paths.toEnv, launch.env) };
+  }
+
+  async toolCommand(launch: ToolLaunch): Promise<PtyCommand> {
+    this.record({ step: 'toolCommand', sessionId: launch.key, detail: launch });
+    const [file = '', ...args] = launch.argv;
+    return { file, args, cwd: launch.cwd, env: { ...launch.env } };
   }
 
   attach(sessionId: SessionId, pid: number): void {

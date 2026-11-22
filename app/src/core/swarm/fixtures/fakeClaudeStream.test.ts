@@ -195,4 +195,23 @@ describe('fake stream-json claude', () => {
     expect(await fake.exited, 'exit code').toBe(3);
     expect(readFileSync(join(dir, 'out.txt'), 'utf8'), 'written file').toBe('hello');
   });
+
+  it('writes a background_tasks_changed line for /background', async () => {
+    const fake = start(launchArgs(randomUUID()));
+    fake.user('/background [{"task_id":"t1","task_type":"local_bash"}]\n/background []\n/text done');
+    const lines = await fake.waitFor((line) => line['subtype'] === 'background_tasks_changed', 2);
+    expect(lines.map((line) => (line['tasks'] as unknown[]).length), 'one open task, then none').toEqual([1, 0]);
+    fake.proc.kill('SIGTERM');
+  });
+
+  it('answers /report with an error result and no tool in init when no MCP server is configured', async () => {
+    const fake = start(launchArgs(randomUUID()));
+    fake.user('/report {"verdict":"accept"}');
+    const [init] = await fake.waitFor((line) => line['subtype'] === 'init');
+    expect(init?.['tools'], 'the report tool is not listed').not.toContain('mcp__app__report_review');
+    const [reply] = await fake.waitFor((line) => line['type'] === 'user');
+    const content = ((reply?.['message'] as { content: { content: string; is_error?: boolean }[] }).content)[0]!;
+    expect([content.is_error, content.content], 'the call fails like a server that is down').toEqual([true, 'MCP server "app" is not connected']);
+    fake.proc.kill('SIGTERM');
+  });
 });

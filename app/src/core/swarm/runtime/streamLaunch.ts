@@ -21,6 +21,7 @@ export function streamContribution(spec: AgentLaunchSpec, toEnv: (hostPath: stri
     String(spec.maxTurnsPerMessage),
     ...(spec.connectors ? [] : ['--strict-mcp-config']),
     ...(spec.tools === undefined ? [] : ['--tools', spec.tools.join(',')]),
+    ...(spec.allowedTools === undefined ? [] : ['--allowedTools', spec.allowedTools.join(',')]),
     ...spec.addDirs.flatMap((dir) => ['--add-dir', toEnv(dir)]),
   ];
   return {

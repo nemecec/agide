@@ -97,3 +97,19 @@ export function buildSrtSettings(input: SrtSettingsInput): SrtSettings {
     },
   };
 }
+
+export interface ToolSrtSettingsInput {
+  /** Directories the program may write: its checkout and a temporary directory. */
+  readonly writeDirs: readonly string[];
+  readonly network: 'none' | 'development';
+  readonly extraDenyRead?: readonly string[];
+}
+
+/** Settings for a program without an agent (0040 section 6): writes limited to `writeDirs`, no hosts or the development hosts. */
+export function buildToolSrtSettings(input: ToolSrtSettingsInput): SrtSettings {
+  return {
+    allowPty: true,
+    network: { allowedDomains: input.network === 'development' ? [...DEVELOPMENT_HOSTS] : [], deniedDomains: [], allowLocalBinding: true },
+    filesystem: { denyRead: [...(input.extraDenyRead ?? [])], allowRead: [], denyWrite: [], allowWrite: [...new Set(input.writeDirs.flatMap(withResolved))] },
+  };
+}

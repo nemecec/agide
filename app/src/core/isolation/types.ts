@@ -103,6 +103,12 @@ export interface AgentEnvironment {
    * `-t`. A provider that cannot run without a terminal throws `IsolationError('unsupported')`.
    */
   processCommand(launch: ProcessLaunch): Promise<PtyCommand>;
+  /**
+   * The host command for a program of the user's project that no agent runs, such as the project check of the review
+   * ladder (0040 section 6): confined like the agent's own commands, never with more power. `srt` limits writes to
+   * `writeDirs` and the network to `network`; `container` mounts `cwd` and `writeDirs`; `local` runs it on the host.
+   */
+  toolCommand(launch: ToolLaunch): Promise<PtyCommand>;
   /** Tells the environment the host pid of the spawned PTY child, so `terminate` can reach it. */
   attach(sessionId: SessionId, pid: number): void;
   /** Ends the agent process inside the environment; killing the host client is not enough for every provider. */
@@ -153,6 +159,19 @@ export interface ProcessLaunch {
   readonly cwd: string;
   readonly args: readonly string[];
   readonly env?: Readonly<Record<string, string>>;
+}
+
+/** A program without an agent: no Claude arguments, no session files. `env` is the complete environment of the program. */
+export interface ToolLaunch {
+  /** Names the launch's settings files; unique per run. */
+  readonly key: string;
+  readonly cwd: string;
+  readonly argv: readonly string[];
+  readonly env: Readonly<Record<string, string>>;
+  /** `none` allows no hosts, `development` the development hosts of the provider. */
+  readonly network: 'none' | 'development';
+  /** Host directories the program may write besides `cwd`. */
+  readonly writeDirs: readonly string[];
 }
 
 export interface PtyCommand {

@@ -63,8 +63,8 @@ export const swarmDefinitionSchema = z
         usdPerAgent: z.number().positive().max(100).optional(),
         maxTurnsPerMessage: z.number().int().min(1).max(200).default(40),
         wallClockMinutes: z.number().int().min(1).max(1_440).default(60),
-        /** Share of `usdTotal` kept for reviewer agents. */
-        reviewShare: z.number().min(0).max(0.8).default(0),
+        /** Share of `usdTotal` kept for reviewer agents. Absent: `defaultReviewShare`. */
+        reviewShare: z.number().min(0).max(0.8).optional(),
       })
       .strict(),
     agents: z.array(agentSpecSchema).min(1).max(16),
@@ -82,6 +82,13 @@ export type Workspace = AgentSpec['workspace'];
 export type FailurePolicy = SwarmDefinition['failurePolicy'];
 export type SwarmMode = z.output<typeof swarmModeSchema>;
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh';
+
+/** The review pot of a swarm with a `worktree` agent when its definition names none (0040 section 16); the other swarms keep none. */
+export const DEFAULT_REVIEW_SHARE = 0.3;
+
+export function defaultReviewShare(definition: Pick<SwarmDefinition, 'agents'>): number {
+  return definition.agents.some((agent) => agent.workspace === 'worktree') ? DEFAULT_REVIEW_SHARE : 0;
+}
 
 /** One problem of a definition, with the field it concerns as a dotted path such as `agents.1.dependsOn`. */
 export interface DefinitionIssue {

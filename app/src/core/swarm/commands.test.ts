@@ -23,7 +23,7 @@ describe('swarm commands', () => {
         .map((command) => command.id)
         .sort(),
       'tools',
-    ).toEqual(['swarm_interrupt', 'swarm_list', 'swarm_results', 'swarm_send', 'swarm_start', 'swarm_status', 'swarm_stop']);
+    ).toEqual(['swarm_interrupt', 'swarm_list', 'swarm_merge', 'swarm_results', 'swarm_send', 'swarm_start', 'swarm_status', 'swarm_stop']);
     expect(SWARM_COMMANDS.swarm_approval_answer.mcpExempt, 'stated exemption').toBe('agents never answer approvals');
     const fromAgent = await registry.invoke('swarm_approval_answer', { swarmId: 'w', agent: 'impl', requestId: 'r', decision: 'allow' }, mcp);
     expect(fromAgent, 'an agent cannot call it').toMatchObject({ ok: false, error: { code: 'not_found' } });

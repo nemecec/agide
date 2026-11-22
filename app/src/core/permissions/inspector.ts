@@ -1,6 +1,6 @@
 import { hostAllowed } from './hosts';
 import { classifyBash, type ClassHit } from './shell/classify';
-import { connectorClassOf, OUTWARD_BUILTIN_TOOLS, OWN_MCP_SERVERS, READ_PREFIXES, AGENT_START_TOOL_NAMES } from './classTable';
+import { connectorClassOf, OUTWARD_BUILTIN_TOOLS, OWN_MCP_SERVERS, READ_PREFIXES, AGENT_START_TOOL_NAMES, MERGE_TOOL_NAMES } from './classTable';
 import type { ActionClassId, GateFile, HookInspector, InspectorDecision, OutwardMode, PreToolUsePayload } from './types';
 
 const RANK: Readonly<Record<OutwardMode, number>> = { allow: 0, notify: 1, draft: 2, approve: 3, deny: 4 };
@@ -36,6 +36,7 @@ function audienceOf(classId: ActionClassId, input: unknown): string | undefined 
 
 function classifyMcp(server: string, tool: string, input: unknown): Classified[] {
   if (AGENT_START_TOOL_NAMES.includes(`mcp__${server}__${tool}`)) return [{ classId: 'app.agent_start' }];
+  if (MERGE_TOOL_NAMES.includes(`mcp__${server}__${tool}`)) return [{ classId: 'app.merge' }];
   if (OWN_MCP_SERVERS.includes(server)) return [];
   if (server.startsWith(CONNECTOR_PREFIX)) {
     const known = connectorClassOf(server, tool);

@@ -63,4 +63,10 @@ describe('streamContribution', () => {
       X: '1',
     });
   });
+
+  it('passes allowed tools as one --allowedTools value and omits the flag without them', () => {
+    const { args } = streamContribution({ ...SPEC, tools: ['Read', 'Grep', 'Glob'], allowedTools: ['mcp__app__report_review'] }, mapped);
+    expect(args?.slice(args.indexOf('--tools'), args.indexOf('--tools') + 4), 'tools then allowed tools').toEqual(['--tools', 'Read,Grep,Glob', '--allowedTools', 'mcp__app__report_review']);
+    expect(streamContribution(SPEC, mapped).args, 'no flag without allowed tools').not.toContain('--allowedTools');
+  });
 });

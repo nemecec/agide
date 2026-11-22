@@ -23,6 +23,10 @@ export const SWARM_COMMAND_INPUTS = {
   swarm_stop: swarmRef.extend({ agent: agentNameSchema.optional() }).strict(),
   swarm_results: swarmRef.extend({ agent: agentNameSchema.optional(), patch: z.boolean().default(false) }).strict(),
   swarm_approval_answer: swarmRef.extend({ agent: agentNameSchema, requestId: z.string().min(1).max(200), decision: z.enum(['allow', 'deny']) }).strict(),
+  /** 0040 section 15.2: a local branch; default `definition.repository.base` when it names one. */
+  swarm_merge: swarmRef
+    .extend({ target: z.string().min(1).max(200).optional(), exclude: z.array(agentNameSchema).max(16).default([]), dryRun: z.boolean().default(false) })
+    .strict(),
 } as const;
 
 export type SwarmCommandId = keyof typeof SWARM_COMMAND_INPUTS;
@@ -90,6 +94,13 @@ export const SWARM_COMMANDS: Readonly<Record<SwarmCommandId, SwarmCommandMeta>> 
     ui: {},
     mcp: false,
     mcpExempt: 'agents never answer approvals',
+  },
+  swarm_merge: {
+    title: 'Merge accepted work',
+    description:
+      'Merges the accepted changesets of a swarm into a local branch of its repository, one squash commit per changeset, after every worktree agent ended and its latest changeset was accepted at its current rung. Never pushes. With dryRun it only reports the conflicts. The user approves each call. Returns the target, the old and new tip, the merged commits, and what refused or conflicted.',
+    ui: {},
+    mcp: true,
   },
 };
 

@@ -1,6 +1,18 @@
 # verify
 
-Start: 2026-11-17 09:32 UTC (date -u). End: 2026-11-17 09:36:47 UTC.
+Start 2026-11-21T19:09Z. End about 19:35Z.
 
-Clean copy of app/ without node_modules, pnpm install --frozen-lockfile, then typecheck, test, build and e2e passed (e2e twice and three more times; the rename test in e2e/tree.spec.ts timed out in 2 of 6 runs: the Rename textbox did not appear after F2). e2e-claude-mcp, smoke-real-claude and e2e-real-claude each passed once (haiku, 0.25 USD cap). docs/parity.md is byte-identical to the output of pnpm parity. No commits exist on spike/stage2; all app files are untracked.
-Drift in 0013: it describes stub modules (in-memory tree, fake sessions, MCP server that never listens) and lists TerminalPane without SurfacePane; it does not mention session_* commands or AGIDE_CLAUDE_ARGS / AGIDE_SESSION_CWD.
+Independent verification of the quality step and the integration step. No code or test was changed.
+
+| Command | Result |
+|---|---|
+| pnpm typecheck | pass |
+| pnpm check:colours | pass |
+| node ../notes/scripts/token-contrast.mjs | pass, pairs below target 0 |
+| pnpm coverage, three runs | all pass, 266 files, 2990 passed, 15 skipped, no failing test; totals 90.88 / 82.66 / 90.11 / 93.26 |
+| pnpm build | pass |
+| pnpm parity | pass (the permission inspector script warning is printed) |
+| AGIDE_HIDDEN=1 pnpm e2e, two runs | both 86 passed, no flaky retries |
+| pnpm mutation | not run: free disk fell to 2.91 GiB after the second e2e run, below the 3 GiB floor |
+
+Scan of changed and new files: no employer name, user path or real e-mail address. Token-like strings are test fixtures for the secret detectors and example.invalid addresses. Style hits: the word "pin" in docs/measurements/w-quality.md ("No test pins it either way") and in a doc comment in app/src/core/review/manager/reviewDecisionContract.ts ("do not pin down"). Count-like text: docs/measurements/integrate.md ("262 files") and a test boundary table in rules.test.ts (data, acceptable).

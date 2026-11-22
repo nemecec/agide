@@ -115,6 +115,7 @@ test('swarm_start over MCP starts agents in the caller folder and swarm_stop sto
   expect(tools.sort(), 'the approval answer is not an agent tool').toEqual([
     'swarm_interrupt',
     'swarm_list',
+    'swarm_merge',
     'swarm_results',
     'swarm_send',
     'swarm_start',

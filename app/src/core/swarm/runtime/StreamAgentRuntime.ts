@@ -22,6 +22,8 @@ export interface StreamAgentRuntimeOptions {
   readonly stopGraceMs?: number;
   /** How long `stop` waits after SIGTERM, and again after SIGKILL. Default 2 s. */
   readonly killTimeoutMs?: number;
+  /** Called before a launch or resume whose spec names a tool set, so the app MCP server lists that set for the session's grant. */
+  readonly declareToolSet?: (sessionId: SessionId, toolSet: NonNullable<AgentLaunchSpec['toolSet']>) => void;
   /** Called for a stdout line that is not a JSON object or is over the size limit; the line is skipped. */
   readonly onUnreadable?: (sessionId: SessionId, item: Extract<NdjsonItem, { kind: 'invalid' | 'dropped' }>) => void;
 }
@@ -58,6 +60,8 @@ interface Agent {
 
 const STDERR_TAIL_CHARS = 2000;
 const STDOUT_DRAIN_MS = 250;
+/** The answer to every `can_use_tool` request of a session launched with `autoDeny`. */
+export const AUTO_DENY_MESSAGE = 'Reviewers run read-only.';
 
 /**
  * Runs swarm agents as `claude -p` stream-json processes (0037 section 2). The session service prepares each
@@ -97,6 +101,7 @@ export class StreamAgentRuntime implements AgentRuntime, StreamSpawner {
     this.lock(spec.sessionId);
     try {
       this.specs.set(spec.sessionId, spec);
+      this.declareToolSet(spec);
       try {
         await this.options.sessions.create({
           id: spec.sessionId,
@@ -121,6 +126,7 @@ export class StreamAgentRuntime implements AgentRuntime, StreamSpawner {
       const info = this.options.sessions.get(spec.sessionId);
       if (info === undefined) throw new RuntimeError('not_found', `no session ${spec.sessionId}`);
       this.specs.set(spec.sessionId, spec);
+      this.declareToolSet(spec);
       if (info.permissionMode !== spec.permissionMode) this.options.sessions.setPermissionMode(spec.sessionId, spec.permissionMode);
       try {
         await this.options.sessions.resume(spec.sessionId);
@@ -334,10 +340,27 @@ export class StreamAgentRuntime implements AgentRuntime, StreamSpawner {
       }
     }
     for (const event of normalizeMessage(sessionId, raw)) {
+      if (event.type === 'permission_request' && agent.spec.autoDeny === true) {
+        this.autoDeny(agent, event.requestId);
+        continue;
+      }
       if (event.type === 'permission_request') agent.open.set(event.requestId, event.request);
       if (event.type === 'permission_cancelled' && !agent.open.delete(event.requestId)) continue;
       if (event.type === 'result') this.finishTurn(agent, event);
       else this.emit(event);
+    }
+  }
+
+  private declareToolSet(spec: AgentLaunchSpec): void {
+    if (spec.toolSet !== undefined) this.options.declareToolSet?.(spec.sessionId, spec.toolSet);
+  }
+
+  /** Denies a request at once, without an event: no inbox item and no waiting turn. The CLI lists the denial in its result. */
+  private autoDeny(agent: Agent, requestId: string): void {
+    try {
+      agent.channel.writePermissionAnswer(requestId, { behavior: 'deny', message: AUTO_DENY_MESSAGE });
+    } catch {
+      // the process ended; its exit supersedes the request
     }
   }
 

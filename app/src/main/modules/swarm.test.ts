@@ -158,7 +158,7 @@ describe('swarm module in the real module graph', () => {
     await client.connect(new StreamableHTTPClientTransport(new URL(grant.url), { requestInit: { headers: { Authorization: `Bearer ${grant.token}` } } }));
     try {
       const names = (await client.listTools()).tools.map((tool) => tool.name).filter((name) => name.startsWith('swarm_'));
-      expect(names.sort(), 'swarm tools agents receive').toEqual(['swarm_interrupt', 'swarm_list', 'swarm_results', 'swarm_send', 'swarm_start', 'swarm_status', 'swarm_stop']);
+      expect(names.sort(), 'swarm tools agents receive').toEqual(['swarm_interrupt', 'swarm_list', 'swarm_merge', 'swarm_results', 'swarm_send', 'swarm_start', 'swarm_status', 'swarm_stop']);
     } finally {
       await client.close();
     }

@@ -90,3 +90,30 @@ Collecting the start and end times from the measurement files, and matching the 
 - `docs/measurements/w-ui.md` of the restyle was overwritten by the swarm UI step; the record lists it as open and did not restore it (not this step's file).
 - `pnpm e2e`, `pnpm mutation` and the real-Claude scripts were not run by this step.
 - Temporary files of this step were removed. The reviewer ran in the project directory, so the CLI may have added a session file under the project entry of that directory in the Claude configuration directory (not checked).
+
+## Milestone 5 record
+
+Start: 2026-11-21T22:01Z (`date -u`). End: 2026-11-21T22:12Z (`date -u`).
+
+### Built
+
+- `docs/decisions/0042-milestone-5-results.md`: what milestone 5 built against 0010 and the slice of 0040, the real-Claude runs, the probe results, the amendments to 0010, 0037 and 0040, the review findings and fixes, tests and coverage, measured effort and spend, the re-estimate, open items, recommendations and questions.
+- Status lines: 0041 accepted; 0040 stays proposed and names the sections the build confirmed.
+- `docs/README.md`: index rows for 0040 to 0042, the milestone 5 measurement files, the P40 to P43 scripts and notes.
+- `app/README.md`: the Review section (the pane, the inbox card, the policy file with an example, the `review` settings, the commands and tool sets), the review tests, the visual-check phases, the module map and the init order.
+
+### Commands run
+
+- `pnpm typecheck`: pass. `pnpm test`: 268 files, 3056 tests pass, 15 skipped.
+- The policy example of `app/README.md` parsed with `reviewPolicySchema` through a small script under `/tmp/agide-record/`.
+- A scan of the new and edited docs for the banned words and user paths: none.
+
+### What took long
+
+Reading the measurement files and the reports, and working out the effort totals.
+
+### Not done
+
+- No real-Claude script and no full `pnpm mutation`, `pnpm coverage` or `pnpm e2e` run in this step; 0042 cites the step reports for them.
+- No independent review of this record.
+- Temporary files of this step under `/tmp/agide-record/` were removed.

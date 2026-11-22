@@ -12,6 +12,7 @@ export const PANE_TYPES = {
   transcriptViewer: 'agide/transcript-viewer',
   observationLog: 'agide/observation-log',
   swarm: 'agide/swarm',
+  review: 'agide/review',
 } as const;
 
 export type FirstPartyPaneType = (typeof PANE_TYPES)[keyof typeof PANE_TYPES];
@@ -85,6 +86,14 @@ export const FIRST_PARTY_MANIFEST = {
       configVersion: 1,
       configSchema: { type: 'object', properties: { swarmId: { type: 'string' } } },
       size: { minWidth: 360, preferredWidth: 560 },
+    },
+    {
+      type: PANE_TYPES.review,
+      title: 'Review',
+      tier: 'builtin',
+      configVersion: 1,
+      configSchema: { type: 'object', properties: { swarmId: { type: 'string' }, changesetId: { type: 'string' } } },
+      size: { minWidth: 400, preferredWidth: 720 },
     },
   ],
 } as const;

@@ -35,6 +35,21 @@ export interface AgentLaunchSpec {
   readonly env?: Readonly<Record<string, string>>;
   /** Written to stdin at once after the spawn (P33: nothing comes before it). */
   readonly firstMessage: string;
+  /** `--allowedTools`, such as `mcp__app__report_review` for a reviewer (0040 section 10.1). */
+  readonly allowedTools?: readonly string[];
+  /** The grant's tool set on the app MCP server; absent is `default` (0040 section 10.2). */
+  readonly toolSet?: 'worker' | 'reviewer';
+  /** Every `can_use_tool` request is answered deny at once, without an inbox item (reviewers). */
+  readonly autoDeny?: true;
+}
+
+/** One entry of `background_tasks_changed` as P32 logged it; unknown keys are kept. Agent text in `description`. */
+export interface BackgroundTask {
+  readonly task_id: string;
+  readonly run_id?: string;
+  readonly task_type?: string;
+  readonly description?: string;
+  readonly [key: string]: unknown;
 }
 
 /** The raw `can_use_tool` request as the CLI sent it (P30). Unknown keys are kept. */
@@ -103,6 +118,11 @@ export type RuntimeEvent =
   | { readonly type: 'permission_cancelled'; readonly sessionId: SessionId; readonly requestId: string }
   | { readonly type: 'result'; readonly sessionId: SessionId; readonly result: TurnResult }
   | { readonly type: 'rate_limit'; readonly sessionId: SessionId; readonly info: Record<string, unknown> }
+  /**
+   * `system` with subtype `background_tasks_changed` (P32): the open background tasks after the change. An empty
+   * list means none is open. A stream without the message reads as no open task (0040 section 4.1).
+   */
+  | { readonly type: 'background_tasks'; readonly sessionId: SessionId; readonly tasks: readonly BackgroundTask[] }
   | { readonly type: 'message'; readonly sessionId: SessionId; readonly raw: unknown }
   | {
       readonly type: 'exited';

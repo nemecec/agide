@@ -29,10 +29,13 @@ export interface Collected {
  * Settings for every git call in a directory an agent can write: no command from the repository's configuration
  * runs, and a diff does not depend on the user's own diff settings.
  */
-const GUARD_CONFIG = [
+export const GUARD_CONFIG = [
   'core.fsmonitor=false',
   'core.hooksPath=/dev/null',
   'core.untrackedCache=false',
+  'core.attributesFile=/dev/null',
+  'core.autocrlf=false',
+  'core.safecrlf=false',
   'core.pager=cat',
   'color.ui=never',
   'diff.noprefix=false',
@@ -41,10 +44,42 @@ const GUARD_CONFIG = [
   'diff.renames=false',
 ] as const;
 /** The empty tree: attributes come from nowhere in the worktree, so no `filter` or `diff` driver of the repository runs on an agent's files. */
-const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+export const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 const DIFF_FLAGS = ['--no-ext-diff', '--no-textconv', '--no-color', '--no-renames', '--src-prefix=a/', '--dst-prefix=b/'] as const;
 
-const COMMIT_IDENTITY = { GIT_AUTHOR_NAME: 'Agide', GIT_AUTHOR_EMAIL: 'agide.invalid', GIT_COMMITTER_NAME: 'Agide', GIT_COMMITTER_EMAIL: 'agide.invalid' };
+/** Lists every `filter.<name>.*` and `merge.<name>.*` of the effective configuration, for `driverSettings`. */
+export const DRIVER_LISTING = ['config', '--includes', '--null', '--get-regexp', '^(filter|merge)\\.'] as const;
+
+/**
+ * The keys that blank the drivers named in a `DRIVER_LISTING` output. `info/attributes` of the common directory can
+ * name a driver that `--attr-source` does not switch off, so every named filter and merge driver is set empty.
+ */
+export function driverSettings(listing: string): string[] {
+  const keys = new Set<string>();
+  for (const entry of listing.split('\0')) {
+    const key = entry.split('\n')[0] ?? '';
+    const filter = /^filter\.(.+)\.(clean|smudge|process|required)$/i.exec(key);
+    if (filter !== null) {
+      for (const variable of ['clean', 'smudge', 'process', 'required']) keys.add(`filter.${filter[1]}.${variable}`);
+      continue;
+    }
+    const merge = /^merge\.(.+)\.(driver|name|recursive)$/i.exec(key);
+    if (merge !== null) keys.add(`merge.${merge[1]}.driver`);
+  }
+  return [...keys];
+}
+
+/** The environment that sets each key of `driverSettings` empty (`required` false), without the system attributes file. */
+export function blankingEnv(keys: readonly string[]): Record<string, string> {
+  const env: Record<string, string> = { GIT_ATTR_NOSYSTEM: '1', GIT_CONFIG_COUNT: String(keys.length) };
+  keys.forEach((key, index) => {
+    env[`GIT_CONFIG_KEY_${index}`] = key;
+    env[`GIT_CONFIG_VALUE_${index}`] = key.endsWith('.required') ? 'false' : '';
+  });
+  return env;
+}
+
+export const COMMIT_IDENTITY = { GIT_AUTHOR_NAME: 'Agide', GIT_AUTHOR_EMAIL: 'agide.invalid', GIT_COMMITTER_NAME: 'Agide', GIT_COMMITTER_EMAIL: 'agide.invalid' };
 
 /**
  * The git steps of swarm workspaces. Every call runs through `execFile` without a shell, with a timeout. Values
@@ -61,12 +96,27 @@ export class Git {
     private readonly timeoutMs: number = GIT_TIMEOUT_MS,
   ) {}
 
-  async run(cwd: string, args: readonly string[], options: { readonly identity?: boolean; readonly raw?: boolean; readonly guard?: boolean } = {}): Promise<string> {
-    const env = options.identity === true ? { ...this.env(), ...COMMIT_IDENTITY } : this.env();
+  /**
+   * `guard` ties the call to the registered git directory of a worktree and switches off the repository's command
+   * settings; `blank` (implied by `guard`) also sets every filter and merge driver of the effective configuration empty.
+   */
+  async run(cwd: string, args: readonly string[], options: { readonly identity?: boolean; readonly raw?: boolean; readonly guard?: boolean; readonly blank?: boolean } = {}): Promise<string> {
     const prefix = options.guard === true ? await this.guardArgs(cwd) : ['-C', cwd];
+    const blanking = options.guard === true || options.blank === true ? blankingEnv(await this.driverKeys(prefix)) : {};
+    const env = { ...this.env(), ...blanking, ...(options.identity === true ? COMMIT_IDENTITY : {}) };
     try {
       return (await this.exec('git', [...prefix, ...args], { env, timeoutMs: this.timeoutMs, ...(options.raw === true ? { encoding: 'latin1' as const } : {}) })).stdout;
     } catch (error) {
+      throw new GitError(error instanceof ExecError ? error.firstLine : error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async driverKeys(prefix: readonly string[]): Promise<string[]> {
+    try {
+      return driverSettings((await this.exec('git', [...prefix, ...DRIVER_LISTING], { env: this.env(), timeoutMs: this.timeoutMs })).stdout);
+    } catch (error) {
+      // `config --get-regexp` exits 1 without a message when nothing matches.
+      if (error instanceof ExecError && error.stderr.trim() === '') return [];
       throw new GitError(error instanceof ExecError ? error.firstLine : error instanceof Error ? error.message : String(error));
     }
   }
@@ -132,7 +182,8 @@ export class Git {
   /** `branch` undefined makes a detached worktree. */
   async addWorktree(repo: string, path: string, commit: string, branch?: string): Promise<void> {
     const args = branch === undefined ? ['worktree', 'add', '--detach', '--', path, commit] : ['worktree', 'add', '-b', branch, '--', path, commit];
-    await this.run(repo, args);
+    // An earlier agent of the swarm can have named a driver in info/attributes of the common directory.
+    await this.run(repo, [`--attr-source=${EMPTY_TREE}`, ...GUARD_CONFIG.flatMap((setting) => ['-c', setting]), ...args], { blank: true });
     await this.record(path);
   }
 

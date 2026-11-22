@@ -8,6 +8,8 @@ export interface ParityRow {
   readonly mcp: boolean;
   /** Whether the tool list that agents receive contains the command. */
   readonly exposed: boolean;
+  /** The other grant tool sets whose tool list contains it, such as `reviewer` for `report_review`. */
+  readonly sets?: readonly string[];
   /** The reason a UI-bound command is not a tool, when the command declares one. */
   readonly exempt?: string;
 }
@@ -24,9 +26,13 @@ function uiLabel(ui: Command['ui']): string {
   return parts.length > 0 ? parts.join(', ') : 'bound';
 }
 
-/** `toolNames` is the name list of the MCP tool list as an agent receives it. */
-export function checkParity(commands: readonly Command[], toolNames: readonly string[]): ParityReport {
+/**
+ * `toolNames` is the name list of the MCP tool list as an agent receives it; `setTools` the lists of the other grant
+ * tool sets, which the table names but which do not count as exposed.
+ */
+export function checkParity(commands: readonly Command[], toolNames: readonly string[], setTools: Readonly<Record<string, readonly string[]>> = {}): ParityReport {
   const exposed = new Set(toolNames);
+  const setsOf = (id: string): string[] => Object.entries(setTools).filter(([, names]) => names.includes(id) && !exposed.has(id)).map(([set]) => set);
   const rows = [...commands]
     .sort((a, b) => a.id.localeCompare(b.id))
     .map((command) => ({
@@ -35,6 +41,7 @@ export function checkParity(commands: readonly Command[], toolNames: readonly st
       ui: uiLabel(command.ui),
       mcp: command.mcp,
       exposed: exposed.has(command.id),
+      ...(setsOf(command.id).length === 0 ? {} : { sets: setsOf(command.id) }),
       ...(command.mcpExempt === undefined ? {} : { exempt: command.mcpExempt }),
     }));
   const missing = commands
@@ -55,7 +62,8 @@ export function renderParityMarkdown(report: ParityReport): string {
     '|---|---|---|---|',
     ...report.rows.map((row) => {
       const status = row.ui === 'none' || row.exposed ? 'ok' : row.exempt === undefined ? 'MISSING' : `exempt: ${row.exempt}`;
-      return `| \`${row.id}\` | ${row.ui} | ${yesNo(row.exposed)} | ${status} |`;
+      const tool = row.sets === undefined ? yesNo(row.exposed) : `${row.sets.join(', ')} set only`;
+      return `| \`${row.id}\` | ${row.ui} | ${tool} | ${status} |`;
     }),
     '',
   ];

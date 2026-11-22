@@ -1,7 +1,7 @@
 export * from './types';
 export { LocalProvider, type LocalProviderOptions } from './LocalProvider';
 export { FakeProvider, type FakeCall, type FakeProviderOptions, type FakeStep } from './FakeProvider';
-export { SrtProvider, findExecutable, type SrtProviderOptions } from './SrtProvider';
+export { SrtProvider, findExecutable, srtToolEnvironment, type SrtProviderOptions } from './SrtProvider';
 export { buildSrtSettings, type SrtSettings } from './srtSettings';
 export { ContainerProvider, ownerIdOf, type ContainerProviderOptions } from './ContainerProvider';
 export { buildDockerRunArgs, containerName, CONTAINER_RUN_FLAGS } from './dockerArgs';

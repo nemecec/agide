@@ -1,7 +1,7 @@
 import { tokenUsageFrom } from '../../agents/normalise/transcriptAdapter';
 import { asRecord, num, str, type Json } from '../../agents/normalise/payload';
 import type { SessionId } from '../../session/types';
-import type { CanUseToolRequest, RuntimeEvent, TurnResult } from './types';
+import type { BackgroundTask, CanUseToolRequest, RuntimeEvent, TurnResult } from './types';
 
 const DIAGNOSTIC_PREFIX = '[ede_diagnostic]';
 
@@ -13,7 +13,8 @@ const DIAGNOSTIC_PREFIX = '[ede_diagnostic]';
 export function normalizeMessage(sessionId: SessionId, raw: Json): RuntimeEvent[] {
   switch (raw['type']) {
     case 'system':
-      return raw['subtype'] === 'init' ? [initEvent(sessionId, raw)] : [];
+      if (raw['subtype'] === 'init') return [initEvent(sessionId, raw)];
+      return raw['subtype'] === 'background_tasks_changed' ? [backgroundTasksEvent(sessionId, raw)] : [];
     case 'assistant':
       return assistantEvent(sessionId, raw);
     case 'control_request':
@@ -43,6 +44,11 @@ function initEvent(sessionId: SessionId, raw: Json): RuntimeEvent {
     apiKeySource: str(raw['apiKeySource']),
     tools,
   };
+}
+
+function backgroundTasksEvent(sessionId: SessionId, raw: Json): RuntimeEvent {
+  const tasks = Array.isArray(raw['tasks']) ? raw['tasks'].flatMap((entry) => (asRecord(entry)?.['task_id'] === undefined ? [] : [entry as BackgroundTask])) : [];
+  return { type: 'background_tasks', sessionId, tasks };
 }
 
 function assistantEvent(sessionId: SessionId, raw: Json): RuntimeEvent[] {

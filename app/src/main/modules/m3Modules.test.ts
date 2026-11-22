@@ -24,7 +24,7 @@ afterEach(async () => {
 describe('milestone 3 modules in the real module graph', () => {
   it('provide every service in the documented order', async () => {
     app = await startAppModules({ dataDir: dir });
-    expect(Object.keys(app.services), 'service order').toEqual(['profile', 'tree', 'mcp', 'permissions', 'sessions', 'layout', 'theme', 'inbox', 'browser', 'agents', 'tasks', 'swarm']);
+    expect(Object.keys(app.services), 'service order').toEqual(['profile', 'tree', 'mcp', 'permissions', 'sessions', 'layout', 'theme', 'inbox', 'browser', 'agents', 'tasks', 'swarm', 'review']);
   });
 
   it('read the default profile without permission settings as auto with the Bash sandbox off', async () => {

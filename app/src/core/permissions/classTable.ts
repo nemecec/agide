@@ -92,6 +92,7 @@ export const OUTWARD_BUILTIN_TOOLS: readonly string[] = ['RemoteTrigger', 'Publi
 export const OWN_MCP_SERVERS: readonly string[] = ['app', 'agide-browser'];
 
 const AGENT_START_TOOLS: readonly string[] = ['mcp__app__task_start', 'mcp__app__swarm_start'];
+const MERGE_TOOLS: readonly string[] = ['mcp__app__swarm_merge'];
 
 /** Names that start a read-only tool of a connector or another MCP server, after the connector's own prefix. */
 export const READ_PREFIXES: readonly string[] = ['get', 'search', 'list', 'read', 'fetch', 'query', 'lookup', 'view'];
@@ -174,6 +175,7 @@ export const ACTION_CLASSES: ActionClassTable = [
   row('web.fetch', 'Web fetch', 'approve', [], 'not-covered'),
   row('shell.opaque', 'Commands the gate cannot read', 'approve', [], 'bash-allowlist'),
   row('app.agent_start', 'Starting agents', 'approve', [...AGENT_START_TOOLS], 'not-applicable'),
+  row('app.merge', 'Merging agent work into your branches', 'approve', [...MERGE_TOOLS], 'not-applicable', 'approve'),
   row('builtin.outward', 'Publishing and remote-trigger tools', 'approve', [...OUTWARD_BUILTIN_TOOLS], 'not-covered'),
   row('mcp.other', 'Other MCP tools', 'draft', [], 'not-covered'),
   row('mcp.other.read', 'Other MCP reads', 'allow', [], 'not-covered'),
@@ -199,3 +201,4 @@ export function connectorClassOf(server: string, tool: string): ActionClassId | 
 }
 
 export const AGENT_START_TOOL_NAMES: readonly string[] = AGENT_START_TOOLS;
+export const MERGE_TOOL_NAMES: readonly string[] = MERGE_TOOLS;

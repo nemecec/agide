@@ -7,6 +7,7 @@ import * as layoutModule from './modules/layout';
 import * as mcpModule from './modules/mcp';
 import * as permissionsModule from './modules/permissions';
 import * as profileModule from './modules/profile';
+import * as reviewModule from './modules/review';
 import * as sessionModule from './modules/session';
 import * as swarmModule from './modules/swarm';
 import * as themeModule from './modules/theme';
@@ -31,6 +32,9 @@ export interface InitializedModules {
  * - swarm comes last (0038): it posts inbox items, counts app-started agents through agents, and sets the
  *   stream-json runtime into `streams`, the spawner slot the session service reads at each stream-json launch.
  *   No stream-json session launches during init.
+ * - review comes after swarm (0041): it reads the swarm manager for callers, captures and the merge gate, runs
+ *   reviewers on the swarm's runtime and posts inbox items. Its tables refer to `swarms`, so the swarm tables
+ *   exist first. Dispose runs in reverse, so reviewer runs and checks end before the swarm runtime.
  */
 export async function initModules(ctx: ModuleContext): Promise<InitializedModules> {
   const handles: ModuleHandle<unknown>[] = [];
@@ -52,11 +56,12 @@ export async function initModules(ctx: ModuleContext): Promise<InitializedModule
   const browser = keep(browserModule.init(ctx, { tree, mcp, sessions, profile, permissions, inbox, launch }));
   const agents = keep(agentsModule.init(ctx, { tree, sessions, inbox, profile, launch }));
   const tasks = keep(tasksModule.init(ctx, { tree, sessions, profile, permissions, inbox, browser, launch, agents }));
-  const swarm = keep(swarmModule.init(ctx, { tree, sessions, profile, permissions, inbox, agents, tasks, launch, streams }));
+  const swarm = keep(swarmModule.init(ctx, { tree, sessions, profile, permissions, inbox, agents, tasks, launch, streams, mcp }));
+  const review = keep(reviewModule.init(ctx, { tree, sessions, profile, inbox, mcp, swarm }));
   await mcp.start();
 
   return {
-    services: { profile, tree, mcp, permissions, sessions, layout, theme, inbox, browser, agents, tasks, swarm },
+    services: { profile, tree, mcp, permissions, sessions, layout, theme, inbox, browser, agents, tasks, swarm, review },
     dispose: async () => {
       for (const handle of handles.reverse()) await handle.dispose?.();
     },

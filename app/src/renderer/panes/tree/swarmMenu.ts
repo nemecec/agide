@@ -1,10 +1,11 @@
 import type { TreeNode } from '../../../core/tree/types';
 import { SURFACE_CLAUDE_SESSION } from '../../../core/surfaces/types';
-import { ACTION_ICONS } from '../../ui/icons';
+import { ACTION_ICONS, PANE_ICONS } from '../../ui/icons';
 import type { MenuEntry } from '../ContextMenu';
 import { agentControls, findAgent, groupControls } from '../swarm/swarmModel';
 import { interruptAgent, pauseSwarm, resumeSwarm } from '../swarm/swarmActions';
 import { openSwarmDialog } from '../swarm/swarmDialogStore';
+import { openReviewPane } from '../review/openReviewPane';
 import { openSwarmPane } from '../swarm/openSwarmPane';
 import { currentSwarms } from '../swarm/useSwarms';
 
@@ -23,6 +24,7 @@ export function swarmMenuEntries(node: TreeNode): MenuEntry[] {
       { label: 'Pause swarm', icon: ACTION_ICONS.pause.icon, disabled: !controls.pause, separated: true, run: () => void pauseSwarm(swarm.id) },
       { label: 'Resume swarm', icon: ACTION_ICONS.resume.icon, disabled: !controls.resume, run: () => void resumeSwarm(swarm.id) },
       { label: 'Results', icon: ACTION_ICONS.results.icon, run: () => void openSwarmPane(swarm.id) },
+      { label: 'Review work', icon: PANE_ICONS.review.icon, run: () => void openReviewPane(swarm.id) },
       { label: 'Show definition', run: () => openSwarmDialog({ kind: 'definition', swarmId: swarm.id }) },
       { label: 'Stop swarm…', icon: ACTION_ICONS.stop.icon, danger: true, disabled: !controls.stop, run: () => openSwarmDialog({ kind: 'stop-swarm', swarmId: swarm.id }) },
     ];
@@ -36,6 +38,7 @@ export function swarmMenuEntries(node: TreeNode): MenuEntry[] {
     { label: 'Send message…', icon: ACTION_ICONS['send-message'].icon, disabled: !controls.send, separated: true, run: () => openSwarmDialog({ kind: 'send', swarmId: swarm.id, agent: agent.name }) },
     { label: 'Interrupt', icon: ACTION_ICONS.pause.icon, disabled: !controls.interrupt, run: () => void interruptAgent(swarm.id, agent.name) },
     { label: 'Open swarm', run: () => void openSwarmPane(swarm.id) },
+    { label: 'Review work', icon: PANE_ICONS.review.icon, disabled: agent.workspace !== 'worktree', run: () => void openReviewPane(swarm.id) },
     { label: 'Stop agent…', icon: ACTION_ICONS.stop.icon, danger: true, disabled: !controls.stop, run: () => openSwarmDialog({ kind: 'stop-agent', swarmId: swarm.id, agent: agent.name }) },
   ];
 }

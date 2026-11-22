@@ -1,7 +1,8 @@
 import { join } from 'node:path';
 import { resolveAgentSettings } from '../../core/agents/index';
-import type { Caller } from '../../core/commands/types';
+import { CommandError, type Caller } from '../../core/commands/index';
 import type { InboxService } from '../../core/inbox/index';
+import type { AppMcpServer } from '../../core/mcp/index';
 import type { PermissionService } from '../../core/permissions/index';
 import { profilePaths, type ProfileService } from '../../core/profile/index';
 import { profileLaunchSpec, type LaunchContributors, type SessionEvent, type SessionService, type StreamSpawners } from '../../core/session/index';
@@ -30,6 +31,14 @@ import type { AgentsRuntime } from './agents';
 /** The manager the module builds, with the steps the swarm pane's "Remove swarm…" dialog calls. */
 export interface SwarmModuleService extends SwarmService {
   readonly manager: PersistentSwarmManager;
+  /** The agent runtime, on which the review module runs its reviewers (0041). */
+  readonly runtime: AgentRuntime;
+  /** True when the runtime is the in-memory one of `AGIDE_SWARM_RUNTIME=fake`, which has no MCP server. */
+  readonly fakeRuntime: boolean;
+  /** The review module's `swarm_merge` (0040 section 15); until it is set the command answers as not built. */
+  setMergeHandler(handler: SwarmCommandHandlers['swarm_merge']): () => void;
+  /** The review module's step before the first launch of a swarm with a worktree agent. */
+  setBeforeFirstLaunch(hook: (swarmId: string) => Promise<void | readonly string[]>): () => void;
 }
 
 /**
@@ -52,6 +61,8 @@ export function init(
     tasks: TasksService;
     launch: LaunchContributors;
     streams: StreamSpawners;
+    /** Grants of the app MCP server: a launch's tool set (worker, reviewer) is declared on the grant. */
+    mcp?: Pick<AppMcpServer, 'declareToolSet'>;
   },
 ): ModuleHandle<SwarmModuleService> {
   const { tree, sessions, profile, inbox, agents, tasks } = deps;
@@ -65,7 +76,7 @@ export function init(
   if (process.env['AGIDE_SWARM_RUNTIME'] === 'fake') {
     runtime = new InMemoryAgentRuntime();
   } else {
-    const real = new StreamAgentRuntime({ sessions });
+    const real = new StreamAgentRuntime({ sessions, ...(deps.mcp === undefined ? {} : { declareToolSet: (sessionId, toolSet) => deps.mcp!.declareToolSet(sessionId, toolSet) }) });
     cleanups.push(deps.launch.register(real.contributor), deps.streams.set(real));
     runtime = real;
   }
@@ -78,6 +89,7 @@ export function init(
     appRoot,
   });
   const taskStarts = new TaskStartStore(ctx.db);
+  let beforeFirstLaunch: ((swarmId: string) => Promise<void | readonly string[]>) | undefined;
   const leaves = new Map<string, NodeId>();
   /** The leaf of an agent's session: remembered, or found in the tree after an app restart. */
   const leafOf = (sessionId: string): NodeId | undefined => {
@@ -107,6 +119,7 @@ export function init(
     knownRepositories: () => taskStarts.repositories(),
     sessionTitle: (sessionId) => sessions.get(sessionId)?.title,
     leafOf,
+    beforeFirstLaunch: async (swarmId) => beforeFirstLaunch?.(swarmId),
     onAnswered: (sessionId, requestId, decision) => agents.controller.streamResponse(sessionId, requestId, decision),
     onStarted: ({ swarmId, folderId, agent, sessionId }) => {
       // The ledger holds what the agent's earlier processes reported, also across an app restart.
@@ -141,6 +154,7 @@ export function init(
   } as const;
   const as = (caller: Caller) => swarmCallerOf(caller, facts);
   const done = { ok: true } as const;
+  let mergeHandler: SwarmCommandHandlers['swarm_merge'];
 
   const handlers: SwarmCommandHandlers = {
     swarm_start: ({ definition, parentFolderId, bypass }, caller) =>
@@ -170,11 +184,31 @@ export function init(
       manager.answerApproval(swarmId, agent, requestId, decision);
       return done;
     },
+    swarm_merge: (input, caller) => {
+      if (mergeHandler === undefined) throw new CommandError('failed', 'swarm_merge is not built yet');
+      return mergeHandler(input, caller);
+    },
   };
   cleanups.push(...registerSwarmCommands(ctx.commands, handlers));
 
   return {
-    service: { manager },
+    service: {
+      manager,
+      runtime,
+      fakeRuntime: process.env['AGIDE_SWARM_RUNTIME'] === 'fake',
+      setBeforeFirstLaunch: (hook) => {
+        beforeFirstLaunch = hook;
+        return () => {
+          if (beforeFirstLaunch === hook) beforeFirstLaunch = undefined;
+        };
+      },
+      setMergeHandler: (handler) => {
+        mergeHandler = handler;
+        return () => {
+          if (mergeHandler === handler) mergeHandler = undefined;
+        };
+      },
+    },
     dispose: async () => {
       await manager.shutdown();
       for (const off of cleanups) off();

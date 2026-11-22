@@ -235,7 +235,18 @@ describe('UI and MCP parity of the app registry', () => {
     const client = new Client({ name: 'parity', version: '0' });
     await client.connect(new StreamableHTTPClientTransport(new URL(grant.url), { requestInit: { headers: { Authorization: `Bearer ${grant.token}` } } }));
     clients.push(client);
-    const report = checkParity(running.commands.list(), (await client.listTools()).tools.map((tool) => tool.name));
+    const setTools: Record<string, string[]> = {};
+    for (const set of ['worker', 'reviewer'] as const) {
+      const setGrant = running.services.mcp.grant(`parity-${set}`, parent.id);
+      running.services.mcp.declareToolSet(`parity-${set}`, set);
+      const setClient = new Client({ name: `parity-${set}`, version: '0' });
+      await setClient.connect(new StreamableHTTPClientTransport(new URL(setGrant.url), { requestInit: { headers: { Authorization: `Bearer ${setGrant.token}` } } }));
+      clients.push(setClient);
+      setTools[set] = (await setClient.listTools()).tools.map((tool) => tool.name);
+    }
+    const report = checkParity(running.commands.list(), (await client.listTools()).tools.map((tool) => tool.name), setTools);
+    expect(report.rows.find((row) => row.id === 'report_review')?.sets, 'report_review is listed to reviewers only').toEqual(['reviewer']);
+    expect(report.rows.find((row) => row.id === 'report_outcome')?.sets, 'report_outcome is listed to worktree agents only').toEqual(['worker']);
 
     expect(report.missing, 'UI-bound commands that agents cannot call').toEqual([]);
     expect(report.rows.map((row) => row.id), 'the registry includes the session and surface type commands').toEqual(

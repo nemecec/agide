@@ -102,3 +102,28 @@ End: 2026-11-21T07:25:16Z
 ## Temporary files
 
 The e2e log under `/tmp` and the session-module backup used for the mutation were removed. The tests remove their temporary directories.
+
+# Milestone 5 contracts (review ladder, 0041)
+
+Start: 2026-11-21T15:24:45Z (date -u). End: see the last line.
+
+## What was built
+
+- `docs/decisions/0041-milestone-5-architecture-and-contracts.md`: the first slice of 0040 split over w-capture, w-reviewer, w-manager and w-ui; the modules; the contracts; ownership and contract files; the module initialization order with `review` after `swarm`; the test strategy; the choices.
+- `app/src/core/review`: zod schemas and types of changesets, files, hunks, reasons, checks, runs, reports and findings, decisions, comments, seen marks and policy snapshots (`schemas.ts`); the service interfaces `CaptureService`, `PolicyLoader`, `CheckExecutor`, `RiskRules`, `ReviewerRuntime`, `ReviewBudget`, `SendBackChannel`, `Merger`, `ChangesetStore`, `ReviewManager` and `ReviewSwarmFacts` (`types.ts`); the policy schema and the user overlay schema (`policy/schema.ts`); the reason catalogue; `computeRung` with demotions, the reviewer tier rule and the summary hash (`rungs.ts`); the transition table and `checkTransition` (`stateMachine.ts`); anchoring (`anchors.ts`); the `review_*`, `report_review` and `report_outcome` commands with tool sets and the parity exemptions (`commands.ts`); the review profile settings; the migration of the `review` tables; `InMemoryChangesetStore` with its contract suite; `InMemoryReviewManager` with its contract suite; `InMemoryReviewerRuntime` over the swarm `AgentRuntime` with its contract suite; fakes and fixtures.
+- Shared files, smallest changes: `swarm/runtime/types.ts` (reviewer launch fields, the `background_tasks` event), `swarm/commands.ts` (`swarm_merge`), `commands/types.ts` (`toolSets`, `inToolSet`), `mcp/tools.ts` (the tool-set filter, default `default`), `events/index.ts`, `profile/types.ts` and `schemas.ts` (`review` settings), `blocks/firstParty.ts` (`agide/review`), `main/context.ts`, `main/modules.ts`, `renderer/panes/paneComponents.tsx`, `renderer/panes/inbox/ItemCard.tsx` (calls `ReviewCardActions`), `renderer/ui/icons.ts` (`PANE_ICONS.review`). Tests updated for the new tool and service: `core/swarm/commands.test.ts`, `main/modules/swarm.test.ts`, `main/modules/m3Modules.test.ts`, `e2e/swarmManager.spec.ts`.
+- `app/src/main/modules/review.ts` (stub: migrates and registers pending commands) with `review.test.ts`; renderer stubs `panes/review/ReviewPane.tsx`, `ChangesetList.tsx`, `ChangesetView.tsx`, `FileView.tsx`, `HunkView.tsx`, `review.css`, `panes/inbox/ReviewCardActions.tsx`, with `ReviewPane.test.ts`.
+- Regenerated `docs/parity.md` (`pnpm parity`) and `docs/blocks.md` (`pnpm blocks-docs`).
+
+## Commands run and account
+
+- Commands run: `pnpm typecheck` (green), `pnpm test` (green after the module order test was updated), `AGIDE_HIDDEN=1 pnpm e2e` (one failure in the first run, the swarm tool list of `e2e/swarmManager.spec.ts`, which now includes `swarm_merge`; see the last line for the second run), `pnpm check:colours` (green), `pnpm parity` (green).
+- Mutation checks, each restored after the run: the reviewer accept above B, a merged changeset not final, the floor ignoring hard reasons, a demotion ignored, accept without the hash check, accept without the rung check, `report_review` for another changeset, the seen rule at D dropped, an agent's request below the current rung, a merged changeset superseded, the store's compare-and-swap dropped, an accept at B without a report or the tick, the tool list ignoring tool sets. Each fails a test. The hash mutation survived at first, because the seen rule refused before the hash check; the contract test now marks the hunk seen first.
+- Longest step: the in-memory review manager and its contract suite, since it has to carry every rule of 0040 sections 9 to 16 that the persistent manager must pass.
+- No real-Claude calls.
+- Disk: about 3.7 GiB free at the start, about 3.5 GiB during the runs.
+- Not done here, by design: the capture, the check executor, the rules, the policy reader, the stream reviewer runner, grant tool sets on `GrantStore`, the SQLite store, the persistent manager, inbox items, `app.merge`, the UI. The contract suites for the SQLite store, the persistent manager and the stream reviewer runner are skipped with `[pending ...]`.
+- Second e2e run with hidden windows: all passed. Final `pnpm typecheck`, `pnpm test` and `pnpm check:colours`: green.
+- Temporary files: `/tmp/agide-contracts/` (logs, the mutation script and its backups, about 100 KB).
+
+End: 2026-11-21T15:55:57Z (date -u).

@@ -14,6 +14,7 @@ import type { TasksService } from '../core/tasks/index';
 import type { ThemeService } from '../core/theme/service';
 import type { TreeService } from '../core/tree/index';
 import type { BrowserViews } from './browser/views';
+import type { ReviewModuleService } from './modules/review';
 
 /** What every main-process module receives. */
 export interface ModuleContext {
@@ -48,7 +49,7 @@ export interface Desktop {
   setBadgeCount(count: number): void;
 }
 
-/** Services the modules provide, in init order (0029, 0038): profile, tree, mcp, permissions, session, layout, theme, inbox, browser, agents, tasks, swarm. */
+/** Services the modules provide, in init order (0029, 0038, 0041): profile, tree, mcp, permissions, session, layout, theme, inbox, browser, agents, tasks, swarm, review. */
 export interface Services {
   readonly profile: ProfileService;
   readonly tree: TreeService;
@@ -62,6 +63,7 @@ export interface Services {
   readonly agents: AgentsService;
   readonly tasks: TasksService;
   readonly swarm: SwarmService;
+  readonly review: ReviewModuleService;
 }
 
 export interface ModuleHandle<S> {

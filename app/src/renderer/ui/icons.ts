@@ -2,14 +2,17 @@ import {
   AlarmClock,
   ArrowLeft,
   ArrowRight,
+  ArrowUpToLine,
   Bot,
   Check,
+  CheckCheck,
   ChevronDown,
   ChevronRight,
   CircleCheck,
   CircleDashed,
   CircleExclamationPoint,
   CircleStop,
+  FileDiff,
   CircleX,
   Clock,
   Copy,
@@ -22,6 +25,7 @@ import {
   FileText,
   FolderPlus,
   Gauge,
+  GitMerge,
   Globe,
   Hand,
   Inbox,
@@ -32,6 +36,7 @@ import {
   Lock,
   LoaderCircle,
   MessageCircleQuestionMark,
+  MessageSquarePlus,
   MessageSquareText,
   Network,
   Minus,
@@ -94,6 +99,7 @@ export const PANE_ICONS = {
   settings: spec(Settings, 'Settings'),
   layout: spec(LayoutDashboard, 'Layout'),
   swarm: spec(Network, 'Swarm'),
+  review: spec(FileDiff, 'Review'),
 } as const;
 export type PaneKind = keyof typeof PANE_ICONS;
 
@@ -170,6 +176,10 @@ export const ACTION_ICONS = {
   'open-to-side': spec(PanelRight, 'Open to the side'),
   devtools: spec(Wrench, 'Developer tools'),
   settings: spec(Settings, 'Settings'),
+  comment: spec(MessageSquarePlus, 'Comment on this line'),
+  merge: spec(GitMerge, 'Merge accepted work'),
+  escalate: spec(ArrowUpToLine, 'Raise the rung'),
+  'mark-seen': spec(CheckCheck, 'Mark seen'),
 } as const;
 export type ActionKind = keyof typeof ACTION_ICONS;
 

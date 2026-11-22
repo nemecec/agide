@@ -12,6 +12,7 @@ import { phaseFocus } from './lib/visual/phaseFocus.mjs';
 import { phaseSwarm } from './lib/visual/phaseSwarm.mjs';
 import { phaseTheme } from './lib/visual/phaseTheme.mjs';
 import { phaseProfiles } from './lib/visual/phaseProfiles.mjs';
+import { phaseReview } from './lib/visual/phaseReview.mjs';
 import { phaseWorkspace } from './lib/visual/phaseWorkspace.mjs';
 
 const PHASES = {
@@ -27,6 +28,7 @@ const PHASES = {
   focus: phaseFocus,
   theme: phaseTheme,
   swarm: phaseSwarm,
+  review: phaseReview,
 };
 
 const argument = (name) => {

@@ -4,7 +4,7 @@ import { isLooser, MODE_ORDER } from '../../permissions/modes';
 import type { PermissionMode, SessionId } from '../../session/types';
 import type { NodeId } from '../../tree/types';
 import { defaultAgentBudget } from '../budget';
-import { checkDefinitionGraph, dependenciesOf, swarmDefinitionSchema, type AgentSpec, type SwarmDefinition } from '../definition';
+import { checkDefinitionGraph, defaultReviewShare, dependenciesOf, swarmDefinitionSchema, type AgentSpec, type SwarmDefinition } from '../definition';
 import { strictestMode } from '../policy';
 import type { AgentLaunchSpec, AgentRuntime, RuntimeEvent } from '../runtime/types';
 import { DEFAULT_SWARM_SETTINGS, type SwarmSettings } from '../settings';
@@ -222,7 +222,7 @@ export class InMemorySwarmManager implements SwarmManager {
       definition: swarm.definition,
       budget: {
         usdTotal: budget.usdTotal,
-        reviewUsd: budget.usdTotal * budget.reviewShare,
+        reviewUsd: budget.usdTotal * (budget.reviewShare ?? defaultReviewShare(swarm.definition)),
         reportedUsd: reported,
         estimatedUsd: 0,
         reservedUsd: 0,

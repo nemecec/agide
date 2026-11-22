@@ -237,4 +237,11 @@ describe('normalizeMessage', () => {
     expect(normalizeMessage(S, { type: 'user', message: {} }), 'tool result').toEqual([]);
     expect(normalizeMessage(S, { type: 'something_new' }), 'future type').toEqual([]);
   });
+
+  it('turns background_tasks_changed into the open task list, empty when none is open', () => {
+    const task = { task_id: 'bgsdf467f', run_id: 'r1', task_type: 'local_bash', description: 'Sleep for 90 seconds in background' };
+    expect(normalizeMessage(S, { type: 'system', subtype: 'background_tasks_changed', tasks: [task, { no_id: true }] }), 'a start').toEqual([{ type: 'background_tasks', sessionId: S, tasks: [task] }]);
+    expect(normalizeMessage(S, { type: 'system', subtype: 'background_tasks_changed', tasks: [] }), 'the last task ended').toEqual([{ type: 'background_tasks', sessionId: S, tasks: [] }]);
+    expect(normalizeMessage(S, { type: 'system', subtype: 'background_tasks_changed' }), 'no list reads as none').toEqual([{ type: 'background_tasks', sessionId: S, tasks: [] }]);
+  });
 });

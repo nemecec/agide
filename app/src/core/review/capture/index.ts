@@ -1,0 +1,10 @@
+export { GitCaptureService, type GitCaptureServiceDeps } from './GitCaptureService';
+export { ProcessCheckExecutor, type CheckEnvironment, type CheckExecutorDeps } from './ProcessCheckExecutor';
+export { InMemoryCaptureState, SqliteCaptureState, type CaptureJob, type CaptureStateStore, type StoredSnapshot } from './captureState';
+export { checkpointRef, commitCheckpoint, readDiff, snapshotTree, type CapturedDiff, type WorktreeTree } from './checkpoint';
+export { cacheEnvironment, checkCacheDirectory, checkEnvironment, isScrubbedName } from './checkEnv';
+export { GuardedGit, ReviewGitError, DIFF_FLAGS, EMPTY_TREE, worktreeGitDir } from './guardedGit';
+export { DEFAULT_DIFF_LIMITS, DiffParseError, parseDiff, parseRaw, type DiffLimits, type ParsedDiff } from './parseDiff';
+export { compareSnapshots, takeSnapshot, type RepoSnapshot, type SnapshotDifference } from './repoSnapshot';
+export { userConfigPaths } from './userConfigPaths';
+export { resolveCheckEnvironment, type CheckEnvironmentInput } from './checkEnvironment';

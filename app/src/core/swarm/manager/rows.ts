@@ -1,6 +1,6 @@
 import type { PermissionMode } from '../../session/types';
 import { defaultAgentBudget } from '../budget';
-import { swarmDefinitionSchema, type AgentSpec, type SwarmDefinition } from '../definition';
+import { defaultReviewShare, swarmDefinitionSchema, type AgentSpec, type SwarmDefinition } from '../definition';
 import { resolveTier, type TierTable } from '../tiers';
 import type { AgentRunState, EndReason, InterruptedBy, SwarmState } from '../types';
 import { BudgetLedger } from './BudgetLedger';
@@ -13,7 +13,7 @@ export const RESULT_TEXT_MAX = 8_000;
 export function ledgerFor(definition: SwarmDefinition): BudgetLedger {
   return new BudgetLedger({
     usdTotal: definition.budget.usdTotal,
-    reviewShare: definition.budget.reviewShare,
+    reviewShare: definition.budget.reviewShare ?? defaultReviewShare(definition),
     agents: definition.agents.map((agent) => ({
       name: agent.name,
       budgetUsd: agent.budget.usd ?? defaultAgentBudget(definition.budget.usdTotal, definition.budget.usdPerAgent),
@@ -110,6 +110,8 @@ export function entryFromRows(row: SwarmRow, agentRows: readonly AgentRow[], tie
         turns: agentRow.turns,
         text: agentRow.result_text ?? undefined,
         errors: [],
+        denials: 0,
+        deniedTools: [],
         cwd: agentRow.cwd ?? undefined,
         branch: agentRow.branch ?? undefined,
         meta: parseMeta(agentRow.result_meta),

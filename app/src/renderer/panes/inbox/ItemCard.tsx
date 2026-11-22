@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ItemContextInfo, ItemRow } from '../../../core/inbox/viewTypes';
 import { SWARM_APPROVAL_ORIGIN } from '../../../core/swarm/types';
+import { ReviewCardActions } from './ReviewCardActions';
 import { SwarmApprovalActions } from './SwarmApprovalActions';
 import { api } from '../../api';
 import { Button } from '../../ui/Button';
@@ -147,6 +148,7 @@ export function ItemCard({ item, canPeek, peeking, onPeek }: { item: ItemRow; ca
               </>
             )}
             <SwarmApprovalActions key={item.id} item={item} />
+            <ReviewCardActions item={item} />
             {needsAnswer(item) && item.linkNodeId !== undefined && typeof browserApprovalId !== 'string' && item.origin !== SWARM_APPROVAL_ORIGIN && (
               <Button variant="primary" onClick={openSession} data-testid="inbox-answer-in-session">
                 Open session to answer

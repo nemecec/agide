@@ -39,6 +39,7 @@ export const ACTION_CLASS_IDS = [
   'web.fetch',
   'shell.opaque',
   'app.agent_start',
+  'app.merge',
   'builtin.outward',
   'mcp.other',
   'mcp.other.read',

@@ -14,29 +14,46 @@ function tabGroups(node: ArrangementNode, path: string): TabsGroup[] {
   return [{ path, panes: node.tabs.panes }];
 }
 
-type Operation = { readonly op: 'add' | 'replace'; readonly path: string; readonly value: unknown };
+export type Operation = { readonly op: 'add' | 'replace'; readonly path: string; readonly value: unknown };
+
+interface PanePlan {
+  readonly type: string;
+  readonly config: Record<string, unknown>;
+  /** Names the new instance: `<prefix>-<first characters of the swarm id>`. */
+  readonly idPrefix: string;
+  /** Finds the pane that already shows this subject. */
+  readonly matches: (instance: { readonly type: string; readonly config?: Record<string, unknown> | undefined }) => boolean;
+  /** Writes `config` into a pane that exists already. */
+  readonly refreshConfig?: boolean;
+}
 
 /**
- * The layout patch that shows the swarm's pane: an existing pane for the swarm is brought to the front of its
- * tab group; otherwise a pane is added to the group that holds the main surface, or to the last group.
+ * The layout patch that shows a swarm's pane: an existing pane for the swarm is brought to the front of its tab
+ * group; otherwise a pane is added to the group that holds the main surface, or to the last group.
  */
-export function planOpenSwarmPane(view: Pick<LayoutViewState, 'layout'>, swarmId: string): Operation[] | undefined {
+export function planOpenPane(view: Pick<LayoutViewState, 'layout'>, plan: PanePlan): Operation[] | undefined {
   const { instances, arrangement } = view.layout;
   const groups = tabGroups(arrangement, '/arrangement');
-  const existing = Object.entries(instances).find(([, instance]) => instance.type === SWARM_PANE && instance.config?.['swarmId'] === swarmId);
+  const existing = Object.entries(instances).find(([, instance]) => instance.type === plan.type && plan.matches(instance));
   if (existing !== undefined) {
     const group = groups.find((candidate) => candidate.panes.includes(existing[0]));
-    return group === undefined ? undefined : [{ op: 'replace', path: `${group.path}/tabs/active`, value: existing[0] }];
+    if (group === undefined) return undefined;
+    const activate: Operation = { op: 'replace', path: `${group.path}/tabs/active`, value: existing[0] };
+    return plan.refreshConfig === true ? [{ op: 'replace', path: `/instances/${existing[0]}/config`, value: plan.config }, activate] : [activate];
   }
   const target = groups.find((group) => group.panes.some((id) => instances[id]?.type === 'agide/surface-host')) ?? groups[groups.length - 1];
   if (target === undefined) return undefined;
-  let id = `swarm-${swarmId.replaceAll(/[^a-zA-Z0-9_-]/g, '').slice(0, 8)}`;
+  const swarmId = typeof plan.config['swarmId'] === 'string' ? plan.config['swarmId'] : '';
+  let id = `${plan.idPrefix}-${swarmId.replaceAll(/[^a-zA-Z0-9_-]/g, '').slice(0, 8)}`;
   while (id in instances) id = `${id}-x`;
   return [
-    { op: 'add', path: `/instances/${id}`, value: { type: SWARM_PANE, version: '^1', configVersion: 1, config: { swarmId } } },
+    { op: 'add', path: `/instances/${id}`, value: { type: plan.type, version: '^1', configVersion: 1, config: plan.config } },
     { op: 'replace', path: `${target.path}/tabs`, value: { panes: [...target.panes, id], active: id } },
   ];
 }
+
+export const planOpenSwarmPane = (view: Pick<LayoutViewState, 'layout'>, swarmId: string): Operation[] | undefined =>
+  planOpenPane(view, { type: SWARM_PANE, config: { swarmId }, idPrefix: 'swarm', matches: (instance) => instance.config?.['swarmId'] === swarmId });
 
 /** Shows the swarm pane in the window's layout; resolves with a failure message, or undefined. */
 export async function openSwarmPane(swarmId: string): Promise<string | undefined> {

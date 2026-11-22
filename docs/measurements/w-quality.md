@@ -1,154 +1,48 @@
-# w-quality
+# w-quality: test quality after the review integration
 
-Start: 2026-11-17 17:41:38 UTC
-End: 2026-11-17 17:57:16 UTC
+Start: 2026-11-21T18:02Z. End: 2026-11-21T19:12Z.
 
 ## What was built
 
-- Decision logic moved out of the Electron entry points into functions the Vitest suite runs: `src/main/ipcPolicy.ts` (which senders may call commands), `src/main/windowPolicy.ts` (app frame URLs, `window.open` decision, web preferences), `src/main/focusRequest.ts`, `src/shared/rendererApi.ts` (the `window.api` object over a minimal `ipcRenderer` interface). `ipc.ts`, `window.ts`, `index.ts` and the preload now only wire them.
-- `isAppFrameUrl` no longer throws for a frame URL that does not parse while a dev server is set; it answers false.
-- Negative cases tested: sender outside an app window, subframe of an app page, main frame on a foreign page, command id that is not a string, other origin, other port, other scheme, look-alike host, sibling directory with the same name prefix, `window.open` to web, file, data and script URLs, cancelled navigation, denied permissions.
-- `ipc.ts` and `window.ts` are tested against a mocked `electron` module. Mutations (dropping the main-frame check, widening the link scheme, loosening the directory prefix, removing the navigation cancel) each fail a test.
-- Renderer: `layout/hostModel.ts` extracted from `LayoutHost.tsx` (tab titles, input bindings, header hiding, the engine sync and save decisions). Tests for treeModel, profileModel, inbox format, hostModel, useTreeNodes, useInbox, useLayoutState, useProfiles, InboxPane with ItemCard, and TerminalPane (xterm mocked). Hook and pane tests run in jsdom with a fake `window.api` (`src/renderer/testing`). Stale-answer ordering, debounce, unsubscribe on unmount, plain-text rendering of agent text and the snapshot/stream ordering of the terminal are covered.
-- `pnpm coverage:e2e` (`scripts/coverage-e2e.mjs`, `e2e/coverageHook.ts`): builds with source maps, runs Playwright with `NODE_V8_COVERAGE` for the main process and `page.coverage` for each window, maps both to `src` with `monocart-coverage-reports`, prints a table. Not a CI gate. The hook is installed from `playwright.config.ts` only when `AGIDE_E2E_COVERAGE_DIR` is set, so the specs are unchanged.
-- Dependencies added as dev dependencies: `jsdom`, `monocart-coverage-reports` (no install scripts).
-- Thresholds in `vitest.config.ts` raised and extended; `coverage-e2e/` added to `app/.gitignore`; `app/README.md` updated. The root README names no test commands and is unchanged.
+- Pure functions extracted from the review module (`app/src/core/review/budgetDay.ts`: local day, time to midnight, the midnight timer, the daily limit; `app/src/core/review/reviewCaller.ts`: reading a command caller as a review caller) with unit tests including edge and negative cases. `app/src/main/modules/review.ts` calls them.
+- New unit tests: policy globs, the fail-closed pipeline slots, the caller view of a changeset (reviewer words, check output, null values), the inbox failure paths, the `review_seen` input rules, the module wiring of a connected capture service (pending captures, capture at the end of a run, a failed policy preparation), a disposed reviewer runner, summary hash binding, the floor rule of the state machine, the overlay network rule, secret detection for AWS temporary keys and symbolic links, attribute conversion in the reviewer checkout.
+- A decision contract for both review managers (`app/src/core/review/manager/reviewDecisionContract.ts`): demotion tokens of another changeset and expired tokens, escalation and demotion to the same rung, a reviewer that sees nothing, seen marks of files with and without hunks, a stale reject, the hunks of reviewer findings at rung D, rung A without a passed check, a rejected agent in the merge gate, reviewers and agents that never merge.
+- `pnpm mutation` gained entries for the review ladder: policy read from the base commit only and the overlay that only tightens, hard floors, raise-only rungs, agents and reviewers that never demote or accept, tool sets of the report tools, report scope, hash-bound seen marks, accept lapse, the merge gate, budget exhaustion, secret detection and the scrubbed check environment. Each was broken once and a test failed.
+- Vitest: review test doubles, contracts and fixtures are excluded from coverage like the other contract files. Thresholds for `src/core/review/**`, `src/main/modules/review.ts` and `src/renderer/panes/review/**` are new; `src/core`, `src/main` and `src/main/modules` rose.
 
-## Unit coverage (pnpm coverage)
+## Mutation results
 
-| Area | Statements | Branches | Functions | Lines | Threshold (stmt/branch/func/line) |
-|---|---|---|---|---|---|
-| src/core | 93.2 | 82.9 | 95.0 | 96.8 | 92 / 81 / 94 / 95 (was 85 / 70 / 85 / 85) |
-| src/main | 66.5 | 51.6 | 69.2 | 69.4 | 65 / 50 / 68 / 68 (new) |
-| src/main/modules | 78.7 | 62.4 | 78.8 | 81.7 | 77 / 61 / 77 / 80 (was 70 / 55 / 65 / 70) |
-| src/shared | 100 | - | 100 | 100 | 98 / - / 98 / 98 (new) |
-| renderer logic files | 94.6 | 88.5 | 89.2 | 96.0 | 93 / 87 / 88 / 95 (new) |
-| src/renderer, all files | 47.8 | 49.1 | 42.2 | 47.1 | no threshold |
-| src/preload | 0 | - | - | 0 | no threshold; the logic is in src/shared |
-| All files | 82.3 | 73.3 | 82.1 | 85.0 | |
+The first run of the new entries left survivors. Tests were added for each real one. Entries that cannot change behaviour were removed from the list: a hard-reason floor of reviewer reasons (no reviewer reason is hard), a demotion to the same rung (the state machine refuses it with the same message), a reviewer reading changesets (the folder scope refuses it anyway), a repository reason accepted by a non-user at rung E (only the user accepts at E), an accept on other content (the content hash of a changeset is fixed), the merge taking agents that are not accepted (the gate refuses them first), a demotion token used twice (the second use lowers nothing), the seen-mark level (hashes differ per level) and the changeset id of a demotion token (the content hash covers it; the entry removes all three token checks together).
 
-The renderer logic threshold covers dockviewAdapter, hostModel, useLayoutState, treeModel, profileModel, useTreeNodes, useProfiles, TerminalPane, InboxPane, format, useInbox and ItemCard. TreePane, LayoutHost, SessionPeek, ProfileRail, SetupPane, ContextMenu and the other components have no unit test. src/main stays low because `index.ts` (process start-up) and `desktop.ts` have none; the end-to-end run reaches them.
+A mutation of the reviewer checkout that restores attribute reading survived from the earlier milestone, because configured filters are blanked and the old test could not see a conversion. A test with `eol` and `ident` attributes kills it.
 
-## End-to-end coverage (pnpm coverage:e2e, V8, mapped to source)
+The last full run left one survivor (`checkout reads attributes`); a test was added and a filtered run of that entry killed it, so no single full run showed every entry killed. The fix step that followed ran the full list again; see `fix.md`.
 
-| Process | Area | Functions | Branches | Lines |
-|---|---|---|---|---|
-| renderer | src/renderer | 81.7 | 65.8 | 82.9 |
-| renderer | src/shared | 83.3 | - | 97.1 |
-| main | src/core | 70.9 | 43.5 | 74.6 |
-| main | src/main | 77.5 | 63.4 | 83.2 |
+## Coverage (unit tests, V8, two runs)
 
-V8 reports no statement counts. The preload does not appear in the main-process data and shows in the renderer data as covered.
+| Area | Statements | Branches | Functions | Lines | Threshold (s/b/f/l) |
+| --- | --- | --- | --- | --- | --- |
+| all of src | 90.9 | 82.7 | 90.1 | 93.3 | none |
+| src/core | 94.3 | 86.0 | 94.8 | 97.1 | 94/85/94/97 |
+| src/core/review | 95.2 | 88.3 | 95.1 | 98.1 | 95/88/95/98 |
+| src/core/swarm | 96.1 | 90.2 | 94.5 | 98.7 | unchanged |
+| src/main | 81.7 | 69.4 | 79.0 | 85.0 | 81/68/78/84 |
+| src/main/modules | 83.8 | 69.1 | 81.2 | 86.9 | 83/68/81/86 |
+| src/main/modules/review.ts | 83.8 | 74.2 | 67.9 | 87.0 | 83/73/67/86 |
+| src/renderer/panes/review | 95.1 | 83.2 | 96.4 | 97.2 | 95/83/96/97 |
+| src/renderer/ui | 98.2 | 92.3 | 98.6 | 99.3 | unchanged |
+| src/shared | 100 | none | 100 | 100 | unchanged |
 
-## What took long
+Before the work the review module had 78.6 statements and 65.5 functions, and `src/core/review` 86.1 functions.
 
-- `page.coverage` entries from Playwright carry `url`, `source` and `functions` directly; passing Puppeteer's `includeRawScriptCoverage` produced entries without function data and an empty report.
-- Node's coverage files carry no source text, so the report read the built bundle from disk for its source map. A report directory with the same name as the raw data directory deleted the raw data.
-- Electron leaves through `app.exit`; `v8.takeCoverage()` is called through `app.evaluate` before close so the counters are written.
+`pnpm typecheck`, `pnpm coverage` (twice), `pnpm mutation` and `pnpm e2e` (hidden windows, every end-to-end test) passed. `pnpm coverage:e2e` was not run.
 
-## Not finished or not clean
+## What took long and what is left
 
-- The PTY session tests in `src/core/session/PtySessionService.test.ts` are timing sensitive. Under the parallel load of `pnpm coverage`, a different test of that file timed out in each of two separate runs (a multi-line prompt paste, a permission-request wait) and passed on the next run and alone. Not changed.
-- The end-to-end test of two profiles expects a default profile that adopts the CLI login; it fails when `CLAUDE_CONFIG_DIR` is set in the environment of the run and passes with the variable unset. The workspace Undo test failed once with a detached button in one coverage run and passed in all later runs.
-- `pnpm e2e` passed with `CLAUDE_CONFIG_DIR` unset.
-- `pnpm coverage:e2e` has no threshold and exits with the status of the Playwright run.
+- The full mutation run takes about 45 minutes; the review entries alone take about 8.
+- The review module still has glue that only the end-to-end tests reach (the real pipeline services built from the profile).
+- A session that is an agent of one swarm and started another cannot ask for escalation on the second swarm, because the starter check requires a session that is no agent. No test fixes it either way.
 
-## Milestone 3 pass
+## Disk
 
-Start: 2026-11-17 23:43:57 UTC
-End: 2026-11-18 00:11:56 UTC
-
-### What was built
-
-- Decision logic taken out of Electron-bound or e2e-only code into functions with unit tests: `src/main/browser/viewPlacement.ts` (zoom-scaled native bounds, eviction victim, download attribution, aborted load), `src/core/permissions/inspectCommand.ts` (the PreToolUse hook command; `inspectEntry.ts` only reads stdin and prints), `src/core/browser/blocked.ts` (blocked-address file), `isChatService` in `src/core/browser/services.ts` (replaces the Slack and Discord test that was written four times), `src/core/usage/alertAction.ts` (which session an alert action runs on), `transcriptMetaFinished` and `withoutPaths` in `src/core/agents`, and `placementRequest` in `src/renderer/panes/browser/model.ts` (the dedupe of view placements that `BrowserPane` did inline).
-- New unit tests: `preview.test.ts` (task start preview, including input that nearly matches a pull request form), the negative cases of the shell parser (unterminated forms, depth and length limits, heredoc variants, here-strings, descriptor numbers), `ElectronViews.test.ts` against a mocked `electron` module, the browser module chrome commands (placement, suspend, navigation, address refusal, site data, agent refusal, blocked file, page events), the agents and usage commands, the permission commands, terminal commands for unknown sessions, and a run of the browser module without Electron.
-- Renderer tests in jsdom: `useBrowserTab`, `ObservationControl`, `ApprovalBar`, `NewTaskDialog`, `SetupPane`, `newSession`, and the placement request. `src/renderer/testing/dom.ts` sets field values the way input does.
-- `pnpm mutation` (`scripts/mutation-checks.mjs`): each mutation edits one line, runs the guarding tests, restores the file. Areas: folder scope check (`requireInScope`, tab resolution), navigation scheme policy (`checkUrl`, `decideTopLevel`, `decideWindowOpen`, permissions, the guards), inspector deny rules (deny mode, bypass, strictest hit, hard floor, unknown classes, unreadable commands, host allowlist), redaction rules (query keys, fragment, headers, field traits, cookie and field values, titles, digest URL), observation switch (off mode, chat services, blocked addresses, service defaults, non-tab surfaces). A mutation counts as killed only when a test fails and no suite failed to load.
-- A fixture race fixed in `src/core/tasks/fixtures/fake-claude-trust.mjs`: two keys written back to back arrived in one read and only the first was handled, so the trust dialog test hung now and then under coverage. The fixture handles each key in order and writes its frame after the input handler exists.
-- `vitest.config.ts` thresholds raised and the renderer logic list extended; `app/README.md` names `pnpm mutation` and the extracted modules.
-
-### Mutation results
-
-Every mutation is killed. The first run left five alive; each led to a test:
-
-| Mutation that survived | Test added |
-|---|---|
-| `requireInScope` treats the top level as inside the folder (the id lookup threw a different error) | `scope.test.ts`: top level is `out_of_scope`, unknown id is `not_found` |
-| Class missing from the profile table defaults to allow | inspector: class without a row asks |
-| Bash call without a readable command passes | inspector: no command field, non-text command, non-object input ask |
-| Shorter secret values replace before longer ones | redaction: longest value first |
-| Blocked host matched by substring | blocked patterns: host that ends with the pattern, case of the host |
-
-### Unit coverage (pnpm coverage)
-
-Before this pass the thresholds already failed on `src/core` and `src/main` after milestone 3 (`ElectronViews`, `agents`, `browser` and `index` had no unit tests).
-
-| Area | Before (stmt/branch/func/line) | After | Threshold now |
-|---|---|---|---|
-| src/core | 91.5 / 81.0 / 93.7 / 94.4 | 92.8 / 82.9 / 94.1 / 95.7 | 92 / 82 / 94 / 95 |
-| src/main | 57.3 / 46.4 / 53.2 / 61.1 | 78.0 / 62.5 / 76.3 / 81.9 | 77 / 62 / 76 / 81 |
-| src/main/modules | 71.4 / 53.4 / 63.7 / 75.5 | 81.7 / 63.8 / 79.9 / 85.2 | 81 / 63 / 79 / 85 |
-| src/shared | 100 / - / 100 / 100 | 100 / - / 100 / 100 | 98 / - / 98 / 98 |
-| renderer logic files | 94.6 / 88.5 / 89.2 / 96.0 (earlier list) | 95.6 / 90.1 / 92.2 / 96.7 (extended list) | 95 / 89 / 91 / 96 |
-| src/renderer, all files | 47.8 / 49.1 / 42.2 / 47.1 (milestone 2 figure) | 59.5 / 58.9 / 57.0 / 59.9 | no threshold |
-| All files | - | 84.2 functions, 88.6 lines | |
-
-The renderer logic list now also holds `SetupPane`, `NewTaskDialog`, `newSession`, `taskForm`, and in `panes/browser` the `model`, `useBrowserTab`, `ObservationControl` and `ApprovalBar`. Components without a unit test (`TreePane`, `BrowserPane`, `LayoutHost`, `SessionPeek`, `ProfileRail`, `NewSessionDialog`, `ContextMenu`) stay covered by the end-to-end tests only. `src/main/index.ts` and `desktop.ts` have no unit test.
-
-### End-to-end coverage (pnpm coverage:e2e)
-
-| Process | Area | Functions | Branches | Lines |
-|---|---|---|---|---|
-| renderer | src/renderer | 77.6 | 69.8 | 83.8 |
-| renderer | src/shared | 83.3 | - | 97.1 |
-| main | src/core | 73.8 | 47.3 | 73.0 |
-| main | src/main | 70.3 | 59.3 | 81.1 |
-
-### Commands run
-
-`pnpm typecheck`, `pnpm coverage` (thresholds pass; repeated runs stable), `pnpm mutation`, `pnpm e2e` (all pass) and `pnpm coverage:e2e`.
-
-### What took long
-
-Finding which decisions lived only in `ElectronViews` and the agents module, and getting the mocked `electron` module right (a failed `loadURL` must still emit `did-stop-loading`, as Electron does). The trust-dialog flake needed several coverage runs to isolate before the fixture race showed.
-
-### Not done
-
-- `BrowserPane`, `TreePane`, `LayoutHost` and `SessionPeek` have no component test; their decisions that can be pure were extracted (placement dedupe), the rest is drawing and event wiring that the end-to-end tests exercise.
-- `src/main/index.ts` start-up has no unit test.
-- `ElectronViews.page()` is tested for attach, reuse and detach only; the dialog events and the cookie callback of the page session run in the end-to-end tests.
-
-
-## Swarm integration pass (second run)
-
-Start: 2026-11-21 08:44:58 UTC
-End: 2026-11-21 09:22:30 UTC
-
-### What was built
-
-- `callerView.ts` gained `assertUser`; the `swarm_approval_answer` handler uses it, so the user-only rule is a function with a unit test. `liveCount.ts` holds the count of processes that share the cap with swarm agents, extracted from `src/main/modules/swarm.ts` (the smallest change to that shared file).
-- New tests: caller views, live count, swarm alerts, fake script parser, usage store, swarm context menu, agents editor of the start dialog; manager tests for the slot of an interrupted live process, nested spawn depth, the agent budget stop during a turn, and swarms whose folder is gone after a restart.
-- `scripts/mutation-checks.mjs` has entries for the cap and queue, permission caps of children, spawn depth, budget stops, approval deny paths, folder scope of the swarm tools, caller views and worktree removal. The whole list ran: no mutation survived and none was skipped after one text anchor was repaired.
-- Mutations first found surviving: caller views (no unit test), the interrupted slot, spawn depth increase, the agent budget stop, the folderless swarm, the approval guard in the module. Each got a test and is now killed. Two candidate mutations are equivalent and were left out: the user's start mode (the schema excludes bypass) and the stage sort of the queue (stages gate dependencies first).
-- Thresholds in `app/vitest.config.ts` rose to just below the measured values for `src/core`, `src/main`, `src/main/modules`, new entries for `src/core/swarm` and the swarm renderer folders, and the swarm menu joined the renderer logic list.
-
-### Coverage (unit, V8, two identical runs)
-
-| Area | Statements | Branches | Functions | Lines |
-|---|---|---|---|---|
-| src/core | 93.88 | 85.03 | 94.62 | 96.62 |
-| src/core/swarm | 95.42 | 89.50 | 94.26 | 98.03 |
-| src/main | 79.33 | 65.77 | 77.68 | 82.89 |
-| src/main/modules | 82.69 | 67.39 | 81.14 | 85.67 |
-| src/renderer/ui | 98.20 | 92.34 | 98.57 | 99.32 |
-| renderer swarm folders | 97.81 | 93.09 | 95.31 | 97.91 |
-
-End-to-end (pnpm coverage:e2e), functions / branches / lines: main src/core 72.0 / 47.8 / 72.8, main src/main 71.9 / 62.3 / 81.3, renderer src/renderer 76.4 / 70.8 / 85.4.
-
-### What took long
-
-The full mutation run takes about ten minutes and edits source files in place, so no other edit to those files is safe while it runs.
-
-### Not finished
-
-`src/main/modules/swarm.ts` wiring (onStarted, the runtime subscription) is still covered by the end-to-end tests only. The sandbox blocked nothing. Temporary files in the system temp directory were removed.
+Free space stayed at about 3.3 GiB on the data volume.

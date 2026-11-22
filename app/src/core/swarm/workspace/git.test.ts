@@ -89,6 +89,28 @@ describe('git steps in a worktree an agent can write', () => {
     expect(existsSync(marker), 'the filter command did not run').toBe(false);
   });
 
+  it('does not run a filter that info/attributes of the common directory names, during collect, apply and commit', async () => {
+    const marker = join(root, 'info-filter-ran');
+    const script = join(root, 'info-filter.sh');
+    writeFileSync(script, `#!/bin/sh\ntouch ${marker}\ncat\n`);
+    chmodSync(script, 0o755);
+    repo.git('config', 'filter.evil.clean', script);
+    repo.git('config', 'filter.evil.smudge', script);
+    const work = await prepare('info');
+    mkdirSync(join(repo.dir, '.git', 'info'), { recursive: true });
+    writeFileSync(join(repo.dir, '.git', 'info', 'attributes'), '* filter=evil\n');
+    writeFileSync(join(work.cwd, 'new.txt'), 'x\n');
+    rmSync(marker, { force: true });
+    await trusted.hasChanges(work.cwd);
+    const collected = await trusted.collect(work.cwd, repo.commit);
+    const patchFile = join(root, 'info.patch');
+    writeFileSync(patchFile, collected.patch, 'latin1');
+    const other = await prepare('info-apply');
+    await trusted.applyPatch(other.cwd, patchFile);
+    await trusted.commitAll(other.cwd, 'applied');
+    expect(existsSync(marker), 'the filter command did not run').toBe(false);
+  });
+
   it('refuses a git directory the agent built inside the worktree', async () => {
     const marker = join(root, 'forged-ran');
     const work = await prepare('forged');

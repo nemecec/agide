@@ -121,6 +121,13 @@ export interface PersistentSwarmManagerDeps {
   readonly onAnswered?: (sessionId: SessionId, requestId: string, decision: 'allow' | 'deny') => void;
   /** A process started or resumed; the swarm module creates the agent's tree leaf. */
   readonly onStarted?: (info: { swarmId: SwarmId; folderId: NodeId | null; agent: string; sessionId: SessionId; resumed: boolean }) => void;
+  /**
+   * Runs after a swarm with a repository and a worktree agent is stored and before its first agent launches: the review
+   * reads the policy from the base commit and takes the repository snapshot there (0040 sections 8.3 and 17). A failure
+   * becomes a warning of the swarm.
+   */
+  /** Runs before the first launch of a swarm with a worktree agent; the strings it returns become warnings of the swarm. */
+  readonly beforeFirstLaunch?: (swarmId: SwarmId) => Promise<void | readonly string[]>;
 }
 
 export interface RemovalPlanEntry {
@@ -225,6 +232,8 @@ export class PersistentSwarmManager implements SwarmManager {
         retries: 0,
         turns: 0,
         errors: [],
+        denials: 0,
+        deniedTools: [],
         meta: emptyMeta(),
         approvals: new Map(),
         queuedAt: at,
@@ -238,6 +247,16 @@ export class PersistentSwarmManager implements SwarmManager {
     this.persistSwarm(swarm);
     for (const agent of swarm.agents) this.persistAgent(swarm, agent);
     this.emit({ type: 'swarm.changed', swarmId: id, state: 'running' });
+    if (swarm.repoRoot !== undefined && swarm.agents.some((agent) => agent.spec.workspace === 'worktree')) {
+      try {
+        const notes = await this.deps.beforeFirstLaunch?.(id);
+        if (notes !== undefined) swarm.warnings.push(...notes);
+        this.persistSwarm(swarm);
+      } catch (error) {
+        swarm.warnings.push(`the review could not prepare: ${error instanceof Error ? error.message : String(error)}`);
+        this.persistSwarm(swarm);
+      }
+    }
     await this.schedule();
     return {
       swarmId: id,
@@ -340,6 +359,19 @@ export class PersistentSwarmManager implements SwarmManager {
   agentOf(sessionId: SessionId): { swarmId: SwarmId; agent: string; depth: number; mayStartSwarms: boolean } | undefined {
     const found = this.bySession.get(sessionId);
     return found === undefined ? undefined : { swarmId: found.swarm.id, agent: found.agent.spec.name, depth: found.swarm.depth, mayStartSwarms: found.agent.spec.mayStartSwarms };
+  }
+
+  /** What the review reads beyond `status`: the repository, the base commit and per agent its latest result text, retries and errors (0040 sections 4 and 7). */
+  reviewInputs(swarmId: SwarmId):
+    | { readonly repoRoot?: string; readonly baseCommit?: string; readonly agents: ReadonlyMap<string, { readonly resultText?: string; readonly retries: number; readonly errors: number; readonly denials: number; readonly deniedTools: readonly string[] }> }
+    | undefined {
+    const swarm = this.swarms.get(swarmId);
+    if (swarm === undefined) return undefined;
+    return {
+      ...(swarm.repoRoot === undefined ? {} : { repoRoot: swarm.repoRoot }),
+      ...(swarm.baseCommit === undefined ? {} : { baseCommit: swarm.baseCommit }),
+      agents: new Map(swarm.agents.map((agent) => [agent.spec.name, { ...(agent.text === undefined ? {} : { resultText: agent.text }), retries: agent.retries, errors: agent.errors.length, denials: agent.denials, deniedTools: [...agent.deniedTools] }])),
+    };
   }
 
   // ---------------------------------------------------------------------------------------------- steering
@@ -716,6 +748,8 @@ export class PersistentSwarmManager implements SwarmManager {
       maxTurnsPerMessage: spec.budget.maxTurnsPerMessage ?? swarm.definition.budget.maxTurnsPerMessage,
       connectors: spec.connectors,
       ...(spec.tools.available === undefined ? {} : { tools: spec.tools.available }),
+      // A worktree agent's grant lists report_outcome (0040 section 11.2).
+      ...(spec.workspace === 'worktree' ? { toolSet: 'worker' as const } : {}),
       denyRules: [...base, ...spec.tools.deny],
       addDirs: agent.meta.inputsDir === undefined ? [] : [agent.meta.inputsDir],
       env: { CLAUDE_CODE_SUBAGENT_MODEL: agent.tier.model, CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1' },
@@ -839,6 +873,11 @@ export class PersistentSwarmManager implements SwarmManager {
     if (result.text !== undefined) agent.text = result.text;
     agent.terminalReason = result.terminalReason;
     agent.errors = [...result.errors];
+    agent.denials += result.permissionDenials.length;
+    for (const denial of result.permissionDenials) {
+      const tool = (denial as { tool_name?: unknown } | null)?.tool_name;
+      if (typeof tool === 'string' && !agent.deniedTools.includes(tool) && agent.deniedTools.length < 50) agent.deniedTools.push(tool.slice(0, 200));
+    }
     this.persistAgent(swarm, agent);
     // The ending is recorded first and the process is told afterwards: the swarm budget check in between may
     // stop the other agents, and ending a process can finish the swarm.
@@ -886,6 +925,8 @@ export class PersistentSwarmManager implements SwarmManager {
     const window = typeof info['rateLimitType'] === 'string' ? info['rateLimitType'] : 'window';
     const resetsAt = typeof info['resetsAt'] === 'number' || typeof info['resetsAt'] === 'string' ? String(info['resetsAt']) : 'unknown';
     this.alerts.rateLimit(window, resetsAt, status);
+    // `allowed_warning` (seen in a real run, not in the probes) still allows requests: it alerts and pauses nothing.
+    if (status === 'allowed_warning') return;
     for (const swarm of this.swarms.values()) {
       if (swarm.state !== 'running') continue;
       this.setSwarm(swarm, 'paused');
@@ -966,6 +1007,11 @@ export class PersistentSwarmManager implements SwarmManager {
     agent.resumeWith = `${note}${text}`;
     agent.reason = undefined;
     agent.endedAt = undefined;
+    // A new run starts after an ended one, so its denials are its own; a resumed run keeps the denials of its first part.
+    if (ENDED_RUN_STATES.includes(agent.state)) {
+      agent.denials = 0;
+      agent.deniedTools = [];
+    }
     this.setAgent(swarm, agent, 'queued');
     if (swarm.state !== 'running' && swarm.state !== 'paused') {
       swarm.endedAt = undefined;

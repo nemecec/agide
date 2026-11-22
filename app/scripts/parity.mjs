@@ -20,7 +20,17 @@ try {
   client = new Client({ name: 'parity', version: '0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(grant.url), { requestInit: { headers: { Authorization: `Bearer ${grant.token}` } } }));
   const toolNames = (await client.listTools()).tools.map((tool) => tool.name);
-  const report = checkParity(app.commands.list(), toolNames);
+  // The worker and reviewer grants list the report tools (0041 tool sets).
+  const setTools = {};
+  for (const set of ['worker', 'reviewer']) {
+    const setGrant = app.services.mcp.grant(`parity-${set}`, folder.id);
+    app.services.mcp.declareToolSet(`parity-${set}`, set);
+    const setClient = new Client({ name: `parity-${set}`, version: '0' });
+    await setClient.connect(new StreamableHTTPClientTransport(new URL(setGrant.url), { requestInit: { headers: { Authorization: `Bearer ${setGrant.token}` } } }));
+    setTools[set] = (await setClient.listTools()).tools.map((tool) => tool.name);
+    await setClient.close();
+  }
+  const report = checkParity(app.commands.list(), toolNames, setTools);
   mkdirSync(dirname(DOC), { recursive: true });
   writeFileSync(DOC, renderParityMarkdown(report));
   if (report.missing.length > 0) {

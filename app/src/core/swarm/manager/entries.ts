@@ -57,6 +57,9 @@ export interface AgentEntry {
   text?: string | undefined;
   terminalReason?: string | undefined;
   errors: string[];
+  /** Permission denials the agent's results reported in its current run, and the tools they named; reset when a run starts, read by the review, not stored. */
+  denials: number;
+  deniedTools: string[];
   cwd?: string | undefined;
   branch?: string | undefined;
   meta: ResultMeta;

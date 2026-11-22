@@ -10,6 +10,13 @@ export type Caller =
   | { readonly kind: 'ui' }
   | { readonly kind: 'mcp'; readonly sessionId: string; readonly folderId: NodeId };
 
+/** Tool sets of the app MCP server: every session today, swarm agents with a worktree, and reviewers. */
+export type ToolSet = 'default' | 'worker' | 'reviewer';
+
+/** Whether a command's tool is listed for a session with the given tool set. */
+export const inToolSet = (command: { readonly toolSets?: readonly ToolSet[] }, set: ToolSet): boolean =>
+  (command.toolSets ?? ['default', 'worker']).includes(set);
+
 export interface CommandContext {
   readonly caller: Caller;
 }
@@ -50,6 +57,11 @@ export interface Command<I extends z.ZodType = z.ZodType, O = unknown> {
    * without a tool only when it has this reason, and lists the reason in `docs/parity.md`.
    */
   readonly mcpExempt?: string;
+  /**
+   * The grant tool sets that list the tool (0040 section 10.2). Absent means `default` and `worker`. A session
+   * whose grant names no set has `default`.
+   */
+  readonly toolSets?: readonly ToolSet[];
   /** The result must be JSON-serializable: it crosses IPC and MCP. */
   run(input: z.output<I>, ctx: CommandContext): O | Promise<O>;
 }

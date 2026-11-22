@@ -5,6 +5,7 @@ import type { UiEvent } from '../commands/uiEvents';
 import type { InboxEvent } from '../inbox/types';
 import type { PermissionsEvent } from '../permissions/types';
 import type { ProfileEvent } from '../profile/types';
+import type { ReviewEvent } from '../review/types';
 import type { SessionEvent } from '../session/types';
 import type { SwarmEvent } from '../swarm/types';
 import type { TasksEvent } from '../tasks/types';
@@ -25,7 +26,8 @@ export type AppEvent =
   | BrowserEvent
   | AgentsEvent
   | TasksEvent
-  | SwarmEvent;
+  | SwarmEvent
+  | ReviewEvent;
 
 export type AppEventBus = EventBus<AppEvent>;
 

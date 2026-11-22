@@ -1,0 +1,206 @@
+# 0041 Milestone 5 architecture and contracts
+
+Status: accepted (the build followed these contracts; results and changes in 0042)
+Date: 2026-11-21
+Decided by: spike agents, reviewed
+Inputs: 0003, 0010, 0011, 0021, 0022, 0028, 0029, 0035, 0037, 0038, 0039, 0040 (reviewed); `notes/probes-m5-review.md` (P40 to P43, reviewed); the milestone 4 code in `app/`
+
+## Context
+
+0040 designs the first slice of the review ladder (R19): changesets captured from swarm worktree agents, rung A (the project check and the rule reasons), rung B (a reviewer agent on the swarm runtime reporting through `report_review`), the project policy with its user-level overlay, the state machine, the `review_*` commands, review items in the inbox, the views with hash-bound seen marks, line comments sent back as one batch, and the merge gate with `swarm_merge`.
+
+The builders w-capture, w-reviewer, w-manager and w-ui work next, in parallel. As in 0013, 0023, 0029 and 0038 they need the contracts fixed first and files that do not overlap. This record states each builder's slice, the modules and contracts that now exist in the code, the seams that keep the builders apart, who owns which file, the module initialization order, the test strategy, and the choices made while writing the contracts.
+
+## Decision
+
+### Slices
+
+| Builder | Slice | From 0040 |
+|---|---|---|
+| w-capture | The capture service (`CaptureService`): the trigger inputs, the temporary-index checkpoint, `commit-tree`, the `refs/agide/review/<id>` ref with the zero old value, capture jobs and their restart, the repository snapshot with `repo.armed` and `repo.ref_moved`; the diff parser over `--raw -z` and the hunk text with the size caps and the parse timeout; the content, file and hunk hashes; the check executor (`CheckExecutor`) with the fresh checkout, `AgentEnvironment.toolCommand` in every provider, the environment scrub, the timeout, the output cap and the base comparison; the rules (`RiskRules`) for every rule, check, telemetry and claim reason of the catalogue, the secret detectors, the protected paths, accumulation and the policy's `rungs`; the policy loader (`PolicyLoader`) reading from the base commit, the overlay merge and the outward merge; the `Git` guard additions (`core.attributesFile=/dev/null`, the filter and merge-driver blanking, the main-checkout guard form, the plumbing methods) | sections 4, 5, 6, 7, 8, 17 (capture, check, policy rows) |
+| w-reviewer | The stream-json reviewer runner (`ReviewerRuntime`): the read-only checkout, the settings file written per launch outside every checkout, the prompt builder with its version id and the untrusted-data blocks, the launch spec of 0040 section 10.1, `--allowedTools` in the runtime's launch contributor, `autoDeny` in `StreamAgentRuntime`, the timeout, the `background_tasks` event in `normalize.ts`; grant tool sets in `GrantStore` and `HttpAppMcpServer`; the `/report <json>` directive and `background_tasks_changed` lines in the fake CLI; the real-Claude script `scripts/e2e-real-review.mjs` | sections 10, 11.1, 11.2 (tool listing), 17 (reviewer rows), 19 (real Claude) |
+| w-manager | The SQLite `ChangesetStore`; the persistent `ReviewManager` with the pipeline, the reviewer retry, the decisions, inbox items, the budget wiring (`ReviewBudget` over the swarm ledger and `review_spend`), the send-back channel through `SwarmManager.send`, comments, seen marks, demotion tokens, the merge gate and the git `Merger`; `main/modules/review.ts` with the command handlers, the caller derivation and the formatting of results for session callers; the capture triggers, held messages, the background wait and reviewer runs in the live count in `PersistentSwarmManager`; the `reviewShare` default, `swarm.backgroundWaitMinutes`, the `app.merge` class, the per-launch outward modes and the `deploy` ask rules; the `swarm_merge` handler | sections 3, 9, 11.3, 12, 14, 15, 16 |
+| w-ui | The `agide/review` pane: changeset list, changeset, file and hunk views, dwell tracking, comment boxes, the demote and merge Dialogs, the Review tab of the swarm pane, the "Review work" entry of an agent leaf; the review card actions on the inbox card; `e2e/review.spec.ts`; the `review` phase of `pnpm visual-check` | sections 12 (card), 13, 14 (comment boxes), 15.2 (Dialog) |
+
+What waits is the table "What waits" of 0040.
+
+### Modules
+
+```
+src/core
+  review       schemas.ts: rungs, states, triggers, reasons, files, hunks, changesets, checks, runs, report_review and
+                           report_outcome inputs, stored findings and reports, decisions, comments, seen marks,
+                           policy snapshots; seenScope
+               types.ts: ReviewError, ReviewCaller, ReviewSwarmFacts, ReviewSwarmView, CaptureAgentFacts,
+                         CapturedChangeset, SwarmReviewSetup, CaptureService, PolicyLoader, CheckExecutor, RiskRules,
+                         ReviewerRuntime, ReviewRunRequest,
+                         ReviewerEvent, ReviewBudget, SendBackChannel, Merger, ChangesetStore, ReviewManager,
+                         ChangesetSummary, ChangesetDetail, MergeGate, ReviewEvent, ReviewService,
+                         REVIEW_ITEM_ORIGIN, ReviewItemPayload
+               commands.ts: REVIEW_COMMAND_INPUTS, REVIEW_COMMANDS, registerReviewCommands
+               policy/schema.ts: reviewPolicySchema, DEFAULT_REVIEW_POLICY, userPolicySchema, POLICY_PATH
+               reasonCatalogue.ts: REASON_CATALOGUE (id, source, default rung, hard), HARD_REASON_IDS
+               rungs.ts: maxRung, rungAbove, computeRung, reviewerTier, summaryHash
+               stateMachine.ts: TRANSITIONS, checkTransition
+               anchors.ts: anchorLines, anchorOf, anchorInFile
+               settings.ts: review profile settings and defaults
+               rungs.test.ts, stateMachine.test.ts, anchors.test.ts, commands.test.ts
+    store/     reviewMigrations.ts, InMemoryChangesetStore.ts, changesetStoreContract.ts, changesetStore.test.ts
+    manager/   InMemoryReviewManager.ts, reviewManagerContract.ts, reviewManager.test.ts
+    reviewer/  InMemoryReviewerRuntime.ts, reviewerRuntimeContract.ts, reviewerRuntime.test.ts
+    fakes/     fixtures.ts (valid records from a seed), fakes.ts (check executor, rules, policy loader, budget,
+               send-back channel, merger, swarm facts)
+  swarm        runtime/types.ts: AgentLaunchSpec.allowedTools, toolSet, autoDeny; RuntimeEvent background_tasks;
+               BackgroundTask. commands.ts: swarm_merge
+  commands     Command.toolSets, ToolSet, inToolSet
+  mcp          tools.ts: toolsFrom, commandForTool and callTool take a tool set, default `default`
+  events       AppEvent gains ReviewEvent
+  profile      ProfileSettings.review
+  blocks       first-party pane type agide/review
+src/main
+  context.ts   Services gains review
+  modules.ts   review initialized after swarm
+  modules/     review.ts (stub), review.test.ts
+src/renderer
+  panes/review/  ReviewPane.tsx, ChangesetList.tsx, ChangesetView.tsx, FileView.tsx, HunkView.tsx (stubs),
+                 review.css, ReviewPane.test.ts; paneComponents agide/review
+  panes/inbox/   ReviewCardActions.tsx (stub); ItemCard calls it
+  ui/icons.ts    PANE_ICONS.review (file-diff glyph)
+```
+
+A builder may add folders for its slice: `core/review/capture`, `diff`, `check`, `reasons` and `policy/*` other than `schema.ts` (w-capture), `core/review/reviewer/*` other than the contract files (w-reviewer), `core/review/manager/*` and `core/review/store/*` other than the contract files (w-manager), `renderer/panes/review/*` (w-ui). The test that keeps `src/core` free of Electron covers them.
+
+### Contracts
+
+Records (`schemas.ts`): zod schemas are the source of the types. Field names are the camelCase of the columns of 0040 section 3.3; `ChangesetRecord` checks `rung >= floor` and that only an accepted changeset is merged, `CheckRecord` that a running check has no end time, `ReviewReport` and the `report_review` input that `escalateTo` goes with `escalate` only, `CommentRecord` that a sent comment names its send-back. The claim is `{ source: 'report_outcome', ... }` or `{ source: 'result', text }`. Agent text is marked in the comments of the schema.
+
+Policy (`policy/schema.ts`): the schema of 0040 section 8.2 as written there. `DEFAULT_REVIEW_POLICY` is the parse of `{ "version": 1 }`. `userPolicySchema` has the same fields without defaults, so an absent field tightens nothing; the merge (0040 section 8.4) and the reader are w-capture's.
+
+Reasons (`reasonCatalogue.ts`): the catalogue of 0040 section 7.2 with its source, default rung and hard flag per id, plus `user.escalated` (below). `variable` marks the reasons whose rung comes from the reason itself. Rules, the manager and the views read ids and defaults from here.
+
+Rungs (`rungs.ts`): `computeRung(reasons, demotion?)` gives the rung (the highest `minRung`) and the floor (the highest `minRung` of hard reasons); after a demotion only reasons created after it count on top of the demoted rung and floor (0040 section 7.3). Accumulation is a reason the rules add at assessment, so it is not computed here. `reviewerTier` never goes below the worker's tier. `summaryHash` is the hash of 0040 section 3.2 over content, rung, sorted reason ids and the latest report.
+
+State machine (`stateMachine.ts`): `TRANSITIONS` is the table of 0040 section 9.2, one row per action. `checkTransition` refuses what no actor may do whatever the manager decides: an actor or a from-state the row does not name, a merged changeset touched by anything but the user's escalate, a rung lowered by anything but demote, an escalation that does not raise, a demotion below the floor without the second confirmation, an app accept above rung A and a reviewer accept above rung B. Guards that need more than the state, the actor and the rungs (the check outcome, the report, the budget, attempts left) are the manager's.
+
+Anchors (`anchors.ts`): the lines a finding or a comment may point at, as in 0040 section 10.4: added and context lines on the new side, removed lines on the old side. Both the report validation and `review_comment` use it.
+
+Commands (`commands.ts`, `swarm/commands.ts`): the inputs of 0040 sections 11.1 to 11.3. `review_accept` gains `withoutReviewer` (the "accept without the reviewer" tick). `review_comment` is a union of the create and the delete form. `review_seen` requires `file` at the file and hunk levels and `hunk` at the hunk level. `review_list`, `review_get` and the decisions of the user have a UI binding; the decisions state their `mcpExempt` reasons, so the parity check holds. `review_request_escalation` is a tool without a UI binding. `report_review` has `toolSets: ['reviewer']`, `report_outcome` has `toolSets: ['worker']`. `swarm_merge` (0040 section 15.2) is in `SWARM_COMMAND_INPUTS` with a UI binding and a tool. `registerReviewCommands` registers every review command; a missing handler answers `failed` with "<id> is not built yet", and a `ReviewError` becomes a `CommandError` with the same code.
+
+Tool sets (`commands/types.ts`, `mcp/tools.ts`): `Command.toolSets` names the grant tool sets that list a tool; absent means `default` and `worker`. The tool list and tool calls take the caller's set, default `default`, and a tool outside the set answers `not_found` like an unknown tool. Until w-reviewer gives grants a set, every session has `default`, so neither report tool is listed or callable.
+
+Services (`types.ts`), with the names of 0040 section 18.1 in brackets where they differ:
+
+- `CaptureService.prepare(swarmId)` runs at swarm start: it loads the policy from the base commit with the overlay through `PolicyLoader`, stores it, takes the repository snapshot, and gives a `SwarmReviewSetup` (the policy and whether `policy.base_differs` applies). `review_repo_snapshots` keeps the swarm's policy hash and that flag, so every capture of the swarm carries the same policy, also after a restart and after a merge moved the base.
+- `CaptureService.capture(subject, trigger)` gives `captured` with a `CapturedChangeset` (files and hunks without `changesetId`, the reasons the capture itself found), `no-change` or `failed` (with `repo.armed` among its reasons when a changed repository stopped it, so the manager posts the `high` alert). `resumePending()` runs the jobs a crash left `pending`; `compareRepo(swarmId)` gives `repo.armed`, `repo.ref_moved` and `reviewer.user_config_changed` before a reviewer starts and before a merge; `acceptRepoChange(swarmId, expectedHash)` compares the current repository with the stored snapshot, refuses when the change is not the one the alert showed, and stores that same snapshot.
+- `PolicyLoader.load(repo, baseCommit, overlay)` (`PolicyReader`) gives a `PolicySnapshot`.
+- `CheckExecutor.run(request)` gives the checkpoint run and, when it failed, the base run; `cancel(changesetId)` ends a running or queued check.
+- `RiskRules.assess(input)` (`Assessor`) is pure and gives the rule, check, telemetry and claim reasons with the policy's `rungs` applied and the hard floors kept. Its input carries the agent's other changesets of the run, the latest changesets of the other agents, the agent's `owns` and the paths of the other agents.
+- `ReviewerRuntime` (`ReviewerRunner`): `start(request)`, `cancel(runId, why)`, `subscribe`, `dispose`. `ReviewRunRequest` carries the launch values and the prompt data of 0040 section 10.3 (the task, the files and hunks, the latest check, the reasons, the claim), so the runner reads no store. Events are `started` (with the prompt's version id, stored on the run) and `ended` (cost, result, a known failure, the count of denied `can_use_tool` requests). The report itself arrives through `report_review`; the manager counts a run without a stored report as failed whatever the result says (P41).
+- `ReviewBudget.reserve(swarmId, runId, usdPerRun)` and `settle(runId, reportedUsd)`; `SendBackChannel.deliver(swarmId, agent, message)`; `Merger.merge(...)` for the git steps of 0040 section 15.3.
+- `ChangesetStore`: the review tables. `applyDecision(decision, update)` is a compare-and-swap on the state and rung the decision names and appends the decision; `addReasons` keeps the first row per (changeset, id, subject) and returns the rows it added; one run per attempt and session; one report per run.
+- `ReviewManager` (`ReviewService`): `submit(capture)` stores, supersedes and runs the pipeline; `list`, `get`, `accept`, `reject`, `sendBack`, `comment`, `escalate`, `requestEscalation`, `demote`, `seen`, `reportReview`, `reportOutcome`, `mergeGate`, `merge`, `subscribe`, `shutdown`. Inputs are the command inputs. `ReviewCaller` is the UI, a session (the module derives it from the command `Caller`) or a reviewer session.
+- `ReviewSwarmFacts`: what the review manager and the capture service read from the swarm manager: the swarm agent of a session, the session that started a swarm, the swarm's folder, the folder scope, per swarm its goal, default merge target, repository with base commit and agents (stage, workspace, run state, task, `owns`), and per agent run the `CaptureAgentFacts` (session, worktree path, tier, latest result text, telemetry). w-manager implements it over the swarm manager.
+
+In-memory implementations: `InMemoryChangesetStore`; `InMemoryReviewManager`, the reference behaviour over a `ChangesetStore` and the injected services, without inbox items or persistence of demotions, pending claims and confirm tokens; `InMemoryReviewerRuntime` over any `AgentRuntime`, which launches one session per run with the reviewer spec (`tools` Read, Grep, Glob; `allowedTools` `mcp__app__report_review`; `toolSet: 'reviewer'`; `autoDeny`; no connectors), passes a `/tool mcp__app__report_review <json>` step to `onReportCall` in place of the MCP call, denies every other request at once, ends the process after its first result and reports the end. Fakes (`fakes/fakes.ts`): a check executor with planned outcomes, rules with planned reasons plus the `check.*` reasons of the outcome, a fixed policy loader, a budget with a pot and a daily amount, a send-back channel with unreachable agents, a merger with conflicting agents, and swarm facts with folders.
+
+Runtime (`swarm/runtime/types.ts`): `AgentLaunchSpec` gains `allowedTools`, `toolSet` and `autoDeny`; `RuntimeEvent` gains `background_tasks` with the open tasks as P32 logged them. Nothing emits it yet; w-reviewer adds it to the normalizer and the fake CLI, w-manager reads it.
+
+Migration (`store/reviewMigrations.ts`): module `review`, migration 1, the SQL of 0040 section 3.3 with the decision actions of this record, a `warnings` column on `review_policies`, `policy_hash` and `base_differs` on `review_repo_snapshots` (the policy read at swarm start), and `prompt_version` on `review_runs` (0040 section 10.3 stores it on the run; its table had no column). The review module migrates at init, after the swarm module created `swarms`.
+
+Settings (`settings.ts`): `ProfileSettings.review` with `dailyBudgetUsd` (5), `maxConcurrentChecks` (1), `dwellMs` (1,500) and `policy` (the overlay). `swarm.backgroundWaitMinutes` is w-manager's addition to the swarm settings.
+
+Inbox: `REVIEW_ITEM_ORIGIN` is `review:changeset`; `ReviewItemPayload` is the item's payload (`swarmId`, `agent`, `changesetId`, `rung`, `contentHash`, `state`, `cardAccept`). w-manager writes it; `ReviewCardActions` reads only that payload.
+
+Events: `review.changed` (changeset, swarm, agent, state, rung) on every applied decision and `review.seen` go on the app bus and cross IPC.
+
+Renderer: `PANE_TYPES.review` is `agide/review` with `swarmId` and `changesetId` in its config schema; `PANE_COMPONENTS['agide/review']` is `ReviewPane`, which shows `ChangesetList` for a swarm and `ChangesetView` for a changeset. `FileView` and `HunkView` take the records of `review_get`. `ItemCard` renders `ReviewCardActions`, which renders nothing for other items.
+
+Main module (`main/modules/review.ts`): migrates the tables and registers the review commands without handlers; its service is `{ manager: undefined }` until w-manager builds the manager. `swarm_merge` has no handler in the swarm module, so it answers "not built yet" too.
+
+### Order of module initialization
+
+1. profile.
+2. tree.
+3. mcp (tree).
+4. permissions (profile, launch).
+5. session (tree, mcp, profile, permissions, launch, streams).
+6. layout (tree).
+7. theme.
+8. inbox (tree, sessions, profile).
+9. browser (tree, mcp, sessions, profile, permissions, inbox, launch).
+10. agents (tree, sessions, inbox, profile, launch).
+11. tasks (tree, sessions, profile, permissions, inbox, browser, launch, agents).
+12. swarm (tree, sessions, profile, permissions, inbox, agents, tasks, launch, streams).
+13. review (tree, sessions, profile, inbox, mcp, swarm): last, because it reads the swarm manager for callers, captures and the merge gate, runs reviewers on the swarm's runtime and posts inbox items; its tables refer to `swarms`.
+14. `mcp.start()` once more after every module registered its tools.
+
+Dispose runs in reverse order, so the review module ends reviewer runs and checks before the swarm module interrupts its agents and disposes the runtime. w-manager adds to the deps of the review module what its manager needs (the runtime and `launch` through the swarm module's service, `permissions` for the outward merge); the position stays.
+
+### Ownership
+
+| Builder | Owns | Must not edit |
+|---|---|---|
+| w-capture | new `src/core/review/capture/**`, `diff/**`, `check/**`, `reasons/**`, `policy/**` except `policy/schema.ts`; the guard additions and plumbing methods in `src/core/swarm/workspace/git.ts` with `git.test.ts`; `toolCommand` in `src/core/isolation/types.ts` and the providers with their tests | other modules, the contract files |
+| w-reviewer | `src/core/review/reviewer/**` except the contract files; the `stream reviewer runner` line of `reviewer/reviewerRuntime.test.ts`; `allowedTools` in `src/core/swarm/runtime/streamLaunch.ts`, `autoDeny` in `StreamAgentRuntime.ts`, `background_tasks` in `normalize.ts`, with their tests; `src/core/swarm/fixtures/fake-claude-stream.mjs`; grant tool sets in `src/core/mcp/grants.ts` and `HttpAppMcpServer.ts` with their tests; the `report_review` and `report_outcome` handlers it hands w-manager; `scripts/e2e-real-review.mjs` | other modules, the contract files |
+| w-manager | `src/core/review/manager/**` and `src/core/review/store/**` except the contract files; the `sqlite store` line of `store/changesetStore.test.ts` and the `persistent review manager` line of `manager/reviewManager.test.ts`; `src/main/modules/review.ts` and `review.test.ts`; the capture triggers, held messages, background wait and reviewer live count in `src/core/swarm/manager/**`; `reviewShare` in `definition.ts`; `backgroundWaitMinutes` in `settings.ts`; `app.merge` in `src/core/permissions/types.ts` and `classTable.ts`; the outward merge in `policyBuilder.ts` or `launchContributor.ts`; the `swarm_merge` handler and the review service in `src/main/modules/swarm.ts` | other modules, the contract files |
+| w-ui | `src/renderer/panes/review/**`; `src/renderer/panes/inbox/ReviewCardActions.tsx` with its tests; the Review tab in `src/renderer/panes/swarm/**`; the "Review work" entry in `panes/tree/swarmMenu.ts`; new glyphs in `src/renderer/ui/icons.ts` with `icons.test.ts`; `e2e/review.spec.ts`; the `review` phase of `scripts/visual-check.mjs` | other modules, the contract files |
+
+Contract files belong to this step and change only through the integration step: `core/review/schemas.ts`, `types.ts`, `commands.ts`, `index.ts`, `policy/schema.ts`, `reasonCatalogue.ts`, `rungs.ts`, `stateMachine.ts`, `anchors.ts`, `settings.ts`, `store/reviewMigrations.ts`, `store/InMemoryChangesetStore.ts`, `store/changesetStoreContract.ts`, `manager/InMemoryReviewManager.ts`, `manager/reviewManagerContract.ts`, `reviewer/InMemoryReviewerRuntime.ts`, `reviewer/reviewerRuntimeContract.ts`, `fakes/**`; `core/swarm/runtime/types.ts`, `core/swarm/commands.ts`, `core/commands/types.ts`, `core/mcp/tools.ts`, `core/events/index.ts`, `core/profile/types.ts`, `core/profile/schemas.ts`, `core/blocks/firstParty.ts`, `main/context.ts`, `main/modules.ts`, `renderer/panes/paneComponents.tsx`, `renderer/panes/inbox/ItemCard.tsx`, the contract files of 0029 and 0038, `package.json`, the lockfile and the configs. A builder records a needed contract change in its measurement file.
+
+Shared seams that need care:
+
+- Swarm start: w-manager calls `CaptureService.prepare` when a swarm with a worktree agent starts, before its first agent launches, and `resumePending` at app start; w-capture's service reads the swarm through `ReviewSwarmFacts` (w-manager's implementation) and the agent's earlier changesets through `ChangesetStore`, and keeps `review_capture_jobs` and `review_repo_snapshots` with its own statements over the module's database, which the module hands it.
+- Capture to manager: w-capture's service returns a `CapturedChangeset`; the module (w-manager) calls `manager.submit` with it. The manager replaces the result-text claim with the agent's latest `report_outcome` since the previous capture.
+- Reviewer to manager: w-reviewer's runner reports `started` and `ended`; `report_review` reaches `manager.reportReview` through the command handler with the reviewer session as caller. The handler validates the schema; the manager checks the run, the changeset, a second report and the anchors. The runner builds the launch from `ReviewRunRequest` and never decides a state.
+- Tool sets: the grant carries the set (w-reviewer); the command declares it (this step); `toolsFrom` and `callTool` filter by it (this step).
+- The swarm runtime: the review module gets the runtime through the swarm module's service (w-manager widens `SwarmModuleService`); reviewer runs count against the cap through the manager's live count (w-manager).
+- Commands: the definitions and bindings are the contract; w-manager supplies the handlers through `registerReviewCommands` and the `swarm_merge` handler through `registerSwarmCommands`; w-ui calls them through `api().invoke`.
+- Inbox items: w-manager posts them with `REVIEW_ITEM_ORIGIN` and a `ReviewItemPayload`; `ReviewCardActions` reads only that payload.
+
+Dependencies: none added.
+
+### Test strategy
+
+- `pnpm test`: Vitest in plain Node. New contract suites: `describeChangesetStoreContract` (in memory now; SQLite `[pending w-manager]`), `describeReviewManagerContract` (in memory now; persistent `[pending w-manager]`), `describeReviewerRuntimeContract` (in memory now; stream runner `[pending w-reviewer]`). A builder's slice is done when its implementation runs the suite unskipped. The manager suite drives the fakes of `fakes/` and the in-memory agent runtime, so it tests the manager's rules and not git or processes.
+- Unit tests in this step: the state machine as a table over every (action, actor, from, to) against 0040 section 9.2 written out row by row, plus the rules of 0040 section 9.3 per actor; `computeRung` with demotions; the tier rule; the summary hash; the hard reasons of the catalogue; the policy schema (the example, the minimal policy, unknown keys, a string command, an unknown class); anchoring per side, context line and large file; the review tools per tool set and the error mapping of the commands; the migration on `node:sqlite` after the swarm tables (rung below floor refused, the added actions accepted, an unknown actor refused); the review module in the real module graph (the pending commands, the tool list a default session receives, `report_review` unknown outside its set); the renderer stubs.
+- The manager contract covers: the automatic accept at A with the check command of the stored policy, the automatic send-back and the failure the base shares, no automatic send-back at the retry limit, the reviewer accept at B only and the major finding at C, no reviewer accept over a contradicted claim or a check that did not pass, revise and the attempt count, the retry and `reviewer.no_report`, `queued_for_budget` never accepted by the app, `report_review` only from the running reviewer of the changeset and once, the prompt data of a run, the unanchored retries, `report_outcome` as the claim of the next capture from worktree agents only, the stale hash and rung and the seen rule at D, the summary mark bound to the rung and reasons, demotion below the floor with the token, the decisions kept from agents and escalation by the agent and the swarm caller, the reopen of an escalated accept, seen marks across supersession, comments on diff lines sent once with the send-back, the caller scopes, the merge gate, the dry run and the merge, an agent branch refused as target, `repo.armed` at E with every hunk seen and a gate that stays closed after an accept below E, an undeliverable send-back.
+- w-capture adds the parser over the P42 corpus, the hashes, every reason with a diff that triggers it and one that does not, the policy reader on a temporary repository, the overlay merge per field, and the capture and check integration tests of 0040 section 19.
+- w-reviewer adds the launch arguments, the prompt builder, the grant tool sets over MCP, the `autoDeny` path in `StreamAgentRuntime`, and the fake-CLI `/report` path.
+- w-manager adds the SQLite store under its contract, inbox items and their coalescing, the budget with the day, the restart of capture jobs, checks and runs, the git merge on temporary repositories, and the attacks of 0040 section 17 marked integration.
+- `pnpm e2e` stays with hidden windows; w-ui adds `e2e/review.spec.ts`.
+- Real-Claude scripts stay outside the default commands with the rules of 0013 and 0040 section 19.
+- Mutation checks run in this step, each failing a test: the reviewer accept above B allowed; a merged changeset not final; the floor ignoring hard reasons; a demotion ignored by `computeRung`; accept without the hash check; accept without the rung check; `report_review` for another changeset; the seen rule at D dropped; an agent's request below the current rung; a merged changeset superseded; the store's compare-and-swap dropped; an accept at B without a report or the tick; the tool list ignoring tool sets. The first run of the hash mutation survived, because the seen rule refused first; the test now marks the hunk seen before it tries the stale values. The review of this record ran further mutations of the in-memory implementations and added tests until each failed one; the ones that survive cannot be told apart through the interfaces (a demotion token bound to a content hash that a changeset never changes, an accept rung that a raise always reopens, drafts that belong to one changeset, a large file that has no hunks, an agent that has no lowering action).
+
+### Choices
+
+- Names follow the task of this step where 0040 section 18.1 used others: `PolicyLoader`, `RiskRules`, `ReviewerRuntime`, `ReviewManager`. `ReviewService` is the module's service holding the manager, as `SwarmService` is.
+- The decision actions gain `start_check` (captured to checking), `review_failed` (no report after the last run) and `undeliverable` (a send-back that did not arrive), so each row of the transition table has its own action and the migration's check lists them.
+- The decision actions also gain `no_new_capture` (a sent-back changeset whose agent ended without new work, or whose capture failed, goes to the person), and the user may reject from `sent_back`.
+- `review_accept_repo_change { swarmId, expectedHash }` is a command with a UI binding and no tool. It accepts the repository change the alert of a swarm shows, bound to the `repoDifferenceHash` in the alert payload; an alert without the hash offers no accept. The alert names the armed categories and the moved refs. The accept stores the snapshot it compared; the hash covers the content of each changed file, every ref change and the user-level Claude content, so the accept also clears a user-level change that the alert showed. A refused accept posts the alert again with the new change and its hash. The alert is also posted when a captured changeset carries `repo.armed` or `repo.ref_moved` that the user has not accepted.
+- The user-level Claude files hashed for `reviewer.user_config_changed` are the instructions, the settings files, skills, agents, commands, output styles, hooks, the plugin manifest and the scripts the settings name as hook commands (`core/review/capture/userConfigPaths.ts`).
+- The check environment follows the agent's confinement (`core/review/capture/checkEnvironment.ts`): `srt` for a profile with the Bash sandbox on or the `srt` provider, `not_run` when `srt` is missing, a plain process only without the sandbox.
+- A policy that sets `outward` or `deployCommands` gets a warning on the swarm start: both are read and not applied to the agents in this build.
+- `agent.requested` is also made from `requestRung` of the pending `report_outcome` at the next capture. A user escalation has its own subject per call, so a second escalation to the same rung after a demotion applies.
+- `file.large_unreviewed` is at rung D, since no hunk is stored for the secret detectors or the person.
+- `user.escalated` is a reason of its own, source `user`, so a rung the user raised survives the next recomputation. `review_escalate` and `review_request_escalation` add a reason and the rung follows from `computeRung`; the subject carries the requested rung, so a repeated request coalesces.
+- A `revise` report at rung C or above goes to `awaiting_human`, not back to the agent: 0040 section 9.2 lists both outcomes for that case, and a person decides above B.
+- `report_review` is accepted from a caller of kind `reviewer` or `session` whose session is a run's session; the manager, not the caller kind, decides. The module can then pass every MCP caller through without knowing which sessions are reviewers.
+- The tool-set filter is in the command layer now, with `default` for every grant, so the report tools exist in the registry and the parity document without being listed to any session before w-reviewer adds sets to grants.
+- The review module is registered and migrates now, with no manager. A pending command answers `failed`, never `not_found`, so `docs/parity.md` changes once.
+- `swarm_merge` stays in the swarm command set (its id and caller scope are the swarm's) and its handler calls the review manager; the `app.merge` class is w-manager's change in the permission files.
+- The merge decision's actor is `app`, with the caller session in `actor_session_id`: the app runs the git steps after the gate and the user's approval of the class.
+- The manager returns raw records from `get`; the module (w-manager) caps hunk text for session callers at 100 KB and wraps agent text in untrusted-data blocks, as `callerView.ts` does for swarm results.
+- Anchoring is a contract module, since `report_review` and `review_comment` validate the same way; w-reviewer may move the report-side checks into its handler but keeps the rule.
+- The in-memory manager keeps demotions, pending claims and confirm tokens in memory. The persistent manager keeps demotions in the decision rows (a demote decision's time and rungs, the changeset's floor) and tokens in memory (they expire in two minutes).
+- `FakeRiskRules` adds the `check.*` reasons from the check outcome at the policy's `rungs`, so manager tests see the check path without w-capture's rules; the real rules own that mapping.
+- The manager applies the policy's `rungs` to the reasons it adds itself (`reviewer.*`, `reviewer.skipped_budget`), since 0040 section 7.2 lets the policy change any id; a hard reason only rises, and the reasons whose rung comes from the request (`agent.requested`, `user.escalated`, `reviewer.escalated`) keep it.
+- `review_seen` at level `file` is refused for a file with hunks, since such a file is seen through its hunks (0040 section 3.3).
+- The review card stub is a separate component called by `ItemCard`, as `SwarmApprovalActions` is, so w-ui does not edit `ItemCard.tsx`.
+
+## Consequences
+
+- The builders can work in disjoint files; the shared places (the swarm runtime, the tool list, the module graph, the inbox card) are seams with one owner per hook point.
+- `docs/parity.md` lists the review commands, the report tools and `swarm_merge`; `docs/blocks.md` lists `agide/review`.
+- The swarm tool list agents receive gains `swarm_merge`, which answers "not built yet" until w-manager's handler lands.
+- 0029's contract list grows by the files under Ownership; 0038's runtime contract gains the reviewer fields and the background-task event.
+- Not verified: the capture, the check, the reviewer runner, the persistent manager and the UI themselves; everything 0040 lists as not verified.

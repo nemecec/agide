@@ -220,19 +220,22 @@ describe('persistence and restart', () => {
     ]);
   });
 
-  it('pauses every running swarm when the plan reports a limit and raises one alert for it', async () => {
+  it('pauses every running swarm when the plan reports a limit, alerts on a warning without pausing, and raises one alert per window', async () => {
     rig = createRig();
     const swarm = await rig.manager.start({ definition: scratchSwarm([{ name: 'a', prompt: '/sleep 5000' }]) }, UI);
     const sessionId = rig.manager.status(swarm.swarmId, UI).agents[0]!.sessionId!;
     const emit = (info: Record<string, unknown>) => (rig.runtime as unknown as { emit(event: unknown): void }).emit({ type: 'rate_limit', sessionId, info });
     emit({ status: 'allowed' });
     expect(rig.manager.status(swarm.swarmId, UI).state, 'an allowed status changes nothing').toBe('running');
+    emit({ status: 'allowed_warning', rateLimitType: 'seven_day', resetsAt: 1_800_000_000 });
+    expect(rig.manager.status(swarm.swarmId, UI).state, 'a warning that still allows requests does not pause').toBe('running');
+    expect(rig.inbox.list({ kinds: ['alert'] }).map((item) => [item.dedupeKey, item.message]), 'the warning is an alert that says nothing paused').toEqual([['swarm:rate:seven_day:1800000000', 'The plan reports allowed_warning for the seven_day window; swarms keep running']]);
     emit({ status: 'rejected', rateLimitType: 'five_hour', resetsAt: 1_900_000_000 });
     await until(rig.manager, swarm.swarmId, (s) => s.state === 'paused' && s.agents[0]!.state === 'interrupted', 'paused');
     expect(
       rig.inbox.list({ kinds: ['alert'] }).map((item) => item.dedupeKey),
       'the alert is keyed by window and reset time',
-    ).toEqual(['swarm:rate:five_hour:1900000000']);
+    ).toEqual(expect.arrayContaining(['swarm:rate:five_hour:1900000000', 'swarm:rate:seven_day:1800000000']));
   });
 
   it('does not charge the time a swarm was paused across a restart to its wall clock when it resumes', async () => {

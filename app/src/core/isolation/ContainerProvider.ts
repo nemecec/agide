@@ -19,6 +19,7 @@ import {
   type ProcessLaunch,
   type ProviderCheck,
   type PtyCommand,
+  type ToolLaunch,
 } from './types';
 
 const run = promisify(execFile);
@@ -174,6 +175,30 @@ class ContainerEnvironment extends HostEnvironment {
       tty,
     });
     return { file: this.options.dockerBinary, args, cwd: launch.cwd, env };
+  }
+
+  /** `docker run -i` of the program with the checkout and `writeDirs` mounted and no network unless the launch asks for it. */
+  override async toolCommand(launch: ToolLaunch): Promise<PtyCommand> {
+    const [command, ...rest] = launch.argv;
+    if (command === undefined) throw new IsolationError('invalid', 'a tool launch needs a command');
+    const mounts: Mount[] = [launch.cwd, ...launch.writeDirs].map((hostPath) => ({ hostPath, readOnly: false }));
+    const envNames = Object.keys(launch.env).filter((name) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && name !== 'HOME');
+    const args = buildDockerRunArgs({
+      sessionId: launch.key,
+      ownerId: this.options.ownerId,
+      user: this.options.user,
+      hostAlias: this.appHost(),
+      image: this.options.image,
+      command: [command],
+      cwd: launch.cwd,
+      mounts,
+      envNames,
+      fixedEnv: { HOME: '/tmp' },
+      claudeArgs: rest,
+      tty: false,
+    });
+    if (launch.network === 'none') args.splice(1, 0, '--network', 'none');
+    return { file: this.options.dockerBinary, args, cwd: launch.cwd, env: { ...launch.env } };
   }
 
   /** SIGTERM to the docker client is forwarded and ends the session cleanly; SIGKILL of the client leaves the container, so `docker kill` goes first. */

@@ -13,6 +13,7 @@ vi.mock('../swarm/swarmActions', () => ({
 }));
 vi.mock('../swarm/swarmDialogStore', () => ({ openSwarmDialog: (request: unknown) => calls.push(['dialog', request]) }));
 vi.mock('../swarm/openSwarmPane', () => ({ openSwarmPane: (...args: unknown[]) => calls.push(['pane', ...args]) }));
+vi.mock('../review/openReviewPane', () => ({ openReviewPane: (...args: unknown[]) => calls.push(['review', ...args]) }));
 
 const { swarmMenuEntries } = await import('./swarmMenu');
 
@@ -28,16 +29,16 @@ beforeEach(() => {
 describe('swarm folder menu', () => {
   it('lists the group entries for the folder of a swarm, with Pause enabled only while it runs', () => {
     const entries = swarmMenuEntries(folder('folder-s1'));
-    expect(labels(entries), 'entries of a running swarm').toEqual(['Pause swarm', 'Resume swarm', 'Results', 'Show definition', 'Stop swarm…']);
-    expect(entries.map((entry) => entry.disabled === true), 'pause and stop allowed, resume not').toEqual([false, true, false, false, false]);
-    expect(entries[4]!.danger, 'stop is marked as dangerous').toBe(true);
+    expect(labels(entries), 'entries of a running swarm').toEqual(['Pause swarm', 'Resume swarm', 'Results', 'Review work', 'Show definition', 'Stop swarm…']);
+    expect(entries.map((entry) => entry.disabled === true), 'pause and stop allowed, resume not').toEqual([false, true, false, false, false, false]);
+    expect(entries[5]!.danger, 'stop is marked as dangerous').toBe(true);
   });
 
   it('enables Resume and disables Pause and Stop for a swarm that finished', () => {
     swarms = [swarmStatus('s1', [agentStatus('a', 'done')], { state: 'done' })];
-    expect(swarmMenuEntries(folder('folder-s1')).map((entry) => entry.disabled === true), 'a done swarm allows neither pause, resume nor stop').toEqual([true, true, false, false, true]);
+    expect(swarmMenuEntries(folder('folder-s1')).map((entry) => entry.disabled === true), 'a done swarm allows neither pause, resume nor stop').toEqual([true, true, false, false, false, true]);
     swarms = [swarmStatus('s1', [agentStatus('a', 'interrupted')], { state: 'paused' })];
-    expect(swarmMenuEntries(folder('folder-s1')).map((entry) => entry.disabled === true), 'a paused swarm resumes and stops').toEqual([true, false, false, false, false]);
+    expect(swarmMenuEntries(folder('folder-s1')).map((entry) => entry.disabled === true), 'a paused swarm resumes and stops').toEqual([true, false, false, false, false, false]);
   });
 
   it('runs the action each entry names', () => {
@@ -47,6 +48,7 @@ describe('swarm folder menu', () => {
       ['pause', 's1'],
       ['resume', 's1'],
       ['pane', 's1'],
+      ['review', 's1'],
       ['dialog', { kind: 'definition', swarmId: 's1' }],
       ['dialog', { kind: 'stop-swarm', swarmId: 's1' }],
     ]);
@@ -60,19 +62,20 @@ describe('swarm folder menu', () => {
 describe('swarm agent menu', () => {
   it('lists the agent entries for the leaf of an agent session', () => {
     const entries = swarmMenuEntries(leaf('session-a'));
-    expect(labels(entries), 'entries of a running agent').toEqual(['Send message…', 'Interrupt', 'Open swarm', 'Stop agent…']);
-    expect(entries.map((entry) => entry.disabled === true), 'a running agent allows everything').toEqual([false, false, false, false]);
+    expect(labels(entries), 'entries of a running agent').toEqual(['Send message…', 'Interrupt', 'Open swarm', 'Review work', 'Stop agent…']);
+    expect(entries.map((entry) => entry.disabled === true), 'a running agent allows everything').toEqual([false, false, false, false, false]);
     for (const entry of entries) entry.run();
     expect(calls, 'each entry names the swarm and the agent').toEqual([
       ['dialog', { kind: 'send', swarmId: 's1', agent: 'a' }],
       ['interrupt', 's1', 'a'],
       ['pane', 's1'],
+      ['review', 's1'],
       ['dialog', { kind: 'stop-agent', swarmId: 's1', agent: 'a' }],
     ]);
   });
 
   it('disables Send message and Interrupt for a queued agent and keeps Stop', () => {
-    expect(swarmMenuEntries(leaf('session-b')).map((entry) => entry.disabled === true), 'a queued agent can only be stopped or shown').toEqual([true, true, false, false]);
+    expect(swarmMenuEntries(leaf('session-b')).map((entry) => entry.disabled === true), 'a queued agent can only be stopped or shown').toEqual([true, true, false, false, false]);
   });
 
   it('adds nothing to a leaf that is not a session, or a session of no swarm', () => {

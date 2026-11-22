@@ -47,3 +47,52 @@ Start: 2026-11-17T18:21:40Z. End: 2026-11-17T18:53:36Z.
 - A layout file written directly into the layouts directory is still adopted without a scope check; recorded as a limit in 0023.
 - Window focus on screen, and the effect of the deny rule syntax in a real session, are not verified. `e2e-real-claude.mjs` and `e2e-claude-mcp.mjs` ran once each and the app MCP server still connected after `mcp.json` was removed.
 - The review note that the profiles e2e spec fails with `CLAUDE_CONFIG_DIR` set did not reproduce.
+
+## Final review fixes for the review ladder (R19)
+
+Start: 2026-11-21T19:32:37Z. End: 2026-11-21T20:36Z.
+
+### Built
+
+- The project check follows the agent's confinement (`checkEnvironment.ts`): a profile with the Bash sandbox on, or the `srt` provider, runs it under `srt` with writes limited to the checkout and ends `not_run` ("the sandbox runtime is not installed") without `srt`; only a profile without the sandbox runs a plain process; `container` stays not connected. `srtToolEnvironment` in `SrtProvider.ts` shares the command builder with the provider.
+- Rung D accept compares the escaped path as well, so a name with a tab or a bidirectional character is held to the seen rule; a D that no reason or finding points at needs the summary mark or every hunk. The pane disables Accept for the same cases and matches reasons to odd file names.
+- A sent-back changeset whose agent ends without new work, or whose capture fails, moves to the person with the new action `no_new_capture`; the user may also reject from `sent_back`.
+- `requestRung` of `report_outcome` makes `agent.requested` at the next capture. A user escalation has its own subject, so a second escalation after a demotion applies.
+- `review_accept_repo_change` (UI only) with an action on the repository alert, bound to the hash of the change in the alert payload. The alert is also posted for a captured changeset that carries `repo.ref_moved` or `repo.armed` that is not accepted yet.
+- The user-level Claude files hashed for `reviewer.user_config_changed` now include skills, agents, commands, output styles, hooks, the plugin manifest and the scripts the settings name as hook commands.
+- A policy that sets `outward` or `deployCommands` gets a warning on the swarm start (`beforeFirstLaunch` may return warnings). `file.large_unreviewed` is at rung D.
+- Permission denials of an agent reach the capture facts, so `run.denials` can fire.
+- The session view of `review_get` marks a hunk cut at the cap, wraps agent text in reason evidence, drops ref evidence, reviewer session ids, process ids and actor session ids.
+- Pane: Escape closes the comment box and returns the focus; more hidden characters are escaped in `plainText`.
+- `GitMerger` takes an optional `beforeMove` seam so a test can move the target between the tip and the swap.
+- Mutation script: entries for each fix, for the module seams (list, get, merge and request escalation read as the user, daily limit, reviewer split, scratch agents), the git-level decisions (attributes, driver blanking, snapshot stop, merge swap) and the card rules; a name filter takes several fragments separated by `|`.
+
+### Results
+
+| Command | Result |
+| --- | --- |
+| `pnpm typecheck` | pass |
+| `pnpm coverage` | pass, no threshold failure; `review.ts` meets its own file thresholds from its own tests, and the thresholds of `src/main/**` and `src/main/modules/**` hold over the whole suite only |
+| `pnpm build` | pass |
+| `AGIDE_HIDDEN=1 pnpm e2e` | 86 passed |
+| `pnpm parity` | ok, `docs/parity.md` regenerated for the new command |
+| `pnpm check:colours` | pass |
+| `pnpm mutation` | one full run: no survivor; a skipped entry was an older entry whose text my change to `commands.ts` moved, fixed and run again: killed |
+
+### What took long
+
+- The first run of the new entries left survivors, each a missing test: the module's use of the profile provider, a failed capture after a send-back, the module's user-config paths and the attribute switch of the merge. The last needed the merge to run with the repository as the working directory, since git otherwise reads the attributes of the work tree.
+- The module tests needed a real swarm with a started repository, because a session may use only a repository an earlier start used.
+- Free disk stayed at about 3.2 GiB; no step ran below 3 GiB.
+
+### Left, and why
+
+- A merge that rebuilds a deleted checkpoint from the stored patch (0040 section 15.3): the merge still refuses. It is a feature, not a fix.
+- Secrets in binary files and in large text files are still not read by the detectors; a large file now goes to rung D, a binary stays at B.
+- A user's own commit on the target branch still counts as `repo.ref_moved`; the user now has the alert and the accept, and the changesets still need rung E. Leaving out moves of the checked-out branch by the user is a policy choice that needs the user.
+- Plugin directories are hashed through the manifest only, and files imported by `CLAUDE.md` are not followed.
+- `outward` and `deployCommands` are reported as not applied; the per-launch merge into `gate.json` is not built.
+- `run.background_stopped` still never fires; denials of an agent are kept in memory and read as zero after an app restart.
+- The inbox card in the visual phase still comes from the e2e backend, not from `ReviewInbox`.
+- An e2e test for a user commit during a swarm, the alert, the accept and the merge: the module and unit tests cover each step, not the whole path.
+- The real-Claude scripts were not run; this step changed no launch path.

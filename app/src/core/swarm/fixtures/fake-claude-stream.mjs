@@ -4,12 +4,19 @@
 //
 // - Records its arguments, working directory and selected variables as one JSON line to $FAKE_CLAUDE_RECORD.
 // - Keeps the session ids it created under $FAKE_CLAUDE_STATE (default: <tmpdir>/fake-claude-stream): a
-//   --session-id that exists fails at start, a --resume of an unknown id fails at start (P33).
+//   --session-id that exists or is not a UUID fails at start, a --resume of an unknown id fails at start (P33).
 // - Writes nothing before the first user message (P33); each user message is one turn that starts with
 //   system/init carrying the requested --permission-mode (manual reads as default, P30), or $FAKE_CLAUDE_MODE.
 // - User messages are read in the step language of src/core/swarm/runtime/fakeScript.ts:
 //   /text <words>, /tool <name> <json>, /cost <usd>, /sleep <ms>, /fail <terminal reason>, /exit <code>,
-//   /write <file> <text>. A message without steps gets the reply "echo: <message>".
+//   /write <file> <text>, /report <json> and /background <json list>. A message without steps gets the reply
+//   "echo: <message>".
+// - /report <json> calls the tool report_review of the app MCP server named by --mcp-config (a file path or JSON) or
+//   $FAKE_CLAUDE_MCP_CONFIG, shows the call and its result in the stream like the CLI does, and adds the tool
+//   name mcp__app__report_review to the tools of system/init. A server that is not listed answers the call with an error result.
+// - /background <json list> writes a system/background_tasks_changed line with that task list ([] for none).
+// - A reviewer launch (--allowedTools naming report_review) reads its steps from $FAKE_CLAUDE_REVIEWER_STEPS when set,
+//   with {{changesetId}} replaced by the changeset id of the review prompt.
 // - Answers the control requests interrupt (ends the turn with error_during_execution and cancels an open
 //   can_use_tool request with control_cancel_request), initialize (a models list) and any other subtype
 //   (an empty success).
@@ -23,7 +30,7 @@
 // - $FAKE_CLAUDE_CHILD_PID_FILE=<file> starts a child process in the same process group and writes its pid there.
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -65,6 +72,11 @@ mkdirSync(stateDir, { recursive: true });
 const marker = join(stateDir, `${sessionId}.session`);
 if (!sessionId) {
   process.stderr.write('Error: --session-id or --resume is required by the fake\n');
+  process.exit(1);
+}
+// The real CLI refuses a --session-id that is not a UUID (seen in a real reviewer launch).
+if (!resumed && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) {
+  process.stderr.write('Error: Invalid session ID. Must be a valid UUID.\n');
   process.exit(1);
 }
 if (!resumed && existsSync(marker)) {
@@ -122,9 +134,57 @@ function parseSteps(text) {
     else if (name === 'fail') steps.push({ kind: 'fail', reason: rest || 'api_error' });
     else if (name === 'exit') steps.push({ kind: 'exit', code: Number(rest || '0') });
     else if (name === 'write') steps.push({ kind: 'write', file: head, text: tail });
+    else if (name === 'report') steps.push({ kind: 'report', input: rest ? JSON.parse(rest) : {} });
+    else if (name === 'background') steps.push({ kind: 'background', tasks: rest ? JSON.parse(rest) : [] });
   }
   if (steps.length === 0) steps.push({ kind: 'text', text: `echo: ${text}` });
   return steps;
+}
+
+/**
+ * A reviewer launch (its --allowedTools names report_review) with $FAKE_CLAUDE_REVIEWER_STEPS set reads its steps from
+ * that file instead of the review prompt, with {{changesetId}} replaced by the first changeset id of the prompt.
+ */
+function reviewerSteps(text) {
+  const file = process.env.FAKE_CLAUDE_REVIEWER_STEPS;
+  if (file === undefined || !(flag('--allowedTools') ?? '').includes('report_review')) return undefined;
+  const changesetId = /cs_[0-9a-f]{16}/.exec(text)?.[0] ?? '';
+  try {
+    return readFileSync(file, 'utf8').replaceAll('{{changesetId}}', changesetId);
+  } catch {
+    return undefined;
+  }
+}
+
+function mcpServerEntry() {
+  const configured = flag('--mcp-config') ?? process.env.FAKE_CLAUDE_MCP_CONFIG;
+  if (configured === undefined) return undefined;
+  try {
+    const text = configured.trim().startsWith('{') ? configured : readFileSync(configured, 'utf8');
+    return JSON.parse(text).mcpServers?.app;
+  } catch {
+    return undefined;
+  }
+}
+
+/** One tools/call of the app MCP server, as a tool result with the text and the error flag. */
+async function callAppTool(name, args) {
+  const entry = mcpServerEntry();
+  if (entry === undefined) return { isError: true, text: 'MCP server "app" is not connected' };
+  try {
+    const response = await fetch(entry.url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...entry.headers },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+    });
+    if (!response.ok) return { isError: true, text: `MCP error: HTTP ${response.status}` };
+    const body = await response.json();
+    if (body.error) return { isError: true, text: `MCP error ${body.error.code}: ${body.error.message}` };
+    const text = (body.result?.content ?? []).filter((part) => part.type === 'text').map((part) => part.text).join('\n');
+    return { isError: body.result?.isError === true, text };
+  } catch (error) {
+    return { isError: true, text: `MCP error: ${error.message}` };
+  }
 }
 
 const usage = () => ({
@@ -242,7 +302,7 @@ async function turn(text) {
     subtype: 'init',
     cwd: process.cwd(),
     session_id: sessionId,
-    tools: ['Bash', 'Read', 'Write', 'Edit'],
+    tools: ['Bash', 'Read', 'Write', 'Edit', ...(mcpServerEntry() === undefined ? [] : ['mcp__app__report_review'])],
     mcp_servers: [],
     model,
     permissionMode: requestedMode,
@@ -266,7 +326,7 @@ async function turn(text) {
   let turns = 0;
   let pendingTool = false;
   const denials = [];
-  for (const step of parseSteps(text)) {
+  for (const step of parseSteps(reviewerSteps(text) ?? text)) {
     if (state.aborted) break;
     if (step.kind === 'text') {
       turns += 1;
@@ -366,6 +426,20 @@ async function turn(text) {
       await new Promise(() => undefined);
     } else if (step.kind === 'write') {
       writeFileSync(resolve(process.cwd(), step.file), step.text);
+    } else if (step.kind === 'background') {
+      out({ type: 'system', subtype: 'background_tasks_changed', tasks: step.tasks, uuid: uuid(), session_id: sessionId });
+    } else if (step.kind === 'report') {
+      turns += 1;
+      const toolUseId = `toolu_${uuid().slice(0, 12)}`;
+      assistant([{ type: 'tool_use', id: toolUseId, name: 'mcp__app__report_review', input: step.input }]);
+      const reported = await callAppTool('report_review', step.input);
+      out({
+        type: 'user',
+        message: { role: 'user', content: [{ tool_use_id: toolUseId, type: 'tool_result', content: reported.text, ...(reported.isError ? { is_error: true } : {}) }] },
+        parent_tool_use_id: null,
+        session_id: sessionId,
+        uuid: uuid(),
+      });
     }
   }
   if (state.aborted) {

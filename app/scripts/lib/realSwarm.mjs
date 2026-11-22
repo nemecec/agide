@@ -16,7 +16,7 @@ export function haikuSwarm(goal, agents) {
 }
 
 /** A layout with the tree beside the surface host and the inbox, written into the data directory and switched to. */
-export async function useTreeAndInboxLayout(run) {
+export async function useTreeAndInboxLayout(run, dataDir = run.userData) {
   const pane = (type, config = {}) => ({ type, version: '^1', configVersion: 1, config });
   const document = {
     schemaVersion: 1,
@@ -26,8 +26,8 @@ export async function useTreeAndInboxLayout(run) {
     instances: { tree: pane('agide/tree'), main: { ...pane('agide/surface-host', { emptyText: 'Open a session' }), bindings: { node: { context: 'node.current' } } }, inbox: pane('agide/inbox') },
     arrangement: { split: 'row', children: [{ size: 1, tabs: { panes: ['tree'], active: 'tree' } }, { size: 3, tabs: { panes: ['main', 'inbox'], active: 'main' } }] },
   };
-  mkdirSync(join(run.userData, 'layouts'), { recursive: true });
-  writeFileSync(join(run.userData, 'layouts', 'real-swarm.json'), JSON.stringify(document));
+  mkdirSync(join(dataDir, 'layouts'), { recursive: true });
+  writeFileSync(join(dataDir, 'layouts', 'real-swarm.json'), JSON.stringify(document));
   await new Promise((resolve) => setTimeout(resolve, 500));
   const switched = await run.invoke('layout_switch', { layoutId: 'real-swarm' });
   if (!switched.ok) throw new Error(`layout: ${JSON.stringify(switched)}`);

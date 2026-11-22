@@ -1,17 +1,19 @@
 import { readFile } from 'node:fs/promises';
 import type { SessionId } from '../session/types';
 import { SessionFiles } from './SessionFiles';
-import type {
-  AgentEnvironment,
-  ClaudeLaunch,
-  EnvironmentSpec,
-  HookDelivery,
-  HookTarget,
-  McpEndpoint,
-  ProcessLaunch,
-  ProviderId,
-  PtyCommand,
-  SessionFileName,
+import {
+  IsolationError,
+  type AgentEnvironment,
+  type ClaudeLaunch,
+  type EnvironmentSpec,
+  type HookDelivery,
+  type HookTarget,
+  type McpEndpoint,
+  type ProcessLaunch,
+  type ProviderId,
+  type PtyCommand,
+  type SessionFileName,
+  type ToolLaunch,
 } from './types';
 
 /** Sends `signal` to a process, ignoring one that is already gone. */
@@ -44,6 +46,13 @@ export abstract class HostEnvironment implements AgentEnvironment {
 
   abstract ptyCommand(launch: ClaudeLaunch): Promise<PtyCommand>;
   abstract processCommand(launch: ProcessLaunch): Promise<PtyCommand>;
+
+  /** Runs the program on the host with the given environment; confined providers override it. */
+  toolCommand(launch: ToolLaunch): Promise<PtyCommand> {
+    const [file = '', ...args] = launch.argv;
+    if (file === '') throw new IsolationError('invalid', 'a tool launch needs a command');
+    return Promise.resolve({ file, args, cwd: launch.cwd, env: { ...launch.env } });
+  }
 
   /** Host name the CLI in the environment dials for the app endpoint. */
   protected appHost(): string {
