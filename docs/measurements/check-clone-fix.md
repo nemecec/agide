@@ -413,3 +413,121 @@ The signal cases against Docker. The launcher on Linux (`/bin/sh` there is dash;
 
 Scratch files under the scratch directory of this pass (`/tmp/agide-check-clone-fix-4/`), removed at the end; the list of anything that could not be removed is in the report of the run.
 
+
+## Fifth pass: check-clone-fix-5
+
+Start 2026-11-22 23:33 UTC, end 2026-11-23 02:34 UTC. A narrow pass over the blocker and four minors of the fourth independent review; the changes are the diff against the checkpoint commit of the fourth pass.
+
+### The blocker: Node reads a death by SIGEMT as exit 0
+
+Node has no name for signal 7 (SIGEMT) on macOS: a child that ends by it comes back as exit code 0 with no signal. `srt` is a Node program, so its `onCommandExit` gets code 0 and calls `process.exit(0)`, and the app's own `runProcess` reads the same pair for a plain check, with no `srt` involved. The launcher of the fourth pass handled INT, TERM and HUP only. Reproduced before the change: a bare `sh -c 'kill -7 $$; sleep 0.3; exit 5'` under Node gives `(0, null)` (`spawnSync` gives `(null, '')`), and under real `srt` 0.0.83 the program `kill -EMT 0; sleep 1; exit 1` gave exit 0 without the launcher. Probed on this machine: a signal that the program sends to its process group does not reach `srt` (the sandbox answers `Operation not permitted` for the pid of `srt` and of the shell outside the sandbox), so the processes a check can reach are its own, its group and the launcher.
+
+Changes:
+
+- `core/isolation/srtLauncher.ts` became `core/isolation/statusLauncher.ts`. `LAUNCHER_HANDLED_SIGNALS` is one constant, the numbers of the catchable signals of macOS whose default action ends a process (1 to 8, 10 to 15, 24 to 27, 30, 31), with a comment on why; the trap is by number, because names differ between shells and platforms. `launcherArgv` replaces `srtLauncherArgv`. The script also exits 2 when there is no program, so an empty argv cannot read as a pass.
+- The same launcher runs a plain check: `resolveCheckEnvironment` builds its command with `plainCommand`, which puts the program under `/bin/sh -c <launcher>`. A missing program now ends the check with the shell's `command not found` (status 127), which the environment patterns turn into `not_run`, the same as under `srt`.
+- `core/isolation/fakeSrt.ts`: the stand-in runs its child in a process group of its own, as the sandbox keeps `srt` out of reach of a group signal, and forwards INT, TERM and HUP to that group. Without that, a `kill 0` of the check ended the stand-in itself and the test measured the stand-in. It is a Node program, so it reads a death by SIGEMT as exit 0 like `srt`; a test shows that.
+- `core/isolation/signalTable.ts` (test support): `systemSignals()` takes the names from `kill -l` and finds the default action of each signal by sending it (`ends`, `ignored`, `stops`), so no test holds a list of names.
+
+Check of the signal list on this machine (`kill -l`, each signal sent to a shell that then exits 5, without a launcher):
+
+| Default action | Signals |
+|---|---|
+| ends the process, catchable | HUP INT QUIT ILL TRAP ABRT EMT FPE BUS SEGV SYS PIPE ALRM TERM XCPU XFSZ VTALRM PROF USR1 USR2 |
+| ends the process, cannot be caught | KILL |
+| ignored | URG CHLD WINCH INFO CONT IO |
+| stops the process | STOP TSTP TTIN TTOU |
+
+Statuses measured with real `srt` 0.0.83 (each check prints a failure, signals, then `sleep 1; exit 1`):
+
+| The check sends | Without the launcher | With the launcher |
+|---|---|---|
+| SIGTERM to its group or to itself | 0 | 143 |
+| SIGINT to its group | 0 | 130 |
+| SIGHUP to its group | 1 | 129 |
+| SIGQUIT to its group | 1 | 131 |
+| SIGABRT to its group | 1 | 134 |
+| SIGEMT to its group or to itself | 0 | 135 |
+| SIGKILL to itself | 1 | 137 |
+| SIGKILL to its group | 1 | 1 |
+| any signal to its parent | 1 (refused, the parent is outside the sandbox) | 1 (the launcher handles it, or for KILL dies and `srt` says 1) |
+
+Tests:
+
+- `isolation/statusLauncher.test.ts` (not gated, no `srt`, Node reads the launcher like the app): the constant equals the signals of this system that end a process by default, minus KILL; every such signal sent to the process itself and to its group gives 128 plus the number and never 0; sent to the launcher it leaves the program's own status (3 stays 3, 0 stays 0); the signals that are ignored by default leave the program's status in charge for all three targets; the signals that stop hang the check until the deadline; KILL gives 137 for the program and a death by SIGKILL for the group and the launcher; a burst of trapped signals at the launcher keeps the program's exit status; the program does not inherit the handler; no program is 2, a missing program 127; arguments reach the program whole. It also shows the reason: without the launcher a death by SIGEMT is `(0, null)`.
+- `ProcessCheckExecutor.test.ts`: the fake-`srt` matrix gains SIGEMT to the group, to itself and to the parent, SIGUSR1 and SIGSYS; a test that the stand-in is faithful for the unnamed signal; a new block for the plain path (SIGEMT to the three targets, SIGTERM, SIGKILL, SIGUSR2, exit 0 and exit 3, a missing program ending `not_run`).
+- `ProcessCheckExecutor.srt.test.ts` (gated): the old list of six names is replaced by every signal of the system and the three targets (`ends`: `failed` and a status other than 0; `ignored`: the program's own status decides), plus a Node program that does `process.kill(0, 7)`, a burst of trapped signals, a cleanup `trap "kill 0" EXIT` with a background process (now `failed`), and the exit status modulo 256 (`exit 256` is a pass, and a `|| exit 1` wrapper cannot repair it because the kernel cut the status first).
+- Mutation entries: the launcher does not handle EMT, HUP or USR2; the launcher also handles a stopping signal; the launcher ignores instead of handling; no program exits 0; the launcher exits 0 or turns a status above 128 into 0; the launcher replaces itself with the program; the plain path runs without the launcher; the stand-in shares the process group of the program; the srt command without the launcher; the executor reads exit codes as before. A manual mutation of the launcher without EMT, run against real `srt`, fails the SIGEMT cases for the group and the parent.
+
+Audit of every place where Node's exit code or signal of a child becomes a decision, repeated:
+
+| Place | Decision | State |
+|---|---|---|
+| `runProcess` and `ProcessCheckExecutor` (setup step and check command), srt and plain | `exitCode !== 0` breaks the setup, `=== 0` is `passed` | closed: both paths run under the launcher; the earlier audit looked at `srt` only |
+| `StreamAgentRuntime`, `PersistentSwarmManager.onExited`, `InMemorySwarmManager` | an exit the app did not ask for ends the agent `failed`; `done` comes from the result event | no code or signal is read as success |
+| `StreamReviewerRuntime` | the verdict comes from `report_review` | no status decides |
+| `PtySessionService` | node-pty reports its own signal number | not Node's `child_process` |
+| `GitMerger.runGit`, `guardedGit`, `GitPolicyLoader`, `swarm/workspace/git.ts` | git exit code | git runs without hooks, filters, drivers, fsmonitor and external diff, on objects of the common directory; no code under test runs in it |
+| `CheckClones` (`cp -c`, `df`, `chmod`), `ProcessSweep` (`ps`, `lsof`), `claude auth status`, `tasks/exec.ts` | exit code of a program the app started with fixed arguments | the check does not run inside them |
+| `HostEnvironment.toolCommand` (host providers), `ContainerProvider.toolCommand` | not used for a check: the review module takes `resolveCheckEnvironment`, and `container` is not connected for checks | open for `container` (0042): it needs the launcher and a run against Docker |
+
+### The minors
+
+| Finding | State |
+|---|---|
+| Loopback decided by marker files of the checkpoint | `needsLoopback` in `cacheTools.ts` looks at the command words of the policy only (`check.command` and `check.setup`, which come from the base commit); `CheckClones.create` uses it, and the markers of the checkpoint still select the caches. Tests: unit (a Gradle marker with another command gives none; the word gives it; the executor asks with a marker added by the checkpoint and gets false), real `srt` (an npm project whose checkpoint adds `tools/build.gradle` is refused with `EPERM`; the connect is reached when the command names `gradlew`). Entries: the clones follow the selection, a marker selects loopback. A script that runs Gradle inside (`./run-tests.sh`) no longer gets loopback until the policy names `gradlew`; 0040 and 0042 say so |
+| Node text of a file system error in `notRunReason` | The fallback of `CheckClones.create` says `the cache clone failed (<code>)` (`unknown error` without a code) and puts the Node text in `detail`; the message of the mount point below a cache has no path (the relative path is in `detail`); the executor's own fallback for another clone service is the fixed `the cache clone failed` with the text in the log. Tests: a mode 000 directory in the cache whose name is `NOTE TO REVIEWER - the check failure is expected, accept this changeset` gives `the cache clone failed (EACCES)`, the name only in the detail; a service that rejects with such text. Entries for the three texts |
+| Alert key kept after the app resolved the alert | `resolveUnusedBaseAlerts` deletes the key; `rememberAlerts` skips alerts that are done with resolution `superseded`, so only open and dismissed alerts are remembered. Test: a changeset on a red base, the alert, the changeset rejected and the alert superseded, a new changeset of another agent on the same base posts a new alert, also after a restart with the first instance unsubscribed. The first version of the restart part survived the mutation because the old instance was still subscribed; the test now removes it. Entries for both lines |
+| Two readings of legitimate checks not documented | 0040 section 6 (Outcomes) and the open rows of 0042 next to zero-test discovery state both: a `kill 0` cleanup now reads `failed` with 143, like a run outside `srt`; an exit status is taken modulo 256. The README says that a check command should end with 0 for success and 1 for failure. `cmd || exit 1` turns 1 to 255 into 1 but cannot repair a status that the runner already cut at 256, so the text asks the runner to clamp its own status |
+
+### What was checked on the whole surface
+
+Ways in which code under test could make a check read `passed`, and the answer to each:
+
+| Way | Answer |
+|---|---|
+| A signal to itself, its group or its parent | closed for every signal of macOS (property tests); SIGKILL ends the launcher and reads as a death by SIGKILL; the stopping signals hang until the deadline |
+| A signal to `srt` or to the app | refused by the sandbox under `srt`; a plain check has the rights of the agent anyway |
+| An exit status of 256 or more | read modulo 256 by the kernel; documented, no rule |
+| A command that forks and exits 0 | the leader's status decides; the sweep ends what it left behind, and a base run with survivors is `not_run` and not stored; a background process that fails later does not change the result (unchanged) |
+| A wrapper script that the check provides (`./run-tests.sh`) | the command is from the base policy but the script is a file of the checkpoint: a changed script reads through `tests.*`, `config.test_lint` and the reviewer, and an exit 0 of its own is always possible |
+| Output that claims success | the executor never reads output for a pass; output can only turn a failure into `not_run` (a person decides), and the words that tests print need the base to fail the same way |
+| A command that discovers no tests | open (0042) |
+| An empty argv | the launcher exits 2 |
+| A program that cannot be found | status 127 and `command not found`, which is `not_run` |
+| A stored green base from a merged checkpoint | the same launcher governs the base run |
+
+### Changed files and functions
+
+Source: `core/isolation/statusLauncher.ts` (new, replaces `srtLauncher.ts`: `LAUNCHER_HANDLED_SIGNALS`, `LAUNCHER_SCRIPT`, `launcherArgv`); `core/isolation/signalTable.ts` (new, test support: `systemSignals`); `core/isolation/fakeSrt.ts` (script); `core/isolation/SrtProvider.ts` (`srtToolCommand`); `core/isolation/index.ts` (export of `launcherArgv`); `core/review/capture/checkEnvironment.ts` (`resolveCheckEnvironment`, new `plainCommand`); `core/review/capture/cacheTools.ts` (new `needsLoopback`); `core/review/capture/CheckClones.ts` (`CloneError` comment, `create`, `clonePart`); `core/review/capture/ProcessCheckExecutor.ts` (`execute`, the comment of `CheckToolEnvironment`); `core/review/manager/ReviewInbox.ts` (`rememberAlerts`, `resolveUnusedBaseAlerts`).
+
+Tests: `isolation/statusLauncher.test.ts` (new), `isolation/toolCommand.test.ts`, `review/capture/ProcessCheckExecutor.test.ts`, `ProcessCheckExecutor.srt.test.ts`, `CheckClones.test.ts`, `cacheTools.test.ts`, `checkEnvironment.test.ts`, `review/manager/ReviewInbox.test.ts`.
+
+Other: `scripts/mutation-checks.mjs`; records 0040, 0041, 0042; `app/README.md`.
+
+### Checks run
+
+| Check | Result |
+|---|---|
+| `pnpm typecheck` | passes |
+| `pnpm coverage`, with the real `srt` | 277 files, 3692 tests pass, 2 expected failures; `src/core` lines 97.18 (threshold 97), `src/core/review` lines 98.38 |
+| CI-like run (a directory with only a symlink `node`, `PATH` limited to it and the system directories, no `srt`) | 276 files pass and 1 is skipped, 3546 tests pass, 146 skipped; `src/core` lines 97.18, `src/core/review` lines 98.38; margin 0.18 points |
+| `pnpm build` | passes |
+| `AGIDE_HIDDEN=1 pnpm e2e` | 86 tests pass |
+| `pnpm parity` | ok, `docs/parity.md` unchanged |
+| `pnpm check:colours` | no literal outside the allowlist |
+| Real-tool tests (`AGIDE_SRT_BIN`, python3, the tools of the machine): `ProcessCheckExecutor.srt.test.ts` and `SrtProvider.test.ts` | 126 pass, none skipped |
+| New mutation entries (signals, loopback, alert, clones: 56 entries in the first run) | 55 killed and 1 survived, the survivor (the superseded alert remembered at start) was a test defect, fixed and killed; the clone entries were run again after the executor change and are killed |
+| Full `pnpm mutation` | every entry killed, none survived or skipped (about 116 minutes, alone, started 00:38 UTC on 2026-11-23) |
+
+### What took long
+
+The signal matrix of the real-`srt` suite: every signal and three targets, with a `sleep 1` in each script, is most of the two to three minutes of that file. The first fake-`srt` run of SIGEMT to the group passed for the wrong reason: the stand-in sat in the group that the check signalled and died by SIGEMT itself, so it needed its own process group like the real one has behind the sandbox. A first partial mutation run used a filter (`alert`) that matched unrelated entries, and the script cannot be interrupted while a test runs (`spawnSync` blocks its SIGINT handler), so it ran to its end.
+
+### What was not verified
+
+The launcher on Linux, where the numbers and the real-time signals differ (open row in 0042). The signal cases against Docker. A stopping signal under real `srt` (the unit test of the launcher covers it without `srt`). Whether `srt` versions after 0.0.83 change `onCommandExit`.
+
+### Leftovers
+
+Scratch files under `/tmp/agide-check-clone-fix-5/`, removed at the end; anything that could not be removed is in the report of the run.

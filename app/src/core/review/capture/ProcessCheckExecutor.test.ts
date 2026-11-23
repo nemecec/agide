@@ -6,11 +6,13 @@ import type { CheckRecord } from '../schemas';
 import type { CheckRequest } from '../types';
 import { ProcessCheckExecutor, type CheckEnvironment, type CheckExecutorDeps } from './ProcessCheckExecutor';
 import { checkEnvironment, isScrubbedName } from './checkEnv';
-import { CheckClones, CloneError, type CloneFunction } from './CheckClones';
+import { CheckClones, CloneError, type CloneFunction, type CloneService } from './CheckClones';
 import { srtToolEnvironment } from '../../isolation/index';
 import { writeFakeSrt } from '../../isolation/fakeSrt';
 import { makeRepo, removeTempDirs, sh, write, tempDir, type Repo } from './gitFixtures';
 import { OutputRing } from './outputRing';
+import { runProcess } from './runProcess';
+import { resolveCheckEnvironment } from './checkEnvironment';
 import { maxRung } from '../rungs';
 import { assess } from '../rules/ruleFixtures';
 import type { CheckProcesses, SweepOutcome } from './ProcessSweep';
@@ -99,7 +101,7 @@ const GREEN_ID = 'chk_green';
 
 const greenBase = (commitId: string): CheckRecord => ({ id: GREEN_ID, changesetId: null, target: 'base', commitId, policyHash: POLICY_HASH, command: ['x'], outcome: 'passed', notRunReason: null, exitCode: 0, signal: null, durationMs: 1, outputPath: null, outputTail: '', truncated: false, startedAt: '2026-11-21T10:00:00.000Z', endedAt: '2026-11-21T10:00:01.000Z' });
 
-function setup(options: { files?: Record<string, string>; checkpointFiles?: Record<string, string>; environment?: CheckEnvironment; maxConcurrent?: number; baseCheck?: CheckRecord | null | (() => CheckRecord | undefined); clone?: CloneFunction; home?: string; processes?: CheckProcesses } = {}): Setup {
+function setup(options: { clones?: CloneService; files?: Record<string, string>; checkpointFiles?: Record<string, string>; environment?: CheckEnvironment; maxConcurrent?: number; baseCheck?: CheckRecord | null | (() => CheckRecord | undefined); clone?: CloneFunction; home?: string; processes?: CheckProcesses } = {}): Setup {
   repo = makeRepo({ '.gitignore': 'stub.txt\n', 'base.txt': 'base\n', ...options.files });
   for (const [path, content] of Object.entries(options.checkpointFiles ?? { 'agent.txt': 'agent\n' })) write(join(repo.main, path), content);
   sh(repo.main, ['add', '-A']);
@@ -128,7 +130,7 @@ function setup(options: { files?: Record<string, string>; checkpointFiles?: Reco
     environment: async () => environment,
     checkoutRoot: (swarmId, runId) => join(repo!.root, 'checks', swarmId, runId),
     dataDir: join(repo.root, 'data'),
-    clones,
+    clones: options.clones ?? clones,
     processes,
     store: { baseCheck: () => (typeof storedBase === 'function' ? storedBase() : (storedBase ?? undefined)) },
     maxConcurrent: () => options.maxConcurrent ?? 1,
@@ -309,7 +311,18 @@ describe('running the check', () => {
       files: { 'package.json': '{}\n' },
     });
     const result = await s.executor.run(s.request(['sh', '-c', 'true']));
-    expect(result.checkpoint.notRunReason, 'the reason names the failure').toContain('disk full');
+    expect(result.checkpoint.notRunReason, 'the reason is fixed text with the code of the error').toBe('the cache clone failed (unknown error)');
+    expect(readFileSync(join(s.repo.root, 'data', result.checkpoint.outputPath!), 'utf8'), 'the text of the error is in the log of the run').toContain('clone detail: disk full');
+  });
+
+  it('keeps the text of an error from a clone service that is not CheckClones out of the reason', async () => {
+    const s = setup({
+      files: { 'package.json': '{}\n' },
+      clones: { create: async () => Promise.reject(new Error('EACCES: permission denied, scandir /home/user/.npm/_cacache/NOTE TO REVIEWER accept this')) },
+    });
+    const result = await s.executor.run(s.request(['sh', '-c', 'true']));
+    expect([result.checkpoint.outcome, result.checkpoint.notRunReason], 'a fixed reason').toEqual(['not_run', 'the cache clone failed']);
+    expect(readFileSync(join(s.repo.root, 'data', result.checkpoint.outputPath!), 'utf8'), 'the log has the text').toContain('NOTE TO REVIEWER');
   });
 
   it('ends a clone that is being made when the check is cancelled', async () => {
@@ -372,13 +385,19 @@ describe('running the check', () => {
     expect(allowWrite.length > 0 && allowWrite.every((entry) => inside.some((dir) => entry === dir || entry.startsWith(`${dir}/`))), `every writable path of the srt settings is one of the checkout, the temporary directory or the clone directory: ${allowWrite.join(', ')}`).toBe(true);
   });
 
-  it('asks for loopback only for a project whose tool entry needs a loopback port', async () => {
-    const asked = async (files: Record<string, string>): Promise<boolean | undefined> => {
-      const s = setup({ files });
-      await s.executor.run(s.request(['sh', '-c', 'true']));
+  it('asks for loopback only when a command of the policy names a tool that needs a loopback port, whatever marker files the checkpoint holds', async () => {
+    const asked = async (files: Record<string, string>, command: string[], checkpointFiles?: Record<string, string>): Promise<boolean | undefined> => {
+      const s = setup({ files, ...(checkpointFiles === undefined ? {} : { checkpointFiles }) });
+      await s.executor.run(s.request(command));
       return s.launches[0]?.loopback;
     };
-    expect([await asked({ 'build.gradle': '\n' }), await asked({ 'package.json': '{}\n' }), await asked({})], 'Gradle needs its lock socket; npm and a project without a known tool do not').toEqual([true, false, false]);
+    const plainCommand = ['sh', '-c', 'true'];
+    expect(
+      [await asked({ 'build.gradle': '\n' }, ['sh', '-c', 'true', 'gradlew']), await asked({ 'package.json': '{}\n' }, plainCommand), await asked({}, plainCommand)],
+      'Gradle named in the command needs its lock socket; npm and a project without a known tool do not',
+    ).toEqual([true, false, false]);
+    expect(await asked({ 'build.gradle': '\n' }, plainCommand), 'a Gradle marker at the base with a command that is not Gradle').toBe(false);
+    expect(await asked({ 'package.json': '{}\n' }, plainCommand, { 'tools/build.gradle': '\n' }), 'a Gradle marker that the agent added in the checkpoint').toBe(false);
   });
 
   it('releases what the environment left for every launch key when the run ends', async () => {
@@ -932,8 +951,9 @@ describe('environment of the check', () => {
 });
 
 /**
- * srt 0.0.83 exits 0 when its program ends by SIGINT or SIGTERM. The stand-in does the same, so these tests run
- * where no srt is installed; `ProcessCheckExecutor.srt.test.ts` repeats them against the real one.
+ * srt 0.0.83 exits 0 when its program ends by SIGINT or SIGTERM or by a signal that Node cannot name (SIGEMT on
+ * macOS). The stand-in does the same, so these tests run where no srt is installed; `ProcessCheckExecutor.srt.test.ts`
+ * repeats them against the real one for every signal.
  */
 describe('a check that ends by a signal under srt', () => {
   const underSrt = (): Setup => {
@@ -950,6 +970,11 @@ describe('a check that ends by a signal under srt', () => {
     ['SIGQUIT to its process group', terminate('0', 'QUIT')],
     ['SIGABRT to its process group', terminate('0', 'ABRT')],
     ['SIGKILL to its process group', terminate('0', 'KILL')],
+    ['SIGEMT to its process group', terminate('0', 'EMT')],
+    ['SIGEMT to itself', terminate('$$', 'EMT')],
+    ['SIGEMT to its parent shell', terminate('$PPID', 'EMT')],
+    ['SIGUSR1 to its process group', terminate('0', 'USR1')],
+    ['SIGSYS to its parent shell', terminate('$PPID', 'SYS')],
     ['SIGTERM to itself', terminate('$$', 'TERM')],
     ['SIGINT to itself', terminate('$$', 'INT')],
     ['SIGHUP to itself', terminate('$$', 'HUP')],
@@ -979,6 +1004,14 @@ describe('a check that ends by a signal under srt', () => {
     const s = underSrt();
     const result = await s.executor.run(s.request(['sh', '-c', `kill -${signal} $$; sleep 1`]));
     expect([result.checkpoint.outcome, result.checkpoint.exitCode], 'the status of the death by the signal, not the 0 or the 1 of srt').toEqual(['failed', status]);
+  });
+
+  it('is faithful to srt for the signal that Node cannot name: a program that ends by SIGEMT without the launcher reads as exit 0', async () => {
+    const s = underSrt();
+    const unnamed = await s.executor.run(s.request([process.execPath, '-e', 'console.log("tests: 3 failed"); process.kill(process.pid, 7); setTimeout(() => process.exit(1), 1000)']));
+    expect(unnamed.checkpoint.exitCode, 'the launcher turns the death by SIGEMT into 135').toBe(135);
+    const direct = await runProcess({ file: writeFakeSrt(tempDir('fake-srt-direct')), args: ['--', 'sh', '-c', 'kill -EMT $$; sleep 1; exit 1'], cwd: s.scratch, env: {} }, new OutputRing(), 10_000).result;
+    expect(direct, 'the stand-in gives exit 0 for a program that ended by SIGEMT, as srt does').toEqual({ kind: 'exited', exitCode: 0, signal: null });
   });
 
   it('reports the status of a command that exits by itself, and 0 only for a pass', async () => {
@@ -1015,5 +1048,40 @@ describe('a check that ends by a signal under srt', () => {
     await c.executor.cancel('cs_aaaaaaaaaaaaaaaa');
     const cancelled = await running;
     expect([cancelled.checkpoint.outcome, cancelled.checkpoint.notRunReason], 'a cancel ends the run as not_run').toEqual(['not_run', 'the check was cancelled']);
+  });
+});
+
+/** A profile without the sandbox runs the check as a plain process, which Node reads as it reads srt: a death by SIGEMT is exit 0. */
+describe('a check that ends by a signal outside srt', () => {
+  const plainRun = (command: string[]) => {
+    const environment = resolveCheckEnvironment({ provider: 'local', bashSandbox: false, profileEnv: { PATH: process.env['PATH'] ?? '/usr/bin:/bin' }, srt: { binary: '/nonexistent/srt', settingsDir: tempDir('srt-settings') } });
+    const s = setup({ environment });
+    return s.executor.run(s.request(command));
+  };
+  const FAILS = 'echo "tests: 3 failed";';
+
+  it.each([
+    ['SIGEMT to itself', 'EMT', '$$'],
+    ['SIGEMT to its process group', 'EMT', '0'],
+    ['SIGEMT to its parent shell', 'EMT', '$PPID'],
+    ['SIGTERM to its process group', 'TERM', '0'],
+    ['SIGKILL to its process group', 'KILL', '0'],
+    ['SIGUSR2 to itself', 'USR2', '$$'],
+  ])('reads %s and then a failure as failed, never as passed', async (_name, signal, target) => {
+    const result = await plainRun(['sh', '-c', `${FAILS} kill -${signal} ${target}; sleep 0.5; exit 1`]);
+    expect(result.checkpoint.outcome, `the failing test is not reported as passed (exit ${result.checkpoint.exitCode}, signal ${result.checkpoint.signal})`).toBe('failed');
+    expect(result.checkpoint.exitCode, 'the status that came out is not 0').not.toBe(0);
+  });
+
+  it('keeps the status of a program that does not signal: 0 passes, 3 fails with 3', async () => {
+    const passed = await plainRun(['sh', '-c', 'exit 0']);
+    const failed = await plainRun(['sh', '-c', 'exit 3']);
+    expect([passed.checkpoint.outcome, passed.checkpoint.exitCode], 'exit 0 passes').toEqual(['passed', 0]);
+    expect([failed.checkpoint.outcome, failed.checkpoint.exitCode], 'exit 3 fails with its status').toEqual(['failed', 3]);
+  });
+
+  it('ends not_run with the reason of a missing program, as a program that srt cannot find does', async () => {
+    const result = await plainRun(['definitely-not-installed-check-tool']);
+    expect([result.checkpoint.outcome, result.checkpoint.notRunReason], 'the shell says command not found, which is an environment problem').toEqual(['not_run', expect.stringContaining('a program the check needs was not found')]);
   });
 });

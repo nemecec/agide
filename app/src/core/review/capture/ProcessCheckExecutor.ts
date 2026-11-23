@@ -16,8 +16,9 @@ import { runProcess, type RunningProcess } from './runProcess';
 
 /**
  * `release` removes what `toolCommand` left for a key, such as a settings file; the executor calls it when the run ends.
- * The command that `toolCommand` returns must end with status 0 only when the program did: a launcher that turns a
- * death by a signal into status 0 would make a failing check pass (`srtLauncherArgv` keeps `srt` from doing it).
+ * The command that `toolCommand` returns must end with status 0 only when the program did. `srt`, and Node itself for a
+ * signal it cannot name, report a death by a signal as 0, which would make a failing check pass; `launcherArgv` keeps
+ * both from doing it.
  */
 export type CheckToolEnvironment = Pick<AgentEnvironment, 'toolCommand'> & { readonly release?: (key: string) => void };
 
@@ -272,8 +273,9 @@ export class ProcessCheckExecutor implements CheckExecutor {
           env = { ...env, ...clones.environment };
           notes.push(`note: cache clones for ${clones.tools.length === 0 ? 'no tool' : clones.tools.join(', ')} made in ${clones.milliseconds} ms\n`);
         } catch (error) {
-          cloneFailure = error instanceof CloneError ? error.message : `the cache clone failed: ${(error as Error).message}`;
-          if (error instanceof CloneError && error.detail !== undefined) cloneDetail = `clone detail: ${error.detail}\n`;
+          cloneFailure = error instanceof CloneError ? error.message : 'the cache clone failed';
+          const detail = error instanceof CloneError ? error.detail : (error as Error).message;
+          if (detail !== undefined) cloneDetail = `clone detail: ${detail}\n`;
         }
       }
       for (const step of cloneFailure === undefined ? steps : []) {

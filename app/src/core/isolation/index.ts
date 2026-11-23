@@ -9,5 +9,6 @@ export { IsolationProviders, type ProviderFactory } from './providerRegistry';
 export { createIsolationProviders, registerIsolationCommands, type ProviderSetup } from './defaultProviders';
 export { SessionFiles } from './SessionFiles';
 export { launchEnv } from './launchEnv';
+export { launcherArgv } from './statusLauncher';
 export type { IsolationStatus, ProviderRow } from './statusTypes';
 export { describeProvider, type CapabilityStatement } from './capabilityStatement';

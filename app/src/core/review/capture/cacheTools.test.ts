@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CACHE_TOOLS, commandWords, EXCLUDED_DIRECTORIES, EXCLUDED_FILES, gradleDistributionOf, readProjectFacts, selectTools, type CacheTool, type HostPaths, type ProjectFacts } from './cacheTools';
+import { CACHE_TOOLS, commandWords, EXCLUDED_DIRECTORIES, EXCLUDED_FILES, gradleDistributionOf, needsLoopback, readProjectFacts, selectTools, type CacheTool, type HostPaths, type ProjectFacts } from './cacheTools';
 import { removeTempDirs, tempDir, write } from './gitFixtures';
 import { symlinkSync } from 'node:fs';
 
@@ -133,6 +133,14 @@ describe('selecting the tools of a check', () => {
 
   it('selects nothing for a project and commands that use no known tool', () => {
     expect(selected({ markers: new Set(['Makefile']), words: commandWords([['make', 'test']]) }), 'make alone').toEqual([]);
+  });
+});
+
+describe('needsLoopback', () => {
+  it('follows the command words only, not the marker files of the checkout', () => {
+    expect(needsLoopback(CACHE_TOOLS, facts({ markers: new Set(['build.gradle', 'gradlew']), words: commandWords([['node', 'test.js']]) })), 'Gradle markers and a command that is not Gradle').toBe(false);
+    expect(needsLoopback(CACHE_TOOLS, facts({ words: commandWords([['sh', '-c', './gradlew test']]) })), 'a script that runs the wrapper').toBe(true);
+    expect(needsLoopback(CACHE_TOOLS, facts({ words: commandWords([['npm', 'test']]) })), 'a tool that does not bind a loopback port').toBe(false);
   });
 });
 

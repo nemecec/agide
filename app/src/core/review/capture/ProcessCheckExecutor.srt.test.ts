@@ -8,6 +8,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { findExecutable, srtToolEnvironment } from '../../isolation/index';
+import { systemSignals } from '../../isolation/signalTable';
 import { findTestSrt, srtTestsUnavailable } from '../../isolation/testRuntimes';
 import { DEFAULT_REVIEW_POLICY, type ReviewPolicy } from '../policy/schema';
 import { assess } from '../rules/ruleFixtures';
@@ -188,24 +189,35 @@ suite(`the check under the real srt${unavailable === undefined ? '' : ` [unavail
   });
 
   /**
-   * srt 0.0.83 exits 0 when the program ends by SIGINT or SIGTERM. A check that prints a failure and signals itself,
-   * its process group or its parent shell must still be `failed`: the launcher shell of `srtLauncherArgv` handles the
-   * signals and exits with the status of the program.
+   * srt 0.0.83 exits 0 when the program ends by SIGINT or SIGTERM, and Node reads a death by a signal it has no name
+   * for (SIGEMT on macOS) as exit 0. A check that prints a failure and then sends any signal to itself, to its process
+   * group or to its parent shell must still be `failed`: the launcher shell of `launcherArgv` handles every signal it
+   * can and exits with the status of the program. The signals are those of this system, taken from `kill -l` and
+   * sorted by what each does to a process by default, not from a list of names.
    */
   const FAILS = 'echo "tests: 3 failed";';
-  const signalling = (target: string, signal: string): string => `${FAILS} kill -${signal} ${target}; sleep 1; exit 1`;
-  const SIGNALS = ['TERM', 'INT', 'HUP', 'QUIT', 'ABRT', 'KILL'];
+  const signalling = (target: string, signal: number, status: number): string => `${FAILS} kill -${signal} ${target}; sleep 1; exit ${status}`;
   const TARGETS: [string, string][] = [
-    ['its process group', '0'],
     ['itself', '$$'],
+    ['its process group', '0'],
     ['its parent shell', '$PPID'],
   ];
+  const SIGNALS = systemSignals();
+  const byAction = (action: string) => SIGNALS.filter((entry) => entry.action === action).flatMap((entry) => TARGETS.map(([name, target]) => [`SIG${entry.name} (${entry.number}) to ${name}`, entry.number, target] as const));
 
-  it.each(SIGNALS.flatMap((signal) => TARGETS.map(([name, target]) => [`SIG${signal} to ${name}`, signalling(target, signal)] as const)))('reads %s and then a failure as failed, never as passed', async (_name, script) => {
+  it.each(byAction('ends'))('reads %s and then a failure as failed, never as passed', async (_name, signal, target) => {
     const r = rig({});
-    const result = await r.run(['sh', '-c', script]);
+    const result = await r.run(['sh', '-c', signalling(target, signal, 1)]);
     expect(result.checkpoint.outcome, `the failing test is not reported as passed (exit ${result.checkpoint.exitCode}, signal ${result.checkpoint.signal}): ${result.checkpoint.outputTail}`).toBe('failed');
     expect(result.checkpoint.exitCode, 'the status that came out of srt is not 0').not.toBe(0);
+  }, 60_000);
+
+  it.each(byAction('ignored'))('reads %s as no effect: the program runs on and its own status decides', async (_name, signal, target) => {
+    const r = rig({});
+    const failing = await r.run(['sh', '-c', signalling(target, signal, 3)]);
+    expect([failing.checkpoint.outcome, failing.checkpoint.exitCode], 'exit 3 is a failure with status 3').toEqual(['failed', 3]);
+    const passing = await r.run(['sh', '-c', signalling(target, signal, 0)]);
+    expect(passing.checkpoint.outcome, 'exit 0 is a pass').toBe('passed');
   }, 60_000);
 
   it.each([
@@ -216,6 +228,25 @@ suite(`the check under the real srt${unavailable === undefined ? '' : ` [unavail
     const r = rig({});
     const result = await r.run(['sh', '-c', `kill -${signal} 0; sleep 1`]);
     expect([result.checkpoint.outcome, result.checkpoint.exitCode], 'the status of the death by the signal').toEqual(['failed', status]);
+  }, 60_000);
+
+  it('reads a runner that signals its group with a signal Node cannot name, or that cleans up with kill 0 before it exits 0, as failed', async () => {
+    const r = rig({});
+    const scripts: Record<string, string> = {
+      'node: process.kill(0, 7), then exit 1': `${FAILS} node -e 'process.kill(0, 7); setTimeout(() => process.exit(1), 800)'`,
+      'a burst of trapped signals at the launcher, then exit 1': `${FAILS} i=0; while [ $i -lt 30 ]; do kill -7 $PPID; kill -15 $PPID; kill -2 $PPID; i=$((i+1)); done; sleep 0.3; exit 1`,
+      'a cleanup trap with kill 0 and a background process, then exit 0': 'sleep 30 & trap "kill 0" EXIT; exit 0',
+    };
+    const outcomes: Record<string, string> = {};
+    for (const [name, script] of Object.entries(scripts)) outcomes[name] = (await r.run(['bash', '-c', script])).checkpoint.outcome;
+    expect(outcomes, 'each is failed, none is passed').toEqual(Object.fromEntries(Object.keys(scripts).map((name) => [name, 'failed'])));
+  }, 120_000);
+
+  it('reads an exit status modulo 256 as the kernel hands it out, so a status of 256 is a pass and a normalized one is not', async () => {
+    const r = rig({});
+    expect((await r.run(['sh', '-c', 'exit 256'])).checkpoint.outcome, 'exit 256 is status 0').toBe('passed');
+    expect((await r.run(['sh', '-c', 'sh -c "exit 256" || exit 1'])).checkpoint.outcome, 'the kernel truncated the status before the wrapper saw it, so the wrapper cannot repair it').toBe('passed');
+    expect((await r.run(['sh', '-c', 'sh -c "exit 3" || exit 1'])).checkpoint.exitCode, 'a command that normalizes its status with || exit 1 reports 1').toBe(1);
   }, 60_000);
 
   it('reads the signals of programs that trap, ignore, exec or end by themselves as the program ends', async () => {
@@ -278,11 +309,19 @@ suite(`the check under the real srt${unavailable === undefined ? '' : ` [unavail
     });
   }, 120_000);
 
-  it('admits loopback connections for a project whose tool entry needs a loopback port, which reaches the services of the host', async () => {
+  it('admits loopback connections when a command of the policy names a tool that needs a loopback port, which reaches the services of the host', async () => {
     await withLoopbackService(async (port) => {
       const r = rig({ 'build.gradle': '\n' });
-      const result = await r.run(connectTo(port));
+      const result = await r.run([...connectTo(port), 'gradlew']);
       expect([result.checkpoint.outcome, result.checkpoint.outputTail], 'the Gradle entry sets allowLocalBinding, and srt pairs it with loopback connections').toMatchObject(['passed', expect.stringContaining('REACHED')]);
+    });
+  }, 120_000);
+
+  it('refuses loopback to a check whose agent added a Gradle marker, while its command is not Gradle', async () => {
+    await withLoopbackService(async (port) => {
+      const r = rig({ 'package.json': '{}\n' }, { extraFiles: { 'agent.txt': 'agent\n', 'tools/build.gradle': '\n' } });
+      const result = await r.run(connectTo(port));
+      expect([result.checkpoint.outcome, result.checkpoint.outputTail], 'a marker in the checkpoint does not open loopback').toMatchObject(['not_run', expect.stringContaining('REFUSED EPERM')]);
     });
   }, 120_000);
 

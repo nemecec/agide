@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { statfsSync } from 'node:fs';
 import { lstat, mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
-import { CACHE_TOOLS, EXCLUDED_DIRECTORIES, EXCLUDED_FILES, selectTools, type CachePart, type CacheTool, type HostPaths, type ProjectFacts } from './cacheTools';
+import { CACHE_TOOLS, EXCLUDED_DIRECTORIES, EXCLUDED_FILES, needsLoopback, selectTools, type CachePart, type CacheTool, type HostPaths, type ProjectFacts } from './cacheTools';
 
 /**
  * Per-run clones of the cache subtrees a check needs (0040 section 6). Each run, the checkpoint run and the base run
@@ -26,7 +26,7 @@ export const APFS_TYPE = 26;
 export class CloneError extends Error {
   override readonly name = 'CloneError';
 
-  /** Text from outside the app, such as the stderr of `cp`, which names paths of the real cache. It goes to the log of the run and never into the reason that a reviewer reads. */
+  /** Text from outside the app, such as the stderr of `cp` or a path inside the real cache. It goes to the log of the run and never into the reason that a reviewer reads. */
   constructor(
     message: string,
     readonly detail?: string,
@@ -128,7 +128,7 @@ export interface RunClones {
   readonly environment: Readonly<Record<string, string>>;
   /** The tools that have a clone directory. */
   readonly tools: readonly string[];
-  /** A tool of the run binds a loopback port: the sandbox then admits loopback connections. */
+  /** A command of the policy names a tool that binds a loopback port: the sandbox then admits loopback connections. */
   readonly loopback: boolean;
   /** Regular files in the clones. */
   readonly files: number;
@@ -191,13 +191,15 @@ export class CheckClones implements CloneService {
         for (const part of tool.parts(host, request.project)) files += await this.clonePart(tool, toolDirectory, part, signal);
         Object.assign(environment, tool.environment(toolDirectory, { ...request.current, ...environment }));
       }
-      return { directory, environment, tools: selected.map((tool) => tool.id), loopback: selected.some((tool) => tool.loopback === true), files, milliseconds: Date.now() - started, remove };
+      return { directory, environment, tools: selected.map((tool) => tool.id), loopback: needsLoopback(selected, request.project), files, milliseconds: Date.now() - started, remove };
     } catch (error) {
       await remove();
       if (error instanceof CloneError) throw error;
       if (request.signal.aborted) throw new CloneError('the check was cancelled while its caches were cloned');
       if (error instanceof Error && error.name === 'TimeoutError') throw new CloneError(`the caches were not cloned within ${this.limits.maxMilliseconds} ms`);
-      throw new CloneError(`the cache clone failed: ${(error as Error).message}`.slice(0, 500));
+      // The message of a file system error names a path in the real cache, and an agent that can write the cache chooses such names: only the code reaches the reason.
+      const code = (error as NodeJS.ErrnoException).code;
+      throw new CloneError(`the cache clone failed (${typeof code === 'string' && /^[A-Z0-9_]{1,32}$/.test(code) ? code : 'unknown error'})`, (error as Error).message.slice(0, 2_000));
     }
   }
 
@@ -209,7 +211,7 @@ export class CheckClones implements CloneService {
     const refusal = await this.probe(source, this.options.root);
     if (refusal !== undefined) throw new CloneError(`the ${tool.id} cache cannot be cloned: ${refusal}`);
     const counted = await countFiles(source, this.limits.maxFiles, this.deviceOf).catch((error: unknown) => {
-      if (error instanceof MountBelowRoot) throw new CloneError(`the ${tool.id} cache holds another volume below it (${relative(source, error.path)}); \`cp -c\` would copy it`);
+      if (error instanceof MountBelowRoot) throw new CloneError(`the ${tool.id} cache holds another volume below it; \`cp -c\` would copy it`, `the other volume is at ${relative(source, error.path)}`);
       throw error;
     });
     if (counted > this.limits.maxFiles) throw new CloneError(`the ${tool.id} cache is too large to clone (more than ${this.limits.maxFiles} files)`);

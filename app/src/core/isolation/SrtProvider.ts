@@ -5,7 +5,7 @@ import type { SessionId } from '../session/types';
 import { HostEnvironment, signalProcess } from './HostEnvironment';
 import { launchEnv } from './launchEnv';
 import { SessionFiles } from './SessionFiles';
-import { srtLauncherArgv } from './srtLauncher';
+import { launcherArgv } from './statusLauncher';
 import { buildSrtSettings, buildToolSrtSettings } from './srtSettings';
 import {
   IsolationError,
@@ -110,7 +110,7 @@ function srtToolCommand(options: Pick<SrtProviderOptions, 'srtBinary' | 'extraDe
   if (launch.argv.length === 0) throw new IsolationError('invalid', 'a tool launch needs a command');
   const content = buildToolSrtSettings({ writeDirs: [launch.cwd, ...launch.writeDirs], network: launch.network, loopback: launch.loopback === true, ...(options.extraDenyRead === undefined ? {} : { extraDenyRead: options.extraDenyRead }) });
   const settingsPath = settings.writePrivate(launch.key, SETTINGS_FILE, JSON.stringify(content));
-  return { file: options.srtBinary, args: ['-s', settingsPath, '--', ...srtLauncherArgv(launch.argv)], cwd: launch.cwd, env: { ...launch.env } };
+  return { file: options.srtBinary, args: ['-s', settingsPath, '--', ...launcherArgv(launch.argv)], cwd: launch.cwd, env: { ...launch.env } };
 }
 
 /**

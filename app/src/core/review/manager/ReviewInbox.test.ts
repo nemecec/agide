@@ -32,7 +32,7 @@ function setup(budget?: FakeReviewBudget) {
   rig.store.putPolicy(NO_CHECK);
   rig.store.putPolicy(PASSING);
   const reviewInbox = new ReviewInbox(inbox, rig.store, rig.facts);
-  rig.manager.subscribe(reviewInbox.onEvent);
+  const unsubscribe = rig.manager.subscribe(reviewInbox.onEvent);
   const until = async (check: () => boolean, what: string): Promise<void> => {
     const deadline = Date.now() + 3_000;
     while (!check()) {
@@ -40,7 +40,7 @@ function setup(budget?: FakeReviewBudget) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
   };
-  return { inbox, reviewInbox, tree, folder, until, rig };
+  return { inbox, reviewInbox, unsubscribe, tree, folder, until, rig };
 }
 const open = (inbox: InMemoryInboxService) => inbox.list({ kinds: ['review'], states: ['new', 'seen', 'snoozed'] });
 
@@ -326,6 +326,31 @@ describe('the alert for a check that fails on the base commit', () => {
     else await rig.manager.reject({ changesetId: red.id, expectedHash, reason: 'no' }, UI);
     await until(() => alerts(inbox).length === 0, 'the alert to end');
     expect(alerts(inbox, ['done'])[0], 'resolved when nothing stands on the base').toMatchObject({ state: 'done', resolution: 'superseded' });
+  });
+
+  it('posts a new alert when a base whose alert the app resolved comes into use again, in the same run and after a restart', async () => {
+    const { inbox, until, rig, unsubscribe } = setup();
+    const red = onBase('again-1', 'worker', 'red-base');
+    rig.checks.set(red.id, 'failed', 'failed');
+    await rig.manager.submit(red);
+    await until(() => alerts(inbox).length === 1, 'the alert');
+    await rig.manager.reject({ changesetId: red.id, expectedHash: rig.store.get(red.id)!.contentHash, reason: 'no' }, UI);
+    await until(() => alerts(inbox).length === 0, 'the alert to end');
+    expect(alerts(inbox, ['done'])[0], 'the app resolved the alert as superseded; nobody dismissed it').toMatchObject({ state: 'done', resolution: 'superseded' });
+    const newcomer = onBase('again-2', 'newcomer', 'red-base');
+    rig.checks.set(newcomer.id, 'failed', 'failed');
+    await rig.manager.submit(newcomer);
+    await until(() => alerts(inbox).length === 1, 'a new alert for the same base');
+    expect(alerts(inbox, [...everything]).map((item) => item.resolution ?? 'open').sort(), 'the resolved alert and a new open one').toEqual(['open', 'superseded']);
+    // The same after a restart, with the first instance gone: the superseded alert is not a record of a dismissal.
+    await rig.manager.reject({ changesetId: newcomer.id, expectedHash: rig.store.get(newcomer.id)!.contentHash, reason: 'no' }, UI);
+    await until(() => alerts(inbox).length === 0, 'the second alert to end');
+    unsubscribe();
+    rig.manager.subscribe(new ReviewInbox(inbox, rig.store, rig.facts).onEvent);
+    const third = onBase('again-3', 'third', 'red-base');
+    rig.checks.set(third.id, 'failed', 'failed');
+    await rig.manager.submit(third);
+    await until(() => alerts(inbox).length === 1, 'an alert after the restart');
   });
 
   it('does not post again for a dismissed alert after the app restarted, and posts for a base that was never alerted', async () => {

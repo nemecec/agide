@@ -23,7 +23,7 @@ const capped = (message: string): string => {
  * changeset tables, so it is rebuilt from the next event after a restart and its state is the inbox's own.
  */
 export class ReviewInbox {
-  /** The bases an alert was posted for, so a base that stays red does not post again, not even after the user dismissed the alert or the app restarted. */
+  /** The bases whose alert is open or was dismissed by the user, so a base that stays red does not post again, not even after a dismissal or a restart. An alert the app resolved leaves the set: the same base in use again posts again. */
   private readonly alerted = new Set<string>();
 
   constructor(
@@ -34,9 +34,11 @@ export class ReviewInbox {
     this.safely(() => this.rememberAlerts());
   }
 
-  /** The alerts of every state, a dismissed one included, are the record of the bases that were posted. */
+  /** The open alerts and the dismissed ones are the record of the bases that were posted; one that the app resolved as superseded is not. */
   private rememberAlerts(): void {
-    for (const item of this.inbox.list({ kinds: ['alert'] })) if (item.origin === BASE_ALERT_ORIGIN && item.dedupeKey !== undefined) this.alerted.add(item.dedupeKey);
+    for (const item of this.inbox.list({ kinds: ['alert'] })) {
+      if (item.origin === BASE_ALERT_ORIGIN && item.dedupeKey !== undefined && !(item.state === 'done' && item.resolution === 'superseded')) this.alerted.add(item.dedupeKey);
+    }
   }
 
   /** Listener for `ReviewManager.subscribe`. */
@@ -84,10 +86,12 @@ export class ReviewInbox {
     return new Set(this.store.list({ swarmId, states: UNDECIDED_STATES }).map((changeset) => baseAlertKey(swarmId, changeset.baseCommit, changeset.policyHash)));
   }
 
-  /** The key stays in `alerted`: the same base red again later is the same alert, not a new one. */
+  /** The key leaves `alerted`: the app ended the alert, the user did not dismiss it, and the base in use again is a new alert. */
   private resolveUnusedBaseAlerts(swarmId: SwarmId, used: ReadonlySet<string>): void {
     for (const open of this.inbox.list({ kinds: ['alert'], states: ['new', 'seen', 'snoozed'] })) {
-      if (open.origin === BASE_ALERT_ORIGIN && open.dedupeKey?.startsWith(`review:base:${swarmId}:`) === true && !used.has(open.dedupeKey)) this.inbox.resolve(open.id, 'superseded');
+      if (open.origin !== BASE_ALERT_ORIGIN || open.dedupeKey === undefined || !open.dedupeKey.startsWith(`review:base:${swarmId}:`) || used.has(open.dedupeKey)) continue;
+      this.alerted.delete(open.dedupeKey);
+      this.inbox.resolve(open.id, 'superseded');
     }
   }
 

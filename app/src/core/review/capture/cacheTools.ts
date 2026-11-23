@@ -39,7 +39,7 @@ export interface CacheTool {
   readonly commands: readonly string[];
   /** File names at the project root that select the tool. */
   readonly markers: readonly string[];
-  /** The tool binds a loopback port (Gradle's lock socket). Under `srt` that also lets the check connect to every loopback service of the host. */
+  /** The tool binds a loopback port (Gradle's lock socket). Under `srt` that also lets the check connect to every loopback service of the host; only a command word of the policy asks for it (`needsLoopback`). */
   readonly loopback?: true;
   parts(host: HostPaths, project: ProjectFacts): readonly CachePart[];
   /** The variables that point the tool at `directory`, its clone directory; `current` is the check environment so far. */
@@ -187,6 +187,15 @@ export const CACHE_TOOLS: readonly CacheTool[] = [gradle, maven, cargo, npm, pnp
 /** The tools a check needs: those a command names or a marker file of the project points to. */
 export function selectTools(tools: readonly CacheTool[], project: ProjectFacts): CacheTool[] {
   return tools.filter((tool) => tool.commands.some((name) => project.words.has(name)) || tool.markers.some((name) => project.markers.has(name)));
+}
+
+/**
+ * Whether a command of the check names a tool that binds a loopback port. Only the command words decide, never the
+ * marker files: the words come from the policy of the base commit, the markers from the checkout of the checkpoint,
+ * which the agent wrote, and loopback reaches every TCP service of the host.
+ */
+export function needsLoopback(tools: readonly CacheTool[], project: ProjectFacts): boolean {
+  return tools.some((tool) => tool.loopback === true && tool.commands.some((name) => project.words.has(name)));
 }
 
 /** Program names in command lines: every argument and every word of a script argument, with its directory part dropped. */

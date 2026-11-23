@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { srtLauncherArgv } from '../../isolation/srtLauncher';
+import { launcherArgv } from '../../isolation/statusLauncher';
 import { resolveCheckEnvironment, type CheckEnvironmentInput } from './checkEnvironment';
 import { removeTempDirs, tempDir } from './gitFixtures';
 
@@ -19,13 +19,14 @@ function fakeSrt(): string {
 }
 
 describe('resolveCheckEnvironment', () => {
-  it('runs a plain process only for a local profile without the Bash sandbox', async () => {
+  it('runs a plain process under the launcher shell only for a local profile without the Bash sandbox', async () => {
     const resolved = resolveCheckEnvironment(input());
     expect(resolved.kind, 'ready').toBe('ready');
     if (resolved.kind !== 'ready') return;
     expect(resolved.enforcesNetwork, 'a plain process confines nothing').toBe(false);
     const command = await resolved.environment.toolCommand({ key: 'k', cwd: '/w', argv: ['pnpm', 'test'], env: { A: '1' }, network: 'none', writeDirs: [] });
-    expect([command.file, command.args], 'the program itself').toEqual(['pnpm', ['test']]);
+    const [file, ...args] = launcherArgv(['pnpm', 'test']);
+    expect([command.file, command.args, command.cwd, command.env], 'the program under the launcher shell, in the checkout, with the environment it was given').toEqual([file, args, '/w', { A: '1' }]);
   });
 
   it('does not run the check when the Bash sandbox is on and srt is missing', () => {
@@ -42,7 +43,7 @@ describe('resolveCheckEnvironment', () => {
     expect(resolved.enforcesNetwork, 'srt enforces the network of the check').toBe(true);
     const command = await resolved.environment.toolCommand({ key: 'run-1', cwd: '/w/checkout', argv: ['pnpm', 'test'], env: { A: '1' }, network: 'none', writeDirs: [] });
     expect(command.file, 'srt is the program').toBe(binary);
-    expect(command.args.slice(0, 1).concat(command.args.slice(2)), 'settings flag, separator, then the command under the launcher shell').toEqual(['-s', '--', ...srtLauncherArgv(['pnpm', 'test'])]);
+    expect(command.args.slice(0, 1).concat(command.args.slice(2)), 'settings flag, separator, then the command under the launcher shell').toEqual(['-s', '--', ...launcherArgv(['pnpm', 'test'])]);
   });
 
   it('limits the writes of the check to its checkout and its temporary directory, and its network to nothing', async () => {

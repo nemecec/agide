@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ContainerProvider } from './ContainerProvider';
 import { LocalProvider } from './LocalProvider';
 import { SrtProvider } from './SrtProvider';
-import { srtLauncherArgv } from './srtLauncher';
+import { launcherArgv } from './statusLauncher';
 import { IsolationError, type AgentEnvironment, type EnvironmentSpec, type ToolLaunch } from './types';
 
 /** `toolCommand` runs a program of the user's project, such as the review check, with no more power than the agent had. */
@@ -55,7 +55,7 @@ describe('srt', () => {
     const environment = await provider().prepare(spec);
     const command = await environment.toolCommand(launch());
     const settingsPath = join(dir, 'srt', 'check-1', 'srt.json');
-    expect([command.file, command.args], 'srt, settings, separator, the launcher shell with the program as its arguments').toEqual(['srt', ['-s', settingsPath, '--', ...srtLauncherArgv(['pnpm', 'test', '--run'])]]);
+    expect([command.file, command.args], 'srt, settings, separator, the launcher shell with the program as its arguments').toEqual(['srt', ['-s', settingsPath, '--', ...launcherArgv(['pnpm', 'test', '--run'])]]);
     expect(command.args.slice(-3), 'the program and its arguments end the argv').toEqual(['pnpm', 'test', '--run']);
     expect(statSync(settingsPath).mode & 0o777, 'settings file mode').toBe(0o600);
     const settings = JSON.parse(readFileSync(settingsPath, 'utf8')) as { filesystem: { allowWrite: string[] }; network: { allowedDomains: string[] } };
