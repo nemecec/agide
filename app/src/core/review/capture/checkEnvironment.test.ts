@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { insideArgv } from '../../isolation/hostLaunch';
 import { launcherArgv } from '../../isolation/statusLauncher';
 import { resolveCheckEnvironment, type CheckEnvironmentInput } from './checkEnvironment';
 import { removeTempDirs, tempDir } from './gitFixtures';
@@ -43,7 +44,7 @@ describe('resolveCheckEnvironment', () => {
     expect(resolved.enforcesNetwork, 'srt enforces the network of the check').toBe(true);
     const command = await resolved.environment.toolCommand({ key: 'run-1', cwd: '/w/checkout', argv: ['pnpm', 'test'], env: { A: '1' }, network: 'none', writeDirs: [] });
     expect(command.file, 'srt is the program').toBe(binary);
-    expect(command.args.slice(0, 1).concat(command.args.slice(2)), 'settings flag, separator, then the command under the launcher shell').toEqual(['-s', '--', ...launcherArgv(['pnpm', 'test'])]);
+    expect(command.args.slice(0, 1).concat(command.args.slice(2)), 'settings flag, separator, then the command under the launcher shell that changes into the checkout').toEqual(['-s', '--', ...insideArgv(undefined, launcherArgv(['pnpm', 'test'], { directory: '/w/checkout' }))]);
   });
 
   it('limits the writes of the check to its checkout and its temporary directory, and its network to nothing', async () => {
@@ -66,6 +67,15 @@ describe('resolveCheckEnvironment', () => {
     expect(existsSync(command.args[1]!), 'the settings file exists while the run lives').toBe(true);
     resolved.environment.release?.('run-3');
     expect(existsSync(command.args[1]!), 'the settings file is gone after the release').toBe(false);
+  });
+
+  it('looks a bare srt name up on the absolute entries of the PATH of the app, never on a relative or empty one', () => {
+    const bin = dirname(fakeSrt());
+    const settingsDir = tempDir('srt-settings');
+    const resolve = (appPath: string) => resolveCheckEnvironment(input({ bashSandbox: true, srt: { binary: 'srt', settingsDir, appPath } })).kind;
+    expect(resolve(bin), 'an absolute entry').toBe('ready');
+    expect(resolve(relative(process.cwd(), bin)), 'the same directory spelled relative to the working directory').toBe('unavailable');
+    expect(resolve(`:${bin.slice(0, 0)}`), 'an empty entry only').toBe('unavailable');
   });
 
   it('does not connect the container provider', () => {

@@ -22,6 +22,8 @@ export interface ProjectFacts {
   readonly markers: ReadonlySet<string>;
   /** Words of the command lines of the check, as program names. */
   readonly words: ReadonlySet<string>;
+  /** The programs the commands start: the first word of each command (`commandPrograms`), not every word. */
+  readonly programs: ReadonlySet<string>;
   /** The Gradle wrapper distribution the project names, such as `gradle-9.8.2-bin`. */
   readonly gradleDistribution?: string | undefined;
 }
@@ -190,12 +192,13 @@ export function selectTools(tools: readonly CacheTool[], project: ProjectFacts):
 }
 
 /**
- * Whether a command of the check names a tool that binds a loopback port. Only the command words decide, never the
- * marker files: the words come from the policy of the base commit, the markers from the checkout of the checkpoint,
- * which the agent wrote, and loopback reaches every TCP service of the host.
+ * Whether a command of the check starts a tool that binds a loopback port. Only the programs of the commands decide,
+ * never the marker files and never a word among the arguments (`npm run test:gradle`, `echo skip gradle`): the
+ * programs come from the policy of the base commit, the markers from the checkout of the checkpoint, which the agent
+ * wrote, and loopback reaches every TCP service of the host.
  */
 export function needsLoopback(tools: readonly CacheTool[], project: ProjectFacts): boolean {
-  return tools.some((tool) => tool.loopback === true && tool.commands.some((name) => project.words.has(name)));
+  return tools.some((tool) => tool.loopback === true && tool.commands.some((name) => project.programs.has(name)));
 }
 
 /** Program names in command lines: every argument and every word of a script argument, with its directory part dropped. */
@@ -208,6 +211,39 @@ export function commandWords(argvs: readonly (readonly string[])[]): Set<string>
     }
   }
   return words;
+}
+
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
+/** Words that start another program: `env FOO=1 ./gradlew test` starts `gradlew`. */
+const PREFIX_WORDS = new Set(['env', 'exec', 'command', 'time', 'nohup']);
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+/** The program a command starts: its first word that is no assignment and no prefix word, with quotes and directory part dropped. */
+function startedProgram(words: readonly string[]): string | undefined {
+  const first = words.find((word) => word !== '' && !ASSIGNMENT.test(word) && !PREFIX_WORDS.has(basename(word)));
+  return first === undefined ? undefined : basename(first.replace(/^['"]+|['"]+$/g, ''));
+}
+
+/** The program of each command of a shell script: split at `&&`, `||`, `;`, `|`, `&`, line ends and parentheses. */
+function scriptPrograms(script: string): string[] {
+  return script.split(/&&|\|\||[;|&()\n]/).flatMap((command) => startedProgram(command.trim().split(/\s+/)) ?? []);
+}
+
+/** The programs the commands start: the program of each argv (past `env` and assignments), and for a shell with `-c` the program of each command of its script. */
+export function commandPrograms(argvs: readonly (readonly string[])[]): Set<string> {
+  const programs = new Set<string>();
+  for (const argv of argvs) {
+    const [program, ...rest] = argv;
+    if (program === undefined) continue;
+    programs.add(basename(program));
+    const started = startedProgram(argv);
+    if (started !== undefined) programs.add(started);
+    if (!SHELLS.has(basename(program))) continue;
+    const flag = rest.findIndex((argument) => /^-[A-Za-z]*c[A-Za-z]*$/.test(argument));
+    const script = flag < 0 ? undefined : rest[flag + 1];
+    if (script !== undefined) for (const name of scriptPrograms(script)) programs.add(name);
+  }
+  return programs;
 }
 
 const SKIPPED_DIRECTORIES = new Set(['.git', 'node_modules', 'target', 'build', 'dist', '.gradle', 'vendor', '.venv']);
@@ -244,5 +280,5 @@ export async function readProjectFacts(checkout: string, argvs: readonly (readon
   await visit(checkout, 0);
   const properties = await readSmallFile(join(checkout, WRAPPER_PROPERTIES));
   const gradleDistribution = properties === undefined ? undefined : gradleDistributionOf(properties);
-  return { markers, words: commandWords(argvs), ...(gradleDistribution === undefined ? {} : { gradleDistribution }) };
+  return { markers, words: commandWords(argvs), programs: commandPrograms(argvs), ...(gradleDistribution === undefined ? {} : { gradleDistribution }) };
 }

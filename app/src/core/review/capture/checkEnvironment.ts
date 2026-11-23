@@ -1,4 +1,4 @@
-import { findExecutable, launcherArgv, srtToolEnvironment } from '../../isolation/index';
+import { launcherArgv, locateHostBinary, srtToolEnvironment } from '../../isolation/index';
 import type { PtyCommand } from '../../isolation/types';
 import type { CheckEnvironment } from './ProcessCheckExecutor';
 
@@ -8,7 +8,7 @@ export interface CheckEnvironmentInput {
   /** `permissions.network.bashSandbox` of the profile: the agent's shell ran confined, so the check may not run with more power. */
   readonly bashSandbox: boolean;
   readonly profileEnv: Readonly<Record<string, string>>;
-  readonly srt: { readonly binary: string; readonly settingsDir: string; readonly extraDenyRead?: readonly string[] | undefined };
+  readonly srt: { readonly binary: string; readonly settingsDir: string; readonly extraDenyRead?: readonly string[] | undefined; readonly appPath?: string | undefined };
 }
 
 /**
@@ -21,10 +21,10 @@ export function resolveCheckEnvironment(input: CheckEnvironmentInput): CheckEnvi
   const { provider, bashSandbox, profileEnv, srt } = input;
   if (provider === 'container') return { kind: 'unavailable', why: 'checks under the container provider are not connected in this build' };
   if (provider === 'srt' || bashSandbox) {
-    if (findExecutable(srt.binary) === undefined) return { kind: 'unavailable', why: 'the sandbox runtime is not installed' };
+    if (locateHostBinary(srt.binary, srt.appPath ?? process.env['PATH']) === undefined) return { kind: 'unavailable', why: 'the sandbox runtime is not installed' };
     return {
       kind: 'ready',
-      environment: srtToolEnvironment({ srtBinary: srt.binary, settingsDir: srt.settingsDir, ...(srt.extraDenyRead === undefined ? {} : { extraDenyRead: srt.extraDenyRead }) }),
+      environment: srtToolEnvironment({ srtBinary: srt.binary, settingsDir: srt.settingsDir, ...(srt.appPath === undefined ? {} : { appPath: srt.appPath }), ...(srt.extraDenyRead === undefined ? {} : { extraDenyRead: srt.extraDenyRead }) }),
       profileEnv,
       enforcesNetwork: true,
     };

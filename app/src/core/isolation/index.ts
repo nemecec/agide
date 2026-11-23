@@ -1,6 +1,7 @@
 export * from './types';
 export { LocalProvider, type LocalProviderOptions } from './LocalProvider';
 export { FakeProvider, type FakeCall, type FakeProviderOptions, type FakeStep } from './FakeProvider';
+export { locateHostBinary, trustedPath } from './hostLaunch';
 export { SrtProvider, findExecutable, srtToolEnvironment, type SrtProviderOptions } from './SrtProvider';
 export { buildSrtSettings, type SrtSettings } from './srtSettings';
 export { ContainerProvider, ownerIdOf, type ContainerProviderOptions } from './ContainerProvider';

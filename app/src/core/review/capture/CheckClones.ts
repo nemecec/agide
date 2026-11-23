@@ -61,7 +61,7 @@ export const cloneWithCp: CloneFunction = (source, destination, signal) => {
  * Why `source` cannot be cloned into the directory `destinationRoot`, or undefined when it can: both must be on one
  * volume, and on macOS that volume must be APFS. `cp -c` copies when it cannot clone, so the check comes first. The
  * volume is the filesystem that `df` names, not `st_dev`: on macOS the sealed system volume and the data volume
- * report the same `st_dev`, and `clonefile` fails between them with `EXDEV`.
+ * report the same `st_dev`, and `clonefile` fails between them with `EXDEV`. The answer names no path.
  */
 export type CloneProbe = (source: string, destinationRoot: string) => Promise<string | undefined>;
 
@@ -88,7 +88,7 @@ export function filesystemOf(path: string): Promise<string> {
     execFile('df', ['-P', path], (error, stdout) => {
       const line = stdout.trim().split('\n').pop() ?? '';
       const match = /^(.+?)\s+\d+\s+\d+\s+\d+\s+\d+%\s/.exec(line);
-      if (error !== null || match === null) reject(new CloneError(`the filesystem of ${path} could not be read`));
+      if (error !== null || match === null) reject(new CloneError('the filesystem of a directory could not be read', path));
       else resolve(match[1]!);
     });
   });
@@ -97,7 +97,7 @@ export function filesystemOf(path: string): Promise<string> {
 export const probeCloneable: CloneProbe = async (source, destinationRoot) => {
   const [from, to, sourceFilesystem, destinationFilesystem] = await Promise.all([stat(source), stat(destinationRoot), filesystemOf(source), filesystemOf(destinationRoot)]);
   const refusal = cloneRefusal({ sourceDevice: from.dev, destinationDevice: to.dev, sourceFilesystem, destinationFilesystem, platform: process.platform, destinationType: statfsSync(destinationRoot).type });
-  return refusal === undefined ? undefined : `${source}: ${refusal}`;
+  return refusal;
 };
 
 export interface CheckClonesOptions {
@@ -208,8 +208,12 @@ export class CheckClones implements CloneService {
     signal.throwIfAborted();
     const source = await realpath(part.from).catch(() => undefined);
     if (source === undefined || !(await stat(source)).isDirectory()) return 0;
-    const refusal = await this.probe(source, this.options.root);
-    if (refusal !== undefined) throw new CloneError(`the ${tool.id} cache cannot be cloned: ${refusal}`);
+    // The reason names the tool and the cause, never a path: the cache root may be a link that whoever writes its parent chose. The path goes to the log.
+    const refusal = await this.probe(source, this.options.root).catch((error: unknown) => {
+      if (error instanceof CloneError) throw new CloneError(`the ${tool.id} cache cannot be cloned: ${error.message}`, error.detail);
+      throw error;
+    });
+    if (refusal !== undefined) throw new CloneError(`the ${tool.id} cache cannot be cloned: ${refusal}`, `${source}: ${refusal}`);
     const counted = await countFiles(source, this.limits.maxFiles, this.deviceOf).catch((error: unknown) => {
       if (error instanceof MountBelowRoot) throw new CloneError(`the ${tool.id} cache holds another volume below it; \`cp -c\` would copy it`, `the other volume is at ${relative(source, error.path)}`);
       throw error;

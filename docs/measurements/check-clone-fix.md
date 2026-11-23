@@ -486,7 +486,7 @@ Ways in which code under test could make a check read `passed`, and the answer t
 
 | Way | Answer |
 |---|---|
-| A signal to itself, its group or its parent | closed for every signal of macOS (property tests); SIGKILL ends the launcher and reads as a death by SIGKILL; the stopping signals hang until the deadline |
+| A signal to itself, its group or its parent | closed for every signal of macOS (property tests); SIGKILL ends the launcher and reads as a death by SIGKILL; SIGSTOP hangs until the deadline (TSTP, TTIN and TTOU are dropped for a check) |
 | A signal to `srt` or to the app | refused by the sandbox under `srt`; a plain check has the rights of the agent anyway |
 | An exit status of 256 or more | read modulo 256 by the kernel; documented, no rule |
 | A command that forks and exits 0 | the leader's status decides; the sweep ends what it left behind, and a base run with survivors is `not_run` and not stored; a background process that fails later does not change the result (unchanged) |
@@ -526,8 +526,91 @@ The signal matrix of the real-`srt` suite: every signal and three targets, with 
 
 ### What was not verified
 
-The launcher on Linux, where the numbers and the real-time signals differ (open row in 0042). The signal cases against Docker. A stopping signal under real `srt` (the unit test of the launcher covers it without `srt`). Whether `srt` versions after 0.0.83 change `onCommandExit`.
+The launcher on Linux, where the numbers and the real-time signals differ (open row in 0042). The signal cases against Docker. Whether `srt` versions after 0.0.83 change `onCommandExit`.
 
 ### Leftovers
 
 Scratch files under `/tmp/agide-check-clone-fix-5/`, removed at the end; anything that could not be removed is in the report of the run.
+
+## Sixth pass: check-clone-fix-6
+
+Start 2026-11-23 06:48 UTC, end 2026-11-23 11:13 UTC. A narrow pass over the major and the minors of the fifth independent review; the changes are the diff against the checkpoint commit of the fifth pass (f16a837). The signal table finding was fixed in that commit and is not part of this pass; the measurement table and 0040 already say that only SIGSTOP suspends a check.
+
+### The major: `srt` is started through anything the checkpoint controls
+
+`srtToolCommand` spawned the name `srt` with the working directory of the checkout and the PATH of the profile. libuv looks a bare name up through the PATH of the child after the change of directory, so a relative or empty entry (`bin`, `.`, a leading, trailing or double colon) resolved inside the checkout. The installed shim of `srt` (read at the pnpm global bin directory) is a `/bin/sh` script that runs `dirname`, `sed` and `uname` through PATH and then `$basedir/node` or `command -v node`, and `srt` itself starts `env`, `which` and `bash` by name (`shell: true` in `dist/cli.js`, `whichSync` in `dist/utils/which.js`). A file that the agent committed as `srt`, `bin/node` or any of those helpers ran outside the sandbox with the rights of the app, could exit 0, and made a failing check `passed` with a green base. `SrtProvider.processCommand` had the same shape with the workspace of the agent as the working directory.
+
+Changes (`core/isolation/hostLaunch.ts` is new):
+
+- `trustedPath(path, excluded)` keeps the absolute entries that are not inside an excluded directory, compared in every spelling with links resolved. `locateHostBinary` and `hostLaunch` find `srt` on those entries of the app's own PATH (`SrtProviderOptions.appPath`, default `process.env.PATH`) and return the absolute file and the PATH for its process; a path is made absolute against the working directory of the app; nothing found throws `IsolationError`, which ends the check `not_run` with the reason.
+- The `srt` process gets only that PATH, so the shim and `srt` find their helpers on absolute entries only, and it starts in a neutral directory (`neutralDirectory`: `/var/empty`, or a private empty directory below the settings directory). The launcher inside the sandbox changes into the checkout (`launcherArgv(argv, { directory })`).
+- The program inside the sandbox keeps the PATH of the profile unchanged: `insideArgv` puts `/usr/bin/env PATH=<profile PATH>` (`env -u PATH` for a profile without one) in front of the launcher.
+- The same for `SrtEnvironment.processCommand` (the agent keeps its working directory, which `claude` needs; the trusted PATH carries nothing inside the workspace and the inbox), for `SrtProvider.check` and for `resolveCheckEnvironment`, which look `srt` up on the trusted entries too.
+- A consequence that 0040 states: the entries of `srt`'s mandatory deny list that are anchored at its working directory now apply to the neutral directory and not to the checkout. The checkout is a git worktree whose `.git` is a file, the shared hooks and configuration are outside the writable paths, and the checkout is removed after the run. A workspace that holds the directories of `node` or `srt` (the home directory, for example) makes an agent session fail closed, because the agent could replace those files.
+
+Reproduced before the change with the real `srt` 0.0.83 shim and the call shape of the old code (`spawnSync` with the checkout as working directory): a bare `srt` with a leading empty entry in PATH and a committed `srt` stub exits 0 and the stub writes its marker; the absolute shim with `bin` first in PATH and a committed `bin/node` stub exits 0 and that stub writes its marker, for a command that was `sh -c 'echo tests failed; exit 1'`. After the change the same two setups through `ProcessCheckExecutor` read `failed` with exit 1 and no marker.
+
+Tests: `hostLaunch.test.ts` (new: the entries kept and dropped, links, siblings with the same prefix, the lookup, the neutral directory, `insideArgv`); `toolCommand.test.ts` and `SrtProvider.test.ts` (the command has the absolute file, the trusted PATH, the neutral directory and the profile PATH verbatim for a profile and an app PATH with relative, empty, `.`, checkout and linked entries; the launch is refused when only such an entry holds `srt`; `check()` does not find `srt` through a relative entry); `checkEnvironment.test.ts`; real `srt` in `ProcessCheckExecutor.srt.test.ts` (committed stubs named `srt`, `node`, `env`, `which`, `dirname`, `sed`, `uname` and `bash` in the root, in `bin` and in `node_modules/.bin`; four spellings of an unsafe profile PATH, and a bare `srt` with an unsafe app PATH and with no trusted `srt` at all: `failed` with exit 1 or `not_run`, and no marker).
+
+### The minors
+
+| Finding | State |
+|---|---|
+| A builtin as the first word of the command (`.`, `source`, `eval`, `exec`) runs inside the launcher shell | The launcher starts the program through `/usr/bin/env -- "$@"`, which finds no builtin; reproduced with the old script (exit 0, no signal) and gone with the new one. A first word with `=` would be an assignment of `env`, so the launcher refuses it with 127 and `command not found` (a shell would not have found such a program either). Missing program: 127 and `env: <word>: No such file or directory`, which the existing pattern turns into `not_run`. Tests: launcher rows for a list of builtins, a sourced file, `eval` and `exec`; the executor with the plain path and with real `srt` (first words `.`, `source`, `eval`, `exec` with a script that clears the trap and kills the launcher: never `passed`) |
+| Clone refusal and failed `df` put a path into the reason | `probeCloneable` returns the refusal without the path; `clonePart` puts the path into `detail`; `filesystemOf` rejects with a fixed text and the path as `detail`; the reason is `the <tool> cache cannot be cloned: <cause>`. Tests assert that no part of the home or cache path is in the message and that the log has it |
+| Loopback from every word of the command | `ProjectFacts.programs` (from `commandPrograms`) holds the program of each argv and the first word of each command of a `sh -c` script (after `env`, assignments, `exec`, `command`, `time` and `nohup`); `needsLoopback` reads it. `npm run test:gradle`, `sh -c 'echo skip gradle'`, `node scripts/gradle` and `mvn -Dgradle=no test` give none; `./gradlew test`, `gradle build`, `sh -c 'cd app && ./gradlew test'`, `env CI=1 gradlew` give it. A script file that runs Gradle inside needs the program in the command, as before |
+| Missing tests of the review | SIGSTOP to the launcher, the group and the program under real `srt` (`timed_out`, nothing left); a program that traps TERM and exits 0 ends `timed_out` at the deadline and `not_run` on a cancel, under real `srt` and in the unit suite; the relative and empty PATH test; the clone refusal without a path |
+
+### What was checked on the whole surface
+
+Every place where the app starts a process with a name, a path, a PATH or a working directory that code under test or the checkpoint can influence:
+
+| Place | Answer |
+|---|---|
+| `srtToolCommand` (the check under `srt`) | the major; fixed |
+| `SrtEnvironment.processCommand` and `ptyCommand` (agent sessions under `srt`) | fixed in the same way, with the workspace as working directory |
+| `SrtProvider.check`, `resolveCheckEnvironment` | look `srt` up on the trusted entries only |
+| `plainCommand` (the check without a sandbox) | `/bin/sh` by absolute path; the program is the agent's own code with the rights of the agent, by the rule that a check never runs with less than the agent had; nothing to confine |
+| `LocalProvider` | `claude` by name with the workspace as working directory and the PATH of the profile, no sandbox by choice of the profile |
+| `ContainerProvider` | `docker` by name, workspace as working directory, PATH of the profile in the client environment: the same class of problem, not fixed (the container check is not connected, and the agent PATH is not forwarded to the container by name); open in 0042 |
+| `GuardedGit` (`git`), `CheckClones` (`cp`, `df`), `ProcessSweep` (`ps`, `lsof`, `kill`) | started with the app's own environment, fixed arguments and no working directory from the checkpoint (`git` gets `--git-dir` and `-C` as arguments, with hooks, filters and the pager off); `cp` by absolute path on macOS |
+| `new Git(undefined, () => launch().env)` of the reviewer checkouts and the swarm module's git | the PATH of the profile with `-C <path>`; a relative entry is the only way in; open in 0042 |
+| The shim of `srt` | runs `dirname`, `sed`, `uname` and `node` through the PATH it gets, which is the trusted PATH |
+| `srt` itself | starts `env`, `which`, `bash` and `rg` through its PATH (trusted) and uses `process.cwd()` for its mandatory deny list (the neutral directory) |
+| `claude auth status`, the browser module, the profile launcher | outside the review and the isolation providers; not changed |
+
+### Changed files and functions
+
+Source: `core/isolation/hostLaunch.ts` (new: `findExecutable` moved here, `trustedPath`, `isWithinAny`, `locateHostBinary`, `hostLaunch`, `insideArgv`, `neutralDirectory`); `core/isolation/SrtProvider.ts` (`SrtProviderOptions.appPath`, `check`, `srtToolCommand`, `srtToolEnvironment`, `SrtEnvironment.processCommand`; `findExecutable` re-exported); `core/isolation/statusLauncher.ts` (`launcherArgv` with `directory`, `LAUNCHER_SCRIPT`, new `LAUNCHER_IN_DIRECTORY_SCRIPT`); `core/isolation/index.ts` (exports); `core/review/capture/checkEnvironment.ts` (`resolveCheckEnvironment`, `appPath`); `core/review/capture/CheckClones.ts` (`filesystemOf`, `probeCloneable`, `clonePart`); `core/review/capture/cacheTools.ts` (`ProjectFacts.programs`, `needsLoopback`, `commandPrograms`, `readProjectFacts`).
+
+Tests: `isolation/hostLaunch.test.ts` (new), `isolation/statusLauncher.test.ts`, `isolation/toolCommand.test.ts`, `isolation/SrtProvider.test.ts`, `review/capture/checkEnvironment.test.ts`, `ProcessCheckExecutor.test.ts`, `ProcessCheckExecutor.srt.test.ts`, `CheckClones.test.ts`, `cacheTools.test.ts`.
+
+Other: `scripts/mutation-checks.mjs`; records 0040, 0041, 0042; `app/README.md`.
+
+### Checks run
+
+| Check | Result |
+|---|---|
+| `pnpm typecheck` | passes |
+| `pnpm coverage`, with the real `srt` (`AGIDE_SRT_BIN`, `python3`) | 278 files, 3767 tests pass, 2 expected failures; `src/core` lines 97.18 (threshold 97), `src/core/review` lines 98.36. The first run had one failure in `StreamAgentRuntime.test.ts` (a pending control request that did not reject at once), a file this pass does not touch; it passed three times alone and in the second full run |
+| CI-like run (a directory with only a symlink `node`, `PATH` limited to it and the system directories, no `srt`) | 277 files pass and 1 is skipped, 3607 tests pass, 160 skipped, 2 expected failures; `src/core` lines 97.19, `src/core/review` lines 98.39; margin 0.19 points. The new unit tests run against a stand-in `srt` on a PATH that the test sets |
+| `pnpm build` | passes |
+| `AGIDE_HIDDEN=1 pnpm e2e` | 86 tests pass. The first run failed `milestone3.spec.ts` (`the isolation provider chosen for the profile`), which read the argv of the fake `srt`: it now starts with `/usr/bin/env PATH=<profile PATH>`; the test names that |
+| `pnpm parity` | ok, `docs/parity.md` unchanged |
+| `pnpm check:colours` | no literal outside the allowlist |
+| Real-tool tests (`ProcessCheckExecutor.srt.test.ts` and `SrtProvider.test.ts`, real `srt` 0.0.83) | 143 pass, none skipped |
+| Launcher tests under a terminal with job control (`script -q /dev/null bash -i -c '...'`) | `statusLauncher.test.ts` 118 pass; the real-`srt` rows for TSTP, TTIN, TTOU, SIGSTOP and `stops` 12 pass |
+| New and changed mutation entries (host launch, launcher, clone refusal, loopback, timeout and cancel) | all killed. In the first run two survived: `empty PATH entries are kept` was an equivalent mutation (`isAbsolute('')` is false, so the `entry !== ''` test was redundant; the test and the entry are removed), and `the directory is read as an option` (`cd` for `cd --`) because the test gave a directory that does not exist; the test now enters a directory named `-dashed`. Two entries of earlier passes had to be updated for the new text of the source (a loopback entry and the srt-missing entry) |
+| Full `pnpm mutation` | 522 killed, none survived, 1 skipped (`check env: srt missing still runs the check`: the text to replace had moved; the entry is updated and killed on its own run). About 176 minutes, alone, started 08:07 UTC on 2026-11-23 |
+
+### What took long
+
+The full mutation run, which grew with the entries of this pass and with the signal matrix of the launcher tests (about four minutes for each `signals:` entry). A first attempt to check the syntax of `scripts/mutation-checks.mjs` imported it, which ran the whole list: its `spawnSync` loop cannot take a SIGINT, so it had to be ended with SIGKILL, and the file it was mutating at that moment (`StreamAgentRuntime.ts`, which this pass does not own) was restored with `git checkout` and checked against HEAD. A second mistake of the same kind: a subset run that included the `signals:` entries ran for nearly an hour before it was ended the same way, and the one file it held mutated (`statusLauncher.ts`) was restored by hand. The syntax of the script is now checked with `node --check`. Two mutation survivors needed a changed test or a removed redundancy (see above).
+
+### What was not verified
+
+The launcher and `srt` on Linux. An agent session under the real `srt` with a hostile PATH in the profile (the command of `processCommand` is tested as a unit and the session launch through the real `srt` is tested with the fake `claude`; the planted-program test runs the check path only). The container provider and the PATH of the profile for the git calls of the reviewer checkouts, which keep their old shape (open in 0042). An app started with a PATH that lacks the directory of `node`, where the shim of `srt` fails with status 127 (`failed`).
+
+### Leftovers
+
+The fixture directories that killed runs left in the system temporary directory (`agide-cap-*`, `agide-check-home-*`, `agide-check-scratch-*`, `agide-fake-srt-*`, `agide-srt-settings-*`) were attributed (created during this pass, no process using them) and removed. The scratch directory `/tmp/agide-check-clone-fix-6/` (logs of the runs, the entries and reproduction scripts, two marker files of the reproduction, a symlink named `node` for the CI-like run) could not be removed: the removal was denied, so it is left for the coordinator.

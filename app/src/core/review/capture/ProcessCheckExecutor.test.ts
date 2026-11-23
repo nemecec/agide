@@ -364,7 +364,7 @@ describe('running the check', () => {
     let allowWrite: string[] = [];
     let inside: string[] = [];
     const settingsDir = join(tempDir('srt-settings'), 'srt');
-    const srt = srtToolEnvironment({ srtBinary: 'srt', settingsDir });
+    const srt = srtToolEnvironment({ srtBinary: writeFakeSrt(tempDir('srt-bin')), settingsDir });
     const s = setup({
       environment: {
         kind: 'ready',
@@ -393,10 +393,13 @@ describe('running the check', () => {
     };
     const plainCommand = ['sh', '-c', 'true'];
     expect(
-      [await asked({ 'build.gradle': '\n' }, ['sh', '-c', 'true', 'gradlew']), await asked({ 'package.json': '{}\n' }, plainCommand), await asked({}, plainCommand)],
+      [await asked({ 'build.gradle': '\n' }, ['sh', '-c', './gradlew test']), await asked({ 'package.json': '{}\n' }, plainCommand), await asked({}, plainCommand)],
       'Gradle named in the command needs its lock socket; npm and a project without a known tool do not',
     ).toEqual([true, false, false]);
     expect(await asked({ 'build.gradle': '\n' }, plainCommand), 'a Gradle marker at the base with a command that is not Gradle').toBe(false);
+    expect(await asked({ 'build.gradle': '\n' }, ['npm', 'run', 'test:gradle']), 'the word gradle inside a script name').toBe(false);
+    expect(await asked({ 'build.gradle': '\n' }, ['sh', '-c', 'echo skip gradle']), 'the word gradle among the arguments of echo').toBe(false);
+    expect(await asked({ 'build.gradle': '\n' }, ['node', 'scripts/gradle']), 'a script of that name').toBe(false);
     expect(await asked({ 'package.json': '{}\n' }, plainCommand, { 'tools/build.gradle': '\n' }), 'a Gradle marker that the agent added in the checkpoint').toBe(false);
   });
 
@@ -758,6 +761,28 @@ describe('limits', () => {
     expect(result.base?.id, 'a timeout does not touch the stored base result').toBe(GREEN_ID);
   }, 20_000);
 
+  it('reads a program that traps SIGTERM and exits 0 as timed out at the deadline and as cancelled on a cancel, never as passed', async () => {
+    const trapping = ['sh', '-c', 'trap "exit 0" TERM; while :; do sleep 0.2; done'];
+    const first = setup();
+    const slow = await first.executor.run(first.request(trapping, { timeoutSeconds: 1 }));
+    expect(slow.checkpoint.outcome, 'the SIGTERM of the deadline makes the program exit 0 and the run is still a timeout').toBe('timed_out');
+    first.repo.cleanup();
+    const s = setup();
+    const running = s.executor.run(s.request(trapping));
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await s.executor.cancel('cs_aaaaaaaaaaaaaaaa');
+    const cancelled = await running;
+    expect([cancelled.checkpoint.outcome, cancelled.checkpoint.notRunReason], 'the SIGTERM of the cancel makes the program exit 0 and the run is still cancelled').toEqual(['not_run', 'the check was cancelled']);
+  }, 30_000);
+
+  it('ends a program that stopped itself with SIGSTOP as timed out: only the deadline and a SIGKILL end it', async () => {
+    const s = setup();
+    const started = Date.now();
+    const result = await s.executor.run(s.request(['sh', '-c', 'echo tests failed; kill -STOP $$; exit 0'], { timeoutSeconds: 1 }));
+    expect(result.checkpoint.outcome, 'a stopped program is neither passed nor failed').toBe('timed_out');
+    expect(Date.now() - started, 'the grace period of the SIGKILL passed').toBeLessThan(15_000);
+  }, 30_000);
+
   it('cuts output over the cap and flags it', async () => {
     const s = setup();
     const result = await s.executor.run(s.request(['sh', '-c', 'yes abcdefghij | head -c 3000000']));
@@ -1053,9 +1078,9 @@ describe('a check that ends by a signal under srt', () => {
 
 /** A profile without the sandbox runs the check as a plain process, which Node reads as it reads srt: a death by SIGEMT is exit 0. */
 describe('a check that ends by a signal outside srt', () => {
-  const plainRun = (command: string[]) => {
+  const plainRun = (command: string[], checkpointFiles?: Record<string, string>) => {
     const environment = resolveCheckEnvironment({ provider: 'local', bashSandbox: false, profileEnv: { PATH: process.env['PATH'] ?? '/usr/bin:/bin' }, srt: { binary: '/nonexistent/srt', settingsDir: tempDir('srt-settings') } });
-    const s = setup({ environment });
+    const s = setup({ environment, ...(checkpointFiles === undefined ? {} : { checkpointFiles }) });
     return s.executor.run(s.request(command));
   };
   const FAILS = 'echo "tests: 3 failed";';
@@ -1070,6 +1095,18 @@ describe('a check that ends by a signal outside srt', () => {
   ])('reads %s and then a failure as failed, never as passed', async (_name, signal, target) => {
     const result = await plainRun(['sh', '-c', `${FAILS} kill -${signal} ${target}; sleep 0.5; exit 1`]);
     expect(result.checkpoint.outcome, `the failing test is not reported as passed (exit ${result.checkpoint.exitCode}, signal ${result.checkpoint.signal})`).toBe('failed');
+    expect(result.checkpoint.exitCode, 'the status that came out is not 0').not.toBe(0);
+  });
+
+  const KILL_LAUNCHER = 'echo tests failed; trap - 7; kill -7 $$; exit 1';
+  it.each([
+    ['.', ['.', './dotted.sh']],
+    ['source', ['source', './dotted.sh']],
+    ['eval', ['eval', KILL_LAUNCHER]],
+    ['exec', ['exec', '/bin/sh', '-c', 'echo tests failed; kill -7 $$; exit 1']],
+  ])('does not run code of the checkpoint inside the launcher when the first word of the command is %j: never passed', async (_word, command) => {
+    const result = await plainRun(command, { 'dotted.sh': `${KILL_LAUNCHER}\n` });
+    expect(result.checkpoint.outcome, `a builtin as the first word does not read as passed (exit ${result.checkpoint.exitCode}): ${result.checkpoint.outputTail}`).not.toBe('passed');
     expect(result.checkpoint.exitCode, 'the status that came out is not 0').not.toBe(0);
   });
 

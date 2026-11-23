@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CACHE_TOOLS, commandWords, EXCLUDED_DIRECTORIES, EXCLUDED_FILES, gradleDistributionOf, needsLoopback, readProjectFacts, selectTools, type CacheTool, type HostPaths, type ProjectFacts } from './cacheTools';
+import { CACHE_TOOLS, commandPrograms, commandWords, EXCLUDED_DIRECTORIES, EXCLUDED_FILES, gradleDistributionOf, needsLoopback, readProjectFacts, selectTools, type CacheTool, type HostPaths, type ProjectFacts } from './cacheTools';
 import { removeTempDirs, tempDir, write } from './gitFixtures';
 import { symlinkSync } from 'node:fs';
 
@@ -8,7 +8,7 @@ afterEach(() => removeTempDirs());
 
 const tool = (id: string): CacheTool => CACHE_TOOLS.find((candidate) => candidate.id === id)!;
 const host = (patch: Partial<HostPaths> = {}): HostPaths => ({ home: '/h', env: {}, platform: 'darwin', ...patch });
-const facts = (patch: Partial<ProjectFacts> = {}): ProjectFacts => ({ markers: new Set(), words: new Set(), ...patch });
+const facts = (patch: Partial<ProjectFacts> = {}): ProjectFacts => ({ markers: new Set(), words: new Set(), programs: new Set(), ...patch });
 
 describe('the tool table', () => {
   it('has one entry per tool with the ids the design names', () => {
@@ -137,10 +137,48 @@ describe('selecting the tools of a check', () => {
 });
 
 describe('needsLoopback', () => {
-  it('follows the command words only, not the marker files of the checkout', () => {
-    expect(needsLoopback(CACHE_TOOLS, facts({ markers: new Set(['build.gradle', 'gradlew']), words: commandWords([['node', 'test.js']]) })), 'Gradle markers and a command that is not Gradle').toBe(false);
-    expect(needsLoopback(CACHE_TOOLS, facts({ words: commandWords([['sh', '-c', './gradlew test']]) })), 'a script that runs the wrapper').toBe(true);
-    expect(needsLoopback(CACHE_TOOLS, facts({ words: commandWords([['npm', 'test']]) })), 'a tool that does not bind a loopback port').toBe(false);
+  const loopback = (...argvs: string[][]): boolean => needsLoopback(CACHE_TOOLS, facts({ programs: commandPrograms(argvs) }));
+
+  it('follows the programs of the commands only, not the marker files of the checkout', () => {
+    expect(needsLoopback(CACHE_TOOLS, facts({ markers: new Set(['build.gradle', 'gradlew']), programs: commandPrograms([['node', 'test.js']]) })), 'Gradle markers and a command that is not Gradle').toBe(false);
+    expect(loopback(['sh', '-c', './gradlew test']), 'a script that runs the wrapper').toBe(true);
+    expect(loopback(['npm', 'test']), 'a tool that does not bind a loopback port').toBe(false);
+  });
+
+  it.each([
+    [['./gradlew', 'test']],
+    [['/opt/gradle/bin/gradle', 'build']],
+    [['sh', '-c', 'cd app && ./gradlew test']],
+    [['bash', '-ec', 'echo start; gradle test | tee log']],
+    [['sh', '-c', 'CI=1 ./gradlew test']],
+    [['sh', '-c', 'env JAVA_HOME=/j ./gradlew test']],
+    [['sh', '-c', "'./gradlew' test"]],
+    [['env', 'CI=1', 'gradlew', 'test']],
+  ])('turns loopback on when a program of the command is Gradle: %j', (argv) => {
+    expect(loopback(argv), 'the program word is gradle or gradlew').toBe(true);
+  });
+
+  it.each([
+    [['npm', 'run', 'test:gradle']],
+    [['sh', '-c', 'echo skip gradle']],
+    [['node', 'scripts/gradle']],
+    [['./run-tests.sh']],
+    [['mvn', '-Dgradle=no', 'test']],
+    [['sh', '-c', 'echo "gradle is off" && cargo test']],
+    [['sh', '-c', 'FOO=gradle cargo test']],
+  ])('leaves loopback off when gradle is only a word among the arguments: %j', (argv) => {
+    expect(loopback(argv), 'gradle is not the program of any command').toBe(false);
+  });
+});
+
+describe('command programs', () => {
+  it('takes the program of each argv and the first word of each command of a shell script', () => {
+    const programs = commandPrograms([['sh', '-c', 'cd app && ./gradlew --offline test; pnpm -r run build\nnohup make | tee log & (exit 0)'], ['/usr/bin/env', 'node'], ['node', '-c', 'gradle']]);
+    expect([...programs].sort(), 'the programs and no argument').toEqual(['cd', 'env', 'exit', 'gradlew', 'make', 'node', 'pnpm', 'sh', 'tee']);
+  });
+
+  it('reads no script from a shell without -c or from a program that is not a shell', () => {
+    expect([...commandPrograms([['sh', './run.sh', 'gradle'], ['sh'], ['python', '-c', 'gradle test'], []])].sort(), 'only the program of each argv').toEqual(['python', 'sh']);
   });
 });
 

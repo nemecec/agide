@@ -1,8 +1,7 @@
-import { accessSync, constants } from 'node:fs';
-import { delimiter, join } from 'node:path';
 import { resolveClaudeBinary } from '../session/env';
 import type { SessionId } from '../session/types';
 import { HostEnvironment, signalProcess } from './HostEnvironment';
+import { findExecutable, hostLaunch, insideArgv, locateHostBinary, neutralDirectory } from './hostLaunch';
 import { launchEnv } from './launchEnv';
 import { SessionFiles } from './SessionFiles';
 import { launcherArgv } from './statusLauncher';
@@ -25,6 +24,8 @@ export interface SrtProviderOptions {
   readonly sessionFilesDir: string;
   /** The `srt` executable of `@anthropic-ai/sandbox-runtime`: a path, or a name looked up on PATH. */
   readonly srtBinary: string;
+  /** The PATH the sandbox runtime and its helpers are looked up on, outside the sandbox: the app's own, never the profile's. Defaults to `process.env.PATH`. */
+  readonly appPath?: string;
   /** Defaults to `resolveClaudeBinary(process.env)`. */
   readonly claudeBinary?: string;
   /** Directory of the generated srt settings file per session (0700, file 0600). */
@@ -39,24 +40,7 @@ export const SRT_INSTALL_FIX = 'Install it with `pnpm add -g @anthropic-ai/sandb
 
 const SETTINGS_FILE = 'srt.json';
 
-function executable(path: string): boolean {
-  try {
-    accessSync(path, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** The file a command name resolves to, or the path itself when it has a directory part. */
-export function findExecutable(name: string, pathVariable: string | undefined = process.env['PATH']): string | undefined {
-  if (name.includes('/')) return executable(name) ? name : undefined;
-  return (pathVariable ?? '')
-    .split(delimiter)
-    .filter(Boolean)
-    .map((dir) => join(dir, name))
-    .find(executable);
-}
+export { findExecutable };
 
 /**
  * Anthropic's sandbox runtime around the whole `claude` process (0022 section 6 row 2, probe I1):
@@ -83,7 +67,7 @@ export class SrtProvider implements IsolationProvider {
   }
 
   check(): Promise<ProviderCheck> {
-    if (findExecutable(this.options.srtBinary) === undefined) {
+    if (locateHostBinary(this.options.srtBinary, this.options.appPath ?? process.env['PATH']) === undefined) {
       const named = this.options.srtBinary.includes('/') ? `${this.options.srtBinary} is not executable` : 'The sandbox runtime (srt) is not installed';
       return Promise.resolve({ ok: false, reason: named, fix: SRT_INSTALL_FIX });
     }
@@ -105,19 +89,27 @@ export class SrtProvider implements IsolationProvider {
   }
 }
 
-/** `srt -s <settings> -- <argv>` for a program that is not the CLI, with writes limited to its directory and `writeDirs`. */
-function srtToolCommand(options: Pick<SrtProviderOptions, 'srtBinary' | 'extraDenyRead'>, settings: SessionFiles, launch: ToolLaunch): PtyCommand {
+/**
+ * `srt -s <settings> -- <argv>` for a program that is not the CLI, with writes limited to its directory and `writeDirs`.
+ * The runtime and its helpers run outside the sandbox: they are an absolute file, they get the trusted PATH of the app
+ * and they start in a directory that no checkout holds (`hostLaunch.ts`). The launcher inside the sandbox changes into
+ * the checkout and the program there finds its own programs on the PATH of the profile.
+ */
+function srtToolCommand(options: Pick<SrtProviderOptions, 'srtBinary' | 'appPath' | 'extraDenyRead'>, settings: SessionFiles, launch: ToolLaunch): PtyCommand {
   if (launch.argv.length === 0) throw new IsolationError('invalid', 'a tool launch needs a command');
-  const content = buildToolSrtSettings({ writeDirs: [launch.cwd, ...launch.writeDirs], network: launch.network, loopback: launch.loopback === true, ...(options.extraDenyRead === undefined ? {} : { extraDenyRead: options.extraDenyRead }) });
+  const writeDirs = [launch.cwd, ...launch.writeDirs];
+  const host = hostLaunch(options.srtBinary, options.appPath ?? process.env['PATH'], writeDirs);
+  const content = buildToolSrtSettings({ writeDirs, network: launch.network, loopback: launch.loopback === true, ...(options.extraDenyRead === undefined ? {} : { extraDenyRead: options.extraDenyRead }) });
   const settingsPath = settings.writePrivate(launch.key, SETTINGS_FILE, JSON.stringify(content));
-  return { file: options.srtBinary, args: ['-s', settingsPath, '--', ...launcherArgv(launch.argv)], cwd: launch.cwd, env: { ...launch.env } };
+  const inside = insideArgv(launch.env['PATH'], launcherArgv(launch.argv, { directory: launch.cwd }));
+  return { file: host.file, args: ['-s', settingsPath, '--', ...inside], cwd: neutralDirectory(settings.root), env: { ...launch.env, PATH: host.path } };
 }
 
 /**
  * Runs programs under srt without a provider or a session, for the project check of a review. The settings files go
  * to `settingsDir`, which only this caller writes; `release` removes the files of one key.
  */
-export function srtToolEnvironment(options: Pick<SrtProviderOptions, 'srtBinary' | 'extraDenyRead' | 'settingsDir'>): Pick<AgentEnvironment, 'toolCommand'> & { release(key: string): void } {
+export function srtToolEnvironment(options: Pick<SrtProviderOptions, 'srtBinary' | 'appPath' | 'extraDenyRead' | 'settingsDir'>): Pick<AgentEnvironment, 'toolCommand'> & { release(key: string): void } {
   const settings = new SessionFiles(options.settingsDir);
   return { toolCommand: (launch) => Promise.resolve(srtToolCommand(options, settings, launch)), release: (key) => settings.remove(key) };
 }
@@ -154,11 +146,13 @@ class SrtEnvironment extends HostEnvironment {
     });
     const settingsPath = this.settings.writePrivate(launch.sessionId, SETTINGS_FILE, JSON.stringify(settings));
     this.sessions.add(launch.sessionId);
+    const host = hostLaunch(this.options.srtBinary, this.options.appPath ?? process.env['PATH'], [workspace.hostPath, launch.cwd, ...(inbox === undefined ? [] : [inbox])]);
+    const env = launchEnv(profile, this.paths.toEnv, launch.env);
     return {
-      file: this.options.srtBinary,
-      args: ['-s', settingsPath, '--', this.claudeBinary, ...launch.args],
+      file: host.file,
+      args: ['-s', settingsPath, '--', ...insideArgv(env['PATH'], [this.claudeBinary, ...launch.args])],
       cwd: launch.cwd,
-      env: launchEnv(profile, this.paths.toEnv, launch.env),
+      env: { ...env, PATH: host.path },
     };
   }
 

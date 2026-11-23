@@ -1,9 +1,11 @@
 import { spawn } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { writeFakeSrt } from './fakeSrt';
+import { insideArgv } from './hostLaunch';
 import { runInPty } from './ptyHarness';
 import { SrtProvider } from './SrtProvider';
 import { findTestSrt, srtTestsUnavailable } from './testRuntimes';
@@ -12,11 +14,16 @@ import type { EnvironmentSpec } from './types';
 let dir: string;
 let spec: EnvironmentSpec;
 const srtBinary = findTestSrt() ?? 'srt';
+/** A provider whose `srt` is a stand-in file on the PATH of the app (`appPath`), for the tests of the command. */
 const provider = (claudeBinary: string, extra: Partial<ConstructorParameters<typeof SrtProvider>[0]> = {}) =>
-  new SrtProvider({ sessionFilesDir: join(dir, 'sessions'), srtBinary, settingsDir: join(dir, 'srt'), claudeBinary, ...extra });
+  new SrtProvider({ sessionFilesDir: join(dir, 'sessions'), srtBinary: 'srt', appPath: join(dir, 'bin'), settingsDir: join(dir, 'srt'), claudeBinary, ...extra });
+/** The provider over the real `srt` for the tests that run it. */
+const real = (claudeBinary: string, extra: Partial<ConstructorParameters<typeof SrtProvider>[0]> = {}) => provider(claudeBinary, { srtBinary, appPath: process.env['PATH'] ?? '', ...extra });
 
 beforeEach(() => {
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'srt-provider-')));
+  mkdirSync(join(dir, 'bin'));
+  writeFakeSrt(join(dir, 'bin'));
   spec = {
     key: { profileId: 'default' },
     profile: { claudeConfigDir: join(dir, 'claude'), env: { PATH: process.env['PATH'] ?? '' }, toolFiles: [] },
@@ -33,6 +40,11 @@ describe('SrtProvider check', () => {
     expect(check, 'check result').toMatchObject({ ok: false, reason: expect.stringContaining('not installed'), fix: expect.stringContaining('@anthropic-ai/sandbox-runtime') });
   });
 
+  it('does not find srt through a relative or an empty entry of the PATH of the app', async () => {
+    const check = await provider('/bin/sh', { appPath: [relative(process.cwd(), join(dir, 'bin')), '', '.'].join(':') }).check();
+    expect(check, 'the stand-in is in the directory of the relative entry only').toMatchObject({ ok: false, reason: expect.stringContaining('not installed') });
+  });
+
   it('names a configured srt path that is not executable', async () => {
     const check = await provider('/bin/sh', { srtBinary: join(dir, 'missing-srt') }).check();
     expect(check, 'check result').toMatchObject({ ok: false, reason: expect.stringContaining('is not executable') });
@@ -45,13 +57,13 @@ describe('SrtProvider check', () => {
 });
 
 describe('SrtProvider command', () => {
-  it('runs srt with a per-session settings file, the separator and then claude with its arguments', async () => {
+  it('runs srt with a per-session settings file, the separator and then claude with its arguments, under the PATH of the profile', async () => {
     const environment = await provider('/bin/claude-stand-in').prepare(spec);
     environment.hookDelivery('s1', { inboxHostDir: join(dir, 'inbox'), httpPath: '/h', token: 't' });
     const command = await environment.ptyCommand({ sessionId: 's1', cwd: join(dir, 'work'), args: ['--session-id', 's1'], cols: 80, rows: 24 });
     const settingsPath = join(dir, 'srt', 's1', 'srt.json');
-    expect(command.file, 'srt is the spawned file').toBe(srtBinary);
-    expect(command.args, 'settings, separator, claude, arguments').toEqual(['-s', settingsPath, '--', '/bin/claude-stand-in', '--session-id', 's1']);
+    expect(command.file, 'srt is the spawned file, as an absolute path').toBe(join(dir, 'bin', 'srt'));
+    expect(command.args, 'settings, separator, env with the profile PATH, claude, arguments').toEqual(['-s', settingsPath, '--', ...insideArgv(process.env['PATH'], ['/bin/claude-stand-in', '--session-id', 's1'])]);
     expect(statSync(settingsPath).mode & 0o777, 'settings file mode').toBe(0o600);
     expect(statSync(join(dir, 'srt', 's1')).mode & 0o777, 'settings directory mode').toBe(0o700);
     const settings = JSON.parse(readFileSync(settingsPath, 'utf8')) as { filesystem: { allowWrite: string[] }; network: { allowedDomains: string[] } };
@@ -63,14 +75,36 @@ describe('SrtProvider command', () => {
     const environment = await provider('/bin/claude-stand-in').prepare(spec);
     const launch = { sessionId: 's1', cwd: join(dir, 'work'), args: ['-p', '--session-id', 's1'], env: { LAUNCH_VAR: 'l' } };
     const command = await environment.processCommand?.(launch);
-    expect(command?.args, 'settings, separator, claude, arguments').toEqual(['-s', join(dir, 'srt', 's1', 'srt.json'), '--', '/bin/claude-stand-in', '-p', '--session-id', 's1']);
+    expect(command?.args.slice(-3), 'claude and its arguments end the argv').toEqual(['-p', '--session-id', 's1']);
+    expect(command?.args.slice(0, 3), 'settings, separator').toEqual(['-s', join(dir, 'srt', 's1', 'srt.json'), '--']);
     expect(command?.env['LAUNCH_VAR'], 'launch variable').toBe('l');
     expect(command, 'same as the PTY command').toEqual(await environment.ptyCommand({ ...launch, cols: 80, rows: 24 }));
   });
 
+  it('never starts srt or the programs of its shim through the working directory of the agent or a PATH entry that it controls', async () => {
+    const workspace = join(dir, 'work');
+    mkdirSync(join(workspace, 'bin'), { recursive: true });
+    writeFileSync(join(workspace, 'bin', 'srt'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const profilePath = ['bin', '', '.', join(workspace, 'bin'), '/usr/bin', ''].join(':');
+    const environment = await provider('claude', { appPath: ['bin', '', '.', join(workspace, 'bin'), join(dir, 'bin')].join(':') }).prepare({ ...spec, profile: { ...spec.profile, env: { PATH: profilePath } } });
+    const command = await environment.processCommand?.({ sessionId: 's1', cwd: workspace, args: [] });
+    expect(command?.file, 'srt comes from the absolute entry of the app PATH, not from the relative, empty or workspace entries').toBe(join(dir, 'bin', 'srt'));
+    expect(command?.env['PATH'], 'the host-side PATH holds the absolute entry outside the workspace only').toBe(join(dir, 'bin'));
+    expect(command?.args.slice(3, 5), 'the profile PATH is put back verbatim for claude inside the sandbox').toEqual(['/usr/bin/env', `PATH=${profilePath}`]);
+    expect(command?.cwd, 'claude still starts in the workspace').toBe(workspace);
+  });
+
+  it('refuses to start when srt is found only through a PATH entry that the agent controls', async () => {
+    const workspace = join(dir, 'work');
+    mkdirSync(join(workspace, 'bin'), { recursive: true });
+    writeFileSync(join(workspace, 'bin', 'srt'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const environment = await provider('claude', { appPath: `bin::.:${join(workspace, 'bin')}` }).prepare(spec);
+    await expect(environment.processCommand?.({ sessionId: 's1', cwd: workspace, args: [] }), 'no trusted entry holds srt').rejects.toThrow('not found as an executable on the trusted PATH');
+  });
+
   it('removes the settings file on release', async () => {
     const environment = await provider('/bin/claude-stand-in').prepare(spec);
-    await environment.ptyCommand({ sessionId: 's1', cwd: dir, args: [], cols: 80, rows: 24 });
+    await environment.ptyCommand({ sessionId: 's1', cwd: join(dir, 'work'), args: [], cols: 80, rows: 24 });
     await environment.releaseSession('s1');
     expect(() => statSync(join(dir, 'srt', 's1')), 'settings directory is gone').toThrow();
   });
@@ -135,7 +169,7 @@ sandboxed(`SrtProvider under the real sandbox runtime${srtTestsUnavailable() ===
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as { port: number }).port;
     try {
-      const environment = await provider(probeScript()).prepare({ ...spec, workspace: { mode: 'bind', hostPath: workspace } });
+      const environment = await real(probeScript()).prepare({ ...spec, workspace: { mode: 'bind', hostPath: workspace } });
       const command = await environment.ptyCommand({ sessionId: 's1', cwd: workspace, args: [workspace, outside, String(port)], cols: 80, rows: 24 });
       const run = runInPty(command);
       await run.until(/end/, 30_000);
@@ -154,7 +188,7 @@ sandboxed(`SrtProvider under the real sandbox runtime${srtTestsUnavailable() ===
     const script = join(dir, 'sleeper.sh');
     writeFileSync(script, `#!/bin/sh\necho "$$" > ${join(dir, 'inner.pid')}\necho ready\nexec sleep 30\n`);
     chmodSync(script, 0o755);
-    const environment = await provider(script, { extraWritePaths: [dir] }).prepare({ ...spec, workspace: { mode: 'bind', hostPath: dir } });
+    const environment = await real(script, { extraWritePaths: [dir] }).prepare({ ...spec, workspace: { mode: 'bind', hostPath: dir } });
     const command = await environment.ptyCommand({ sessionId: 's1', cwd: dir, args: [], cols: 80, rows: 24 });
     const run = runInPty(command);
     await run.until(/ready/);
@@ -186,7 +220,7 @@ sandboxed('SrtProvider in a session launch', () => {
       const workdir = join(dir, `cwd-${name}`);
       spawn('mkdir', ['-p', workdir]);
       await new Promise((resolve) => setTimeout(resolve, 100));
-      const chosen = name === 'srt' ? provider(FAKE_CLAUDE, { extraWritePaths: [dir] }) : new LocalProvider({ sessionFilesDir: join(dir, 'local-sessions'), claudeBinary: FAKE_CLAUDE });
+      const chosen = name === 'srt' ? real(FAKE_CLAUDE, { extraWritePaths: [dir] }) : new LocalProvider({ sessionFilesDir: join(dir, 'local-sessions'), claudeBinary: FAKE_CLAUDE });
       const service = new PtySessionService({
         eventsDir: join(dir, `events-${name}`),
         provider: chosen,

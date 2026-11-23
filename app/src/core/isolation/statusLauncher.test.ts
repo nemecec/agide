@@ -1,4 +1,7 @@
 import { spawn } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { launcherArgv, LAUNCHER_HANDLED_SIGNALS } from './statusLauncher';
 import { systemSignals, type SystemSignal } from './signalTable';
@@ -13,10 +16,10 @@ interface Ended {
 }
 
 /** Runs argv the way the check does, with Node, in its own process group, so that a signal to the group stays inside it. */
-function run(argv: readonly string[], timeoutMs = 10_000): Promise<Ended> {
+function run(argv: readonly string[], timeoutMs = 10_000, cwd?: string): Promise<Ended> {
   return new Promise((resolve) => {
     const [file = '', ...args] = argv;
-    const child = spawn(file, args, { stdio: 'ignore', detached: true });
+    const child = spawn(file, args, { stdio: 'ignore', detached: true, ...(cwd === undefined ? {} : { cwd }) });
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
@@ -34,6 +37,17 @@ function run(argv: readonly string[], timeoutMs = 10_000): Promise<Ended> {
       killGroup();
       resolve({ code, signal, timedOut });
     });
+  });
+}
+
+/** Runs argv like `run` and returns the status and what it wrote to stderr. */
+function runCapturing(argv: readonly string[]): Promise<{ code: number | null; stderr: string }> {
+  return new Promise((resolve) => {
+    const [file = '', ...args] = argv;
+    const child = spawn(file, args, { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
+    const chunks: Buffer[] = [];
+    child.stderr.on('data', (chunk: Buffer) => chunks.push(chunk));
+    child.once('close', (code) => resolve({ code, stderr: Buffer.concat(chunks).toString('utf8') }));
   });
 }
 
@@ -121,6 +135,50 @@ describe('the launcher shell of a check, on any system', () => {
   it('fails when there is no program, and when the program does not exist', async () => {
     expect((await run(launcherArgv([]))).code, 'no program is no pass').toBe(2);
     expect((await run(launcherArgv(['/nonexistent/program']))).code, 'a program that cannot be found ends with 127').toBe(127);
+  });
+
+  it.each(['.', 'source', 'eval', 'exec', 'trap', 'set', 'export', 'cd', 'umask', 'command', 'builtin', 'return', 'exit', 'break', 'times'])('does not run the first word %j as a shell builtin: the launcher shell keeps its trap and its status', async (word) => {
+    const ended = await run(launcherArgv([word, 'echo tests failed; trap - 7; kill -7 $$; exit 1']));
+    expect([ended.code === 0, ended.timedOut], `a builtin word cannot make the launcher exit 0 (code ${ended.code}, signal ${ended.signal})`).toEqual([false, false]);
+  });
+
+  it('does not let a sourced file, an eval or an exec of the checkpoint end the launcher with status 0', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'launcher-builtin-'));
+    try {
+      const sourced = join(directory, 'dotted.sh');
+      writeFileSync(sourced, 'echo tests failed; trap - 7; kill -7 $$; exit 1\n');
+      for (const argv of [['.', sourced], ['source', sourced], ['eval', 'echo tests failed; trap - 7; kill -7 $$; exit 1'], ['exec', '/bin/sh', '-c', 'echo tests failed; kill -7 $$; exit 1']]) {
+        const ended = await run(launcherArgv(argv));
+        expect(ended.code, `${argv[0]} does not run in the launcher: it ends 127 or 126, not 0 (code ${ended.code}, signal ${ended.signal})`).not.toBe(0);
+        expect(ended.timedOut, `${argv[0]} does not hang`).toBe(false);
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('starts a program through an external env: a missing program is 127 with the env line, and a name with = is not an assignment', async () => {
+    const missing = await runCapturing(launcherArgv(['no-such-program-here']));
+    expect([missing.code, missing.stderr], 'env names the program it could not find').toEqual([127, 'env: no-such-program-here: No such file or directory\n']);
+    const assignment = await runCapturing(launcherArgv(['FOO=bar', 'true']));
+    expect([assignment.code, assignment.stderr], 'a first word with = is refused with the line of the toolchain pattern, and the rest never runs').toEqual([127, 'check-launcher: FOO=bar: command not found\n']);
+  });
+
+  it('changes into the directory it is given before it runs the program, and fails when it cannot', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'launcher-cd-'));
+    try {
+      const inside = await run(launcherArgv(['sh', '-c', `test "$(pwd -P)" = '${realpathSync(directory)}'`], { directory }));
+      expect(inside.code, 'the program runs in the directory').toBe(0);
+      const missing = await run(launcherArgv(['true'], { directory: join(directory, 'absent') }));
+      expect(missing.code, 'a directory that cannot be entered is status 2, never a pass').toBe(2);
+      const bare = await run(launcherArgv([], { directory }));
+      expect(bare.code, 'no program is status 2 here as well').toBe(2);
+      mkdirSync(join(directory, '-dashed'));
+      const dashed = await run(launcherArgv(['sh', '-c', 'exit 5'], { directory: '-dashed' }), 10_000, directory);
+      expect(dashed.code, 'a directory name that starts with a dash is a directory and not an option: the program runs there').toBe(5);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('passes the arguments on as they are, without a second parse by the shell', async () => {

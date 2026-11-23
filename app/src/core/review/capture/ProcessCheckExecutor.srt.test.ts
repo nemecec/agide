@@ -5,7 +5,7 @@ import { chmodSync, existsSync, lstatSync, readdirSync, readFileSync, readlinkSy
 import { createServer, type Server } from 'node:http';
 import { createServer as createSocketServer } from 'node:net';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { findExecutable, srtToolEnvironment } from '../../isolation/index';
 import { systemSignals } from '../../isolation/signalTable';
@@ -57,7 +57,7 @@ interface Rig {
 const greenBase = (commitId: string): CheckRecord => ({ id: 'chk_stored_green', changesetId: null, target: 'base', commitId, policyHash: POLICY_HASH, command: ['x'], outcome: 'passed', notRunReason: null, exitCode: 0, signal: null, durationMs: 1, outputPath: null, outputTail: '', truncated: false, startedAt: '2026-11-21T10:00:00.000Z', endedAt: '2026-11-21T10:00:01.000Z' });
 
 /** An executor over the real srt. `home` is the home directory the check sees: a fixture directory unless a test needs the real toolchains. */
-function rig(files: Record<string, string | Buffer>, options: { home?: string; extraFiles?: Record<string, string>; env?: Record<string, string>; executables?: string[]; base?: 'run' | 'stored'; loopback?: boolean } = {}): Rig {
+function rig(files: Record<string, string | Buffer>, options: { home?: string; extraFiles?: Record<string, string>; env?: Record<string, string>; executables?: string[]; base?: 'run' | 'stored'; loopback?: boolean; srtBinary?: string; appPath?: string } = {}): Rig {
   repo = makeRepo({ 'base.txt': 'base\n', ...files });
   for (const path of options.executables ?? []) chmodSync(join(repo.main, path), 0o755);
   for (const [path, content] of Object.entries(options.extraFiles ?? { 'agent.txt': 'agent\n' })) write(join(repo.main, path), content);
@@ -71,9 +71,9 @@ function rig(files: Record<string, string | Buffer>, options: { home?: string; e
   const siblingFiles = { profile: join(appRoot, 'profiles', 'sibling', 'data', 'review', 'swarm', 'patch'), registry: join(appRoot, 'registry', 'profiles.json') };
   write(siblingFiles.profile, 'the diff of a swarm of another profile\n');
   write(siblingFiles.registry, 'the registry of the app\n');
-  const srtBinary = findTestSrt()!;
+  const srtBinary = options.srtBinary ?? findTestSrt()!;
   const settingsDir = join(tempDir('srt-settings'), 'srt');
-  const srt = srtToolEnvironment({ srtBinary, settingsDir, extraDenyRead: checkDenyRead({ agent: undefined, appRoot, appDirs: [], claude: claudeConfigPaths({ configured: undefined, home }), home }) });
+  const srt = srtToolEnvironment({ srtBinary, settingsDir, ...(options.appPath === undefined ? {} : { appPath: options.appPath }), extraDenyRead: checkDenyRead({ agent: undefined, appRoot, appDirs: [], claude: claudeConfigPaths({ configured: undefined, home }), home }) });
   // The daemon tests bind loopback ports: they ask for the loopback that only a tool entry (Gradle) grants a check otherwise.
   const environment = options.loopback === true ? { ...srt, toolCommand: (launch: ToolLaunch) => srt.toolCommand({ ...launch, loopback: true }) } : srt;
   const clonesRoot = join(repo.root, 'clones');
@@ -267,6 +267,93 @@ suite(`the check under the real srt${unavailable === undefined ? '' : ` [unavail
     expect((await r.run(['sh', '-c', 'trap "" TERM; kill -TERM 0; sleep 1; exit 0'])).checkpoint.outcome, 'an ignored signal and the program\'s own exit 0 is a pass').toBe('passed');
   }, 120_000);
 
+  /**
+   * The sandbox runtime and the programs that start it run outside the sandbox, with the rights of the app, in a
+   * directory that the checkpoint fills. A stub that is committed as `srt` or as `bin/node` stands for the program an
+   * agent would plant: if it ran, it would write a marker outside the checkout, exit 0 and make the failing check pass.
+   */
+  describe('the host-side lookup of the sandbox runtime', () => {
+    const HELPERS = ['srt', 'node', 'env', 'which', 'dirname', 'sed', 'uname', 'bash'];
+    const stub = (marker: string): string => `#!/bin/sh\necho planted > '${marker}'\nexit 0\n`;
+    /** The names the host side looks up (srt, node, and the helpers of the shim and of srt), in the checkout root and in `bin` and `node_modules/.bin`. `sh` is not among them: the program itself finds `sh` through the profile PATH inside the sandbox. */
+    const planted = (marker: string): { files: Record<string, string>; executables: string[] } => {
+      const paths = HELPERS.flatMap((name) => [name, `bin/${name}`, `node_modules/.bin/${name}`]);
+      return { files: Object.fromEntries(paths.map((path) => [path, stub(marker)])), executables: paths };
+    };
+    const realPath = (): string => process.env['PATH'] ?? '/usr/bin:/bin';
+
+    it.each([
+      ['a relative entry, an empty entry and the entry .', (real: string) => ['bin', '', '.', './node_modules/.bin', real].join(':')],
+      ['a leading empty entry', (real: string) => `:${real}`],
+      ['a trailing empty entry', (real: string) => `${real}:`],
+      ['a double colon', (real: string) => `${real}::/usr/bin`],
+    ])('reads a failing check as failed and never runs a program of the checkpoint outside the sandbox: the profile PATH holds %s', async (_name, profilePath) => {
+      const marker = join(tempDir('srt-planted'), 'ran');
+      const { files, executables } = planted(marker);
+      const r = rig(files, { executables, env: { PATH: profilePath(realPath()) } });
+      const result = await r.run(['sh', '-c', 'echo tests failed; exit 1']);
+      expect([result.checkpoint.outcome, result.checkpoint.exitCode], `the failing check is failed: ${result.checkpoint.outputTail}`).toEqual(['failed', 1]);
+      expect(existsSync(marker), 'no stub of the checkpoint ran outside the sandbox').toBe(false);
+      expect(result.checkpoint.outputTail, 'the output is the command of the check').toContain('tests failed');
+    }, 120_000);
+
+    it('does not take a bare srt name from the checkout, whatever the PATH of the app holds, and refuses to start without a trusted srt', async () => {
+      const marker = join(tempDir('srt-planted-bare'), 'ran');
+      const { files, executables } = planted(marker);
+      const appPath = ['', 'bin', '.', dirname(findTestSrt()!), realPath()].join(':');
+      const bare = rig(files, { executables, srtBinary: 'srt', appPath, env: { PATH: ['', 'bin', '.', realPath()].join(':') } });
+      const result = await bare.run(['sh', '-c', 'echo tests failed; exit 1']);
+      expect([result.checkpoint.outcome, result.checkpoint.exitCode], `a bare srt is looked up on the absolute entries only: ${result.checkpoint.outputTail}`).toEqual(['failed', 1]);
+      expect(existsSync(marker), 'the srt stub of the checkout did not run').toBe(false);
+      const none = rig(files, { executables, srtBinary: 'srt', appPath: ['', 'bin', '.'].join(':') });
+      const refused = await none.run(['sh', '-c', 'echo tests failed; exit 1']);
+      expect([refused.checkpoint.outcome, refused.checkpoint.notRunReason], 'no trusted entry holds srt: the check does not start').toEqual(['not_run', expect.stringContaining('not found as an executable on the trusted PATH')]);
+      expect(existsSync(marker), 'the srt stub of the checkout did not run either').toBe(false);
+    }, 120_000);
+
+    it('starts srt outside the checkout: the working directory of the sandbox runtime is not the checkpoint, and the program still starts in the checkout', async () => {
+      const r = rig({ 'package.json': '{}\n' });
+      const result = await r.run(['sh', '-c', 'test -f agent.txt && test "$(basename "$(dirname "$PWD")")" = sw1 && echo in-checkout']);
+      expect([result.checkpoint.outcome, result.checkpoint.outputTail], `the program runs in the checkout of the checkpoint: ${result.checkpoint.outputTail}`).toMatchObject(['passed', expect.stringContaining('in-checkout')]);
+    }, 60_000);
+  });
+
+  /** SIGSTOP cannot be caught or ignored and stops the check: only the deadline of the app ends it, as a timeout. */
+  it.each([
+    ['itself', '$$'],
+    ['its process group', '0'],
+    ['its parent, the launcher', '$PPID'],
+  ])('ends a check that stops %s with SIGSTOP as timed out, never as passed or failed', async (_name, target) => {
+    const r = rig({});
+    const result = await r.run(['sh', '-c', `echo tests failed; kill -STOP ${target}; sleep 1; exit 0`], { timeoutSeconds: 2 });
+    expect(result.checkpoint.outcome, `a stopped check hits the deadline (exit ${result.checkpoint.exitCode}): ${result.checkpoint.outputTail}`).toBe('timed_out');
+    expect(await r.survivors(), 'nothing of the run is left').toEqual([]);
+  }, 60_000);
+
+  it('ends a check that traps SIGTERM and exits 0 as timed out at the deadline and as cancelled on a cancel, never as passed', async () => {
+    const trapping = 'trap "exit 0" TERM; while :; do sleep 1; done';
+    const slow = await rig({}).run(['sh', '-c', trapping], { timeoutSeconds: 2 });
+    expect(slow.checkpoint.outcome, `the SIGTERM of the deadline makes the program exit 0, and the run is still a timeout: ${slow.checkpoint.outputTail}`).toBe('timed_out');
+    const c = rig({});
+    const running = c.run(['sh', '-c', trapping]);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await c.cancel();
+    const cancelled = await running;
+    expect([cancelled.checkpoint.outcome, cancelled.checkpoint.notRunReason], 'the SIGTERM of the cancel makes the program exit 0, and the run is still cancelled').toEqual(['not_run', 'the check was cancelled']);
+  }, 120_000);
+
+  it.each([
+    ['.', ['.', './dotted.sh']],
+    ['source', ['source', './dotted.sh']],
+    ['eval', ['eval', 'echo tests failed; trap - 7; kill -7 $$; exit 1']],
+    ['exec', ['exec', '/bin/sh', '-c', 'echo tests failed; kill -7 $$; exit 1']],
+  ])('does not run code of the checkpoint inside the launcher when the first word of the command is %j: never passed', async (_word, command) => {
+    const r = rig({}, { extraFiles: { 'agent.txt': 'agent\n', 'dotted.sh': 'echo tests failed; trap - 7; kill -7 $$; exit 1\n' } });
+    const result = await r.run(command);
+    expect(result.checkpoint.outcome, `a builtin as the first word does not read as passed (exit ${result.checkpoint.exitCode}): ${result.checkpoint.outputTail}`).not.toBe('passed');
+    expect(result.checkpoint.exitCode, 'the status that came out of srt is not 0').not.toBe(0);
+  }, 60_000);
+
   it('keeps pass, fail, timeout and cancel as they were', async () => {
     const r = rig({});
     const [passed, failed, slow] = [await r.run(['sh', '-c', 'exit 0']), await r.run(['sh', '-c', 'exit 3']), await r.run(['sh', '-c', 'sleep 30'], { timeoutSeconds: 2 })];
@@ -311,8 +398,8 @@ suite(`the check under the real srt${unavailable === undefined ? '' : ` [unavail
 
   it('admits loopback connections when a command of the policy names a tool that needs a loopback port, which reaches the services of the host', async () => {
     await withLoopbackService(async (port) => {
-      const r = rig({ 'build.gradle': '\n' });
-      const result = await r.run([...connectTo(port), 'gradlew']);
+      const r = rig({ 'build.gradle': '\n', gradlew: '#!/bin/sh\nexec node -e "$1"\n' }, { executables: ['gradlew'] });
+      const result = await r.run(['./gradlew', connectTo(port)[2]!]);
       expect([result.checkpoint.outcome, result.checkpoint.outputTail], 'the Gradle entry sets allowLocalBinding, and srt pairs it with loopback connections').toMatchObject(['passed', expect.stringContaining('REACHED')]);
     });
   }, 120_000);

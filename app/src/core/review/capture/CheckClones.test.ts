@@ -11,7 +11,16 @@ afterEach(() => removeTempDirs());
 const copy: CloneFunction = async (source, destination) => cpSync(source, destination, { recursive: true, verbatimSymlinks: true });
 const never = new AbortController().signal;
 
-const project = (markers: string[] = ['package.json'], words: string[] = []): ProjectFacts => ({ markers: new Set(markers), words: new Set(words) });
+/** The `CloneError` a promise rejects with. */
+const rejection = (promise: Promise<unknown>): Promise<CloneError> =>
+  promise.then(
+    () => {
+      throw new Error('expected a rejection');
+    },
+    (error: unknown) => error as CloneError,
+  );
+
+const project = (markers: string[] = ['package.json'], words: string[] = []): ProjectFacts => ({ markers: new Set(markers), words: new Set(words), programs: new Set(words) });
 
 interface Rig {
   readonly home: string;
@@ -227,11 +236,32 @@ describe('when a clone cannot be made', () => {
     }
   });
 
-  it('refuses a cache on another volume without calling the clone function', async () => {
-    const r = rig({ probe: async (source) => `${source}: it is on another volume than the clone directory` });
-    await expect(r.clones.create('chk_volume', r.request()), 'the reason names the tool').rejects.toThrow(/the npm cache cannot be cloned: .*another volume/);
+  it('refuses a cache on another volume without calling the clone function and names no path in the reason', async () => {
+    const r = rig({ probe: async () => 'it is on another volume than the clone directory' });
+    const error = await rejection(r.clones.create('chk_volume', r.request()));
+    expect(error.message, 'the reason names the tool and the cause').toBe('the npm cache cannot be cloned: it is on another volume than the clone directory');
+    expect(error.message.includes(r.home) || error.message.includes(realpathSync(r.home)), 'no part of the home or the cache path is in the reason').toBe(false);
+    expect(error.detail, 'the log of the run has the real cache path').toContain(join(realpathSync(r.home), '.npm', '_cacache'));
     expect(r.calls, 'nothing was cloned').toEqual([]);
     expect(existsSync(join(r.root, 'chk_volume')), 'the directory is gone').toBe(false);
+  });
+
+  it('names no path when the filesystem of a cache cannot be read, and keeps the path for the log', async () => {
+    const r = rig({
+      probe: async (source) => {
+        throw new CloneError('the filesystem of a directory could not be read', source);
+      },
+    });
+    const error = await rejection(r.clones.create('chk_df', r.request()));
+    expect(error.message, 'fixed text with the tool').toBe('the npm cache cannot be cloned: the filesystem of a directory could not be read');
+    expect(error.message.includes(realpathSync(r.home)), 'no path in the reason').toBe(false);
+    expect(error.detail, 'the path is in the detail').toContain(realpathSync(r.home));
+  });
+
+  it('reads no path into the reason of the real df probe either', async () => {
+    const missing = join(tempDir('df-missing'), 'not-there');
+    const error = await rejection(filesystemOf(missing));
+    expect([error.message, error.detail], 'fixed text, the path in the detail').toEqual(['the filesystem of a directory could not be read', missing]);
   });
 
   it('refuses a cache that holds another volume below its root, which cp -c would copy, without calling the clone function', async () => {
