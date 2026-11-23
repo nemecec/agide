@@ -435,8 +435,8 @@ Check of the signal list on this machine (`kill -l`, each signal sent to a shell
 |---|---|
 | ends the process, catchable | HUP INT QUIT ILL TRAP ABRT EMT FPE BUS SEGV SYS PIPE ALRM TERM XCPU XFSZ VTALRM PROF USR1 USR2 |
 | ends the process, cannot be caught | KILL |
-| ignored | URG CHLD WINCH INFO CONT IO |
-| stops the process | STOP TSTP TTIN TTOU |
+| ignored | URG CHLD WINCH INFO CONT IO, and TSTP TTIN TTOU for a check (its session has no controlling terminal, so its process group is orphaned and the kernel drops these three) |
+| stops the process | STOP |
 
 Statuses measured with real `srt` 0.0.83 (each check prints a failure, signals, then `sleep 1; exit 1`):
 

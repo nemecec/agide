@@ -5,7 +5,8 @@
  * INT or TERM. A signal that ends the launcher would read as a pass, so the launcher handles all of them and only
  * SIGKILL, which cannot be caught and which Node and `srt` report by name, can end it. The list is by number because
  * names differ between shells and platforms. It leaves out the signals that are ignored by default (URG, CHLD, WINCH,
- * INFO, CONT, IO) or stop the process (STOP, TSTP, TTIN, TTOU). The app runs on macOS only; Linux has other numbers.
+ * INFO, CONT, IO), SIGSTOP, which stops the process, and TSTP, TTIN and TTOU, which the kernel drops for a check because
+ * its session has no controlling terminal. The app runs on macOS only; Linux has other numbers.
  */
 export const LAUNCHER_HANDLED_SIGNALS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 30, 31];
 

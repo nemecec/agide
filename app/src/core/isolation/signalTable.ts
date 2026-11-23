@@ -18,10 +18,17 @@ function signalNames(): string[] {
   return listing.stdout.split(/\s+/).filter((name) => /^[A-Z][A-Z0-9]*$/.test(name));
 }
 
-/** A shell sends the signal to itself and then exits with the probe status: another status or a death is an end, a hang is a stop. */
+/**
+ * A shell sends the signal to itself and then exits with the probe status: another status or a death is an end, a hang is a stop.
+ * The probe runs in its own session like a check does: in the process group of the test runner, TSTP, TTIN and TTOU stop the
+ * shell when the runner has a job-control terminal and are dropped when it has none, so the table would depend on how the
+ * tests were started. In a new session the group is orphaned and the kernel drops them, so only SIGSTOP suspends a check.
+ */
 function defaultAction(number: number): DefaultAction {
   if (number === SIGKILL) return 'ends';
-  const run = spawnSync('/bin/sh', ['-c', `kill -${number} $$; sleep 0.2; exit ${PROBE_STATUS}`], { timeout: 1_500, killSignal: 'SIGKILL' });
+  // Node honours `detached` in spawnSync (the child calls setsid), although the typings of SpawnSyncOptions do not list it.
+  const options = { timeout: 1_500, killSignal: 'SIGKILL', detached: true } as const;
+  const run = spawnSync('/bin/sh', ['-c', `kill -${number} $$; sleep 0.2; exit ${PROBE_STATUS}`], options);
   if (run.error !== undefined) return 'stops';
   return run.status === PROBE_STATUS ? 'ignored' : 'ends';
 }
