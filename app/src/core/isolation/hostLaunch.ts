@@ -1,14 +1,13 @@
-import { accessSync, constants, existsSync, mkdirSync, realpathSync } from 'node:fs';
-import { delimiter, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { IsolationError } from './types';
+import { accessSync, constants, realpathSync } from 'node:fs';
+import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 /**
- * Host-side starts of a sandbox: the sandbox runtime and everything that starts it (its shim, `node`, `env`, `which`)
- * run outside the sandbox with the rights of the app, in a directory that the agent or the checkpoint controls. A
- * program found there instead of the real one would run unconfined, and could end with status 0 for a failing check.
- * So nothing on the host side is looked up through anything the program controls: a relative or empty entry of PATH
- * resolves in the working directory after the directory change, and an entry below a directory of the program holds
- * its files.
+ * The path primitives of the host side (`hostTools.ts` builds on them): the sandbox runtime and everything that starts
+ * it (its shim, `node`, `env`, `which`) run outside the sandbox with the rights of the app. A program found in a
+ * directory that the agent or the checkpoint controls instead of the real one would run unconfined, and could end with
+ * status 0 for a failing check. So nothing on the host side is looked up through anything the program controls: a
+ * relative or empty entry of PATH resolves in the working directory after the directory change, and an entry below a
+ * directory of the program holds its files.
  */
 
 function executable(path: string): boolean {
@@ -30,15 +29,25 @@ export function findExecutable(name: string, pathVariable: string | undefined = 
     .find(executable);
 }
 
-/** A path and its resolved form: a directory below `/tmp` or `/var` is a link on macOS. */
+/**
+ * The deepest existing ancestor of `path` in its native spelling, with the missing rest appended. The native form keeps
+ * the letter case the volume stores: on the default case-insensitive APFS volume `BIN` and `bin` are one directory,
+ * and `realpathSync` (the JavaScript version) keeps the case it is given.
+ */
+function nativePath(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    const parent = dirname(path);
+    return parent === path ? path : join(nativePath(parent), relative(parent, path));
+  }
+}
+
+/** A path and its resolved form: a directory below `/tmp` or `/var` is a link on macOS, and the volume may ignore case. */
 function spellings(path: string): string[] {
   const plain = resolve(path);
-  try {
-    const real = realpathSync(plain);
-    return real === plain ? [plain] : [plain, real];
-  } catch {
-    return [plain];
-  }
+  const real = nativePath(plain);
+  return real === plain ? [plain] : [plain, real];
 }
 
 function within(path: string, directory: string): boolean {
@@ -68,41 +77,27 @@ export function locateHostBinary(binary: string, appPath: string | undefined, ex
   return found === undefined || isWithinAny(found, excluded) ? undefined : found;
 }
 
-export interface HostLaunch {
-  /** The absolute file to spawn. */
-  readonly file: string;
-  /** The PATH of the spawned process: trusted entries only. */
-  readonly path: string;
-}
-
-/**
- * The absolute sandbox runtime and the PATH its process gets, from the app's own PATH and not from the profile or the
- * checkout. `excluded` are the directories the sandboxed program controls.
- */
-export function hostLaunch(binary: string, appPath: string | undefined, excluded: readonly string[]): HostLaunch {
-  const file = locateHostBinary(binary, appPath, excluded);
-  if (file === undefined) throw new IsolationError('failed', `the sandbox runtime (${binary}) was not found as an executable on the trusted PATH of the app (the absolute entries outside the directories that the program may write)`);
-  return { file, path: trustedPath(appPath, excluded) };
-}
-
 /**
  * `/usr/bin/env` puts the profile's PATH back for the program inside the sandbox, which looks its own programs up
- * there, while the host-side process has the trusted PATH. A profile without PATH gets none.
+ * there, while the host-side process has the trusted PATH. A profile without PATH gets none. `inside` are the
+ * variables that change how a program starts (`isLoaderVariable`): the host-side process must not have them, the
+ * program does.
  */
-export function insideArgv(profilePath: string | undefined, argv: readonly string[]): string[] {
-  return ['/usr/bin/env', ...(profilePath === undefined ? ['-u', 'PATH'] : [`PATH=${profilePath}`]), ...argv];
+export function insideArgv(profilePath: string | undefined, argv: readonly string[], inside: Readonly<Record<string, string>> = {}): string[] {
+  const assignments = Object.entries(inside).map(([name, value]) => `${name}=${value}`);
+  return ['/usr/bin/env', ...(profilePath === undefined ? ['-u', 'PATH'] : [`PATH=${profilePath}`]), ...assignments, ...argv];
 }
 
-const EMPTY_DIRECTORY = '/var/empty';
-
 /**
- * A working directory for the host-side process that no program of the checkpoint can write and that holds no
- * checkout: the sandbox starts the program in the directory it names, and the launcher changes into the checkout.
- * `/var/empty` is owned by root; a system without it gets a private empty directory below `fallbackRoot`.
+ * The variables that make Node or the dynamic loader start extra code, or look it up, before the program runs: a
+ * relative value resolves in the working directory of the process that has it.
  */
-export function neutralDirectory(fallbackRoot: string, system: string = EMPTY_DIRECTORY): string {
-  if (existsSync(system)) return system;
-  const directory = join(fallbackRoot, '.cwd');
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  return directory;
+export const isLoaderVariable = (name: string): boolean => name === 'NODE_OPTIONS' || name === 'NODE_PATH' || name.startsWith('DYLD_') || name.startsWith('LD_');
+
+/** `env` without the loader variables, and those variables on their own. */
+export function splitLoaderVariables(env: Readonly<Record<string, string>>): { readonly host: Record<string, string>; readonly inside: Record<string, string> } {
+  const host: Record<string, string> = {};
+  const inside: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) (isLoaderVariable(name) ? inside : host)[name] = value;
+  return { host, inside };
 }

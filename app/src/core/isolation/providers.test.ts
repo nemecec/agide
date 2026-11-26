@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { FakeProvider } from './FakeProvider';
 import { describeIsolationProviderContract } from './isolationProviderContract';
 import { ContainerProvider } from './ContainerProvider';
+import { HostTools } from './hostTools';
 import { LocalProvider } from './LocalProvider';
 import { IsolationProviders } from './providerRegistry';
 import { SrtProvider } from './SrtProvider';
@@ -105,6 +106,29 @@ describe('LocalProvider launch', () => {
     try {
       const environment = await new LocalProvider({ sessionFilesDir: dir, claudeBinary: FAKE_CLAUDE }).prepare({ ...spec(dir, undefined), workspace: { mode: 'clone', remoteUrl: 'u', ref: 'r' } });
       await expect(environment.processCommand?.({ sessionId: 's1', cwd: dir, args: [] }), 'clone workspace').rejects.toMatchObject({ code: 'unsupported' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('starts the claude that the host tools found outside the workspace, never one that the workspace or a relative PATH entry holds', async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'local-provider-')));
+    try {
+      const planted = join(dir, 'work', 'bin');
+      mkdirSync(planted, { recursive: true });
+      mkdirSync(join(dir, 'trusted'));
+      for (const path of [join(planted, 'claude'), join(dir, 'work', 'claude')]) writeFileSync(path, `#!/bin/sh\ntouch '${join(dir, 'planted')}'\n`, { mode: 0o755 });
+      writeFileSync(join(dir, 'trusted', 'claude'), '#!/bin/sh\n', { mode: 0o755 });
+      chmodSync(join(dir, 'trusted', 'claude'), 0o755);
+      const tools = (appPath: string) => new HostTools({ appPath, fixedDirectories: [] });
+      const launch = { sessionId: 's1', cwd: join(dir, 'work'), args: [] };
+      const found = await new LocalProvider({ sessionFilesDir: join(dir, 'sessions'), claudeBinary: 'claude', hostTools: tools(['bin', '', '.', planted, join(dir, 'trusted')].join(':')) }).prepare({ ...spec(dir, undefined), workspace: { mode: 'bind', hostPath: join(dir, 'work') } });
+      expect((await found.processCommand?.(launch))?.file, 'the claude of the trusted entry').toBe(join(dir, 'trusted', 'claude'));
+      const hidden = await new LocalProvider({ sessionFilesDir: join(dir, 'sessions'), claudeBinary: 'claude', hostTools: tools(['bin', '', '.', planted].join(':')) }).prepare({ ...spec(dir, undefined), workspace: { mode: 'bind', hostPath: join(dir, 'work') } });
+      await expect(hidden.processCommand?.(launch), 'the only claude is in the workspace').rejects.toThrow('exists only in a directory that an agent may write');
+      const relativeOnly = await new LocalProvider({ sessionFilesDir: join(dir, 'sessions'), claudeBinary: 'claude', hostTools: tools(['bin', '.'].join(':')) }).prepare({ ...spec(dir, undefined), workspace: { mode: 'bind', hostPath: join(dir, 'work') } });
+      await expect(relativeOnly.processCommand?.({ ...launch, cwd: join(dir, 'work') }), 'a relative entry finds nothing').rejects.toThrow('was not found as an executable');
+      expect(existsSync(join(dir, 'planted')), 'no planted claude ran').toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

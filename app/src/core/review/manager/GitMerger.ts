@@ -1,6 +1,6 @@
-import { execFile } from 'node:child_process';
 import { lstat, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
+import { hostTools } from '../../isolation/hostTools';
 import { cleanLine } from '../../inbox/text';
 import { blankingEnv, COMMIT_IDENTITY, DRIVER_LISTING, driverSettings, EMPTY_TREE, GUARD_CONFIG } from '../../swarm/workspace/git';
 import type { MergeOutcome, Merger } from '../types';
@@ -17,7 +17,7 @@ interface GitResult {
 /** Runs git without a shell and keeps the exit code, since `merge-tree` answers a conflict with exit 1. */
 function runGit(args: readonly string[], env: NodeJS.ProcessEnv): Promise<GitResult> {
   return new Promise((resolveResult) => {
-    execFile('git', [...args], { env, timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, encoding: 'utf8' }, (error, stdout, stderr) => {
+    hostTools().execFile('git', args, { env, timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
       const code = error === null ? 0 : typeof (error as { code?: unknown }).code === 'number' ? ((error as { code: number }).code) : 128;
       resolveResult({ code, stdout: String(stdout), stderr: String(stderr) });
     });

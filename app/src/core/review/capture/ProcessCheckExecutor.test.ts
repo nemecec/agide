@@ -16,7 +16,7 @@ import { resolveCheckEnvironment } from './checkEnvironment';
 import { maxRung } from '../rungs';
 import { assess } from '../rules/ruleFixtures';
 import type { CheckProcesses, SweepOutcome } from './ProcessSweep';
-import type { ToolLaunch } from '../../isolation/types';
+import { IsolationError, type PtyCommand, type ToolLaunch } from '../../isolation/types';
 
 let repo: Repo | undefined;
 afterEach(() => {
@@ -97,6 +97,9 @@ function listing(root: string): string[] {
   return out;
 }
 
+/** The program of a launch through `env`, which finds it on the PATH of the launch: a command that spawns need an absolute file. */
+const direct = (launch: ToolLaunch): PtyCommand => ({ file: '/usr/bin/env', args: ['--', ...launch.argv], cwd: launch.cwd, env: { ...launch.env } });
+
 const GREEN_ID = 'chk_green';
 
 const greenBase = (commitId: string): CheckRecord => ({ id: GREEN_ID, changesetId: null, target: 'base', commitId, policyHash: POLICY_HASH, command: ['x'], outcome: 'passed', notRunReason: null, exitCode: 0, signal: null, durationMs: 1, outputPath: null, outputTail: '', truncated: false, startedAt: '2026-11-21T10:00:00.000Z', endedAt: '2026-11-21T10:00:01.000Z' });
@@ -114,8 +117,7 @@ function setup(options: { clones?: CloneService; files?: Record<string, string>;
     environment: {
       toolCommand: async (launch) => {
         launches.push(launch);
-        const [file = '', ...args] = launch.argv;
-        return { file, args, cwd: launch.cwd, env: { ...launch.env } };
+        return direct(launch);
       },
     },
     profileEnv: { PATH: process.env['PATH'] ?? '/usr/bin:/bin', HOME: home, KEEP_ME: 'yes' },
@@ -348,7 +350,7 @@ describe('running the check', () => {
     const s = setup({
       environment: {
         kind: 'ready',
-        environment: { toolCommand: async (launch) => ({ file: launch.argv[0]!, args: launch.argv.slice(1), cwd: launch.cwd, env: { ...launch.env } }) },
+        environment: { toolCommand: async (launch) => direct(launch) },
         profileEnv: { PATH: process.env['PATH'] ?? '', HOME: '/home/profile' },
         enforcesNetwork: false,
       },
@@ -373,7 +375,7 @@ describe('running the check', () => {
             await srt.toolCommand(launch);
             inside = [launch.cwd, ...launch.writeDirs].flatMap((dir) => [dir, realpathSync(dir)]);
             allowWrite = (JSON.parse(readFileSync(join(settingsDir, launch.key, 'srt.json'), 'utf8')) as { filesystem: { allowWrite: string[] } }).filesystem.allowWrite;
-            return { file: launch.argv[0]!, args: launch.argv.slice(1), cwd: launch.cwd, env: { ...launch.env } };
+            return direct(launch);
           },
           release: (key) => srt.release(key),
         },
@@ -412,7 +414,7 @@ describe('running the check', () => {
         environment: {
           toolCommand: async (launch) => {
             keys.push(launch.key);
-            return { file: 'sh', args: ['-c', 'true'], cwd: launch.cwd, env: {} };
+            return { file: '/bin/sh', args: ['-c', 'true'], cwd: launch.cwd, env: {} };
           },
           release: (key) => void released.push(key),
         },
@@ -541,7 +543,7 @@ describe('base comparison', () => {
     const s = setup({
       environment: {
         kind: 'ready',
-        environment: { toolCommand: async (launch) => ({ file: launch.argv[0]!, args: launch.argv.slice(1), cwd: launch.cwd, env: { ...launch.env } }) },
+        environment: { toolCommand: async (launch) => direct(launch) },
         profileEnv: { PATH: process.env['PATH'] ?? '' },
         enforcesNetwork: false,
       },
@@ -829,15 +831,32 @@ describe('not run', () => {
   });
 
   it('is not run when the program does not start', async () => {
-    const s = setup();
+    const s = setup({ environment: { kind: 'ready', environment: { toolCommand: async (launch) => ({ file: '/no/such/program', args: [], cwd: launch.cwd, env: {} }) }, profileEnv: { PATH: process.env['PATH'] ?? '' }, enforcesNetwork: false } });
     const result = await s.executor.run(s.request(['/no/such/program']));
     expect(result.checkpoint.outcome, 'a spawn error').toBe('not_run');
     expect(result.checkpoint.notRunReason, 'the reason names the failure').toContain('did not start');
   });
 
+  it('is not run when the command is not an absolute file, because no PATH may decide which program starts', async () => {
+    const s = setup({ environment: { kind: 'ready', environment: { toolCommand: async (launch) => ({ file: 'sh', args: ['-c', 'true'], cwd: launch.cwd, env: {} }) }, profileEnv: { PATH: process.env['PATH'] ?? '' }, enforcesNetwork: false } });
+    const result = await s.executor.run(s.request(['true']));
+    expect([result.checkpoint.outcome, result.checkpoint.notRunReason], 'a bare name never spawns').toEqual(['not_run', 'the command command did not start: a command that starts on the host names its program by an absolute path']);
+  });
+
+  it('keeps where a refused host program was found out of the reason and writes it to the log of the run', async () => {
+    const refused = (): never => {
+      throw new IsolationError('failed', 'the sandbox runtime (srt) exists only in a directory that an agent may write, so it was not started', '/agent/writable/bin/srt');
+    };
+    const s = setup({ environment: { kind: 'ready', environment: { toolCommand: async () => refused() }, profileEnv: { PATH: process.env['PATH'] ?? '' }, enforcesNetwork: true } });
+    const result = await s.executor.run(s.request(['true']));
+    expect([result.checkpoint.outcome, result.checkpoint.notRunReason], 'the fixed reason only').toEqual(['not_run', 'the command command did not start: the sandbox runtime (srt) exists only in a directory that an agent may write, so it was not started']);
+    expect(result.checkpoint.outputTail?.includes('/agent/writable'), 'no path in the tail that a reviewer reads').toBe(false);
+    expect(readFileSync(join(s.repo.root, 'data', result.checkpoint.outputPath!), 'utf8'), 'the log names the file').toContain('launch detail: /agent/writable/bin/srt');
+  });
+
   it('says in the log that a provider does not enforce the network limit', async () => {
     const s = setup({
-      environment: { kind: 'ready', environment: { toolCommand: async (launch) => ({ file: launch.argv[0]!, args: launch.argv.slice(1), cwd: launch.cwd, env: { ...launch.env } }) }, profileEnv: { PATH: process.env['PATH'] ?? '' }, enforcesNetwork: false },
+      environment: { kind: 'ready', environment: { toolCommand: async (launch) => direct(launch) }, profileEnv: { PATH: process.env['PATH'] ?? '' }, enforcesNetwork: false },
     });
     const result = await s.executor.run(s.request(['sh', '-c', 'true']));
     expect(result.checkpoint.outputTail, 'the note is at the top of the output').toContain('does not enforce the network limit');
@@ -956,7 +975,7 @@ describe('environment of the check', () => {
     const s = setup({
       environment: {
         kind: 'ready',
-        environment: { toolCommand: async (launch) => ({ file: launch.argv[0]!, args: launch.argv.slice(1), cwd: launch.cwd, env: { ...launch.env } }) },
+        environment: { toolCommand: async (launch) => direct(launch) },
         profileEnv: { PATH: process.env['PATH'] ?? '', ANTHROPIC_API_KEY: 'secret-1', GH_TOKEN: 'secret-2', KEEP_ME: 'yes', LISTED_NAME: 'allowed' },
         enforcesNetwork: true,
       },

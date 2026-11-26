@@ -2,14 +2,16 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ContainerProvider, ownerIdOf, type ContainerProviderOptions } from './ContainerProvider';
 import { CONTAINER_RUN_FLAGS, containerName } from './dockerArgs';
+import { fakeDockerClient } from './fakeDocker';
+import { HostTools, hostDirectory, SYSTEM_DIRECTORIES } from './hostTools';
 import { hookCommand } from '../session/hooks';
 import { runInPty } from './ptyHarness';
 import { containerTestsUnavailable, TEST_IMAGE } from './testRuntimes';
-import type { EnvironmentSpec } from './types';
+import { IsolationError, type EnvironmentSpec } from './types';
 
 let dir: string;
 let spec: EnvironmentSpec;
@@ -188,14 +190,17 @@ describe('ContainerProvider terminate with a fake docker', () => {
 });
 
 describe('ContainerProvider command', () => {
+  /** The provider over a docker client that is a file of the test, so no engine is needed. */
+  const fakeProvider = (extra: Partial<ContainerProviderOptions> = {}) => provider({ dockerBinary: fakeDockerClient(join(dir, 'client')), ...extra });
+
   it('builds docker run with the same-path mounts, the host alias and no secret or host variable in the arguments', async () => {
-    const environment = await provider({ ownerId: 'o1' }).prepare(spec);
+    const environment = await fakeProvider({ ownerId: 'o1' }).prepare(spec);
     const inbox = join(dir, 'inbox');
     environment.hookDelivery('s1', { inboxHostDir: inbox, httpPath: '/h', token: 't' });
     await environment.writeSessionFile('s1', 'mcp.json', '{"token":"secret-token"}');
     const command = await environment.ptyCommand({ sessionId: 's1', cwd: join(dir, 'work'), args: ['--session-id', 's1'], cols: 80, rows: 24, env: { LAUNCH_VAR: 'l' } });
     const sessionDir = join(dir, 'sessions', 's1');
-    expect(command.file, 'docker client').toBe('docker');
+    expect(command.file, 'the docker client as an absolute file').toBe(join(dir, 'client', 'docker'));
     expect(command.args.slice(0, 4), 'interactive, removed, init').toEqual(['run', '-it', '--rm', '--init']);
     expect(command.args, 'workspace').toEqual(expect.arrayContaining(['--mount', `type=bind,src=${join(dir, 'work')},dst=${join(dir, 'work')}`]));
     expect(command.args, 'session directory read-only').toEqual(expect.arrayContaining(['--mount', `type=bind,src=${sessionDir},dst=${sessionDir},readonly`]));
@@ -211,7 +216,7 @@ describe('ContainerProvider command', () => {
   });
 
   it('runs a process without a terminal as docker run -i, with the mounts and variables of the PTY launch', async () => {
-    const environment = await provider({ ownerId: 'o1' }).prepare(spec);
+    const environment = await fakeProvider({ ownerId: 'o1' }).prepare(spec);
     const launch = { sessionId: 's1', cwd: join(dir, 'work'), args: ['-p', '--session-id', 's1'], env: { LAUNCH_VAR: 'l' } };
     const command = await environment.processCommand?.(launch);
     const withTerminal = await environment.ptyCommand({ ...launch, cols: 80, rows: 24 });
@@ -222,21 +227,21 @@ describe('ContainerProvider command', () => {
   });
 
   it('uses the provider Claude directory as CLAUDE_CONFIG_DIR even when the profile names another', async () => {
-    const environment = await provider().prepare({ ...spec, profile: { ...spec.profile, claudeConfigDir: join(dir, 'profile-claude') } });
+    const environment = await fakeProvider().prepare({ ...spec, profile: { ...spec.profile, claudeConfigDir: join(dir, 'profile-claude') } });
     const command = await environment.ptyCommand({ sessionId: 's1', cwd: join(dir, 'work'), args: [], cols: 80, rows: 24 });
     expect(command.env['CLAUDE_CONFIG_DIR'], 'the container has its own login').toBe(join(dir, 'claude'));
   });
 
   it('mounts the gh configuration read-only, because a token in it is readable inside the container', async () => {
     const gh = join(dir, 'gh');
-    const environment = await provider().prepare({ ...spec, profile: { ...spec.profile, ghConfigDir: gh } });
+    const environment = await fakeProvider().prepare({ ...spec, profile: { ...spec.profile, ghConfigDir: gh } });
     const command = await environment.ptyCommand({ sessionId: 's1', cwd: join(dir, 'work'), args: [], cols: 80, rows: 24 });
     expect(command.args, 'gh directory read-only').toEqual(expect.arrayContaining(['--mount', `type=bind,src=${gh},dst=${gh},readonly`]));
   });
 
   it('mounts a tool file read-only and does not create its path as a directory', async () => {
     const toolFile = join(dir, 'gitconfig');
-    const environment = await provider().prepare({ ...spec, profile: { ...spec.profile, toolFiles: [{ hostPath: toolFile, envVar: 'GIT_CONFIG_GLOBAL' }] } });
+    const environment = await fakeProvider().prepare({ ...spec, profile: { ...spec.profile, toolFiles: [{ hostPath: toolFile, envVar: 'GIT_CONFIG_GLOBAL' }] } });
     const command = await environment.ptyCommand({ sessionId: 's1', cwd: join(dir, 'work'), args: [], cols: 80, rows: 24 });
     expect(command.args, 'tool file read-only').toEqual(expect.arrayContaining(['--mount', `type=bind,src=${toolFile},dst=${toolFile},readonly`]));
     expect(existsSync(toolFile), 'the file path stays as the host has it').toBe(false);
@@ -247,8 +252,108 @@ describe('ContainerProvider command', () => {
   });
 
   it('points the MCP endpoint at the host alias and gives the server the matching Host value', async () => {
-    const environment = await provider().prepare(spec);
+    const environment = await fakeProvider().prepare(spec);
     expect(environment.mcpEndpoint('s1'), 'endpoint').toEqual({ url: 'http://host.docker.internal:4567/mcp/s1', hostHeader: 'host.docker.internal:4567' });
+  });
+});
+
+describe('ContainerProvider host-side lookups against what the agent can write', () => {
+  /** A `docker` the agent committed: it writes a marker when it runs. */
+  const plant = (directory: string): string => {
+    mkdirSync(directory, { recursive: true });
+    const path = join(directory, 'docker');
+    writeFileSync(path, `#!/bin/sh\ntouch '${join(dir, 'planted')}'\nexit 0\n`, { mode: 0o755 });
+    return path;
+  };
+  /** Looks only on the app PATH it is given, so a docker of the machine in a system directory cannot answer. */
+  const tools = (appPath: string): HostTools => new HostTools({ appPath, fixedDirectories: [] });
+  const planted = (): boolean => existsSync(join(dir, 'planted'));
+  const unsafePath = (...entries: string[]): string => [relative(process.cwd(), join(dir, 'work', 'bin')), '', '.', 'bin', ...entries].join(':');
+
+  it('starts the docker client of the trusted entry, with the trusted PATH and a working directory that holds nothing, whatever the profile PATH and the committed files say', async () => {
+    plant(join(dir, 'work', 'bin'));
+    plant(join(dir, 'work'));
+    const trusted = fakeDockerClient(join(dir, 'client'));
+    const environment = await provider({ dockerBinary: 'docker', hostTools: tools(unsafePath(join(dir, 'work', 'bin'), join(dir, 'client'))) }).prepare({ ...spec, profile: { ...spec.profile, env: { PATH: unsafePath(), HOME: '/Users/host' } } });
+    const command = await environment.ptyCommand({ sessionId: 's1', cwd: join(dir, 'work'), args: [], cols: 80, rows: 24 });
+    expect(command.file, 'the docker client outside the workspace').toBe(trusted);
+    expect(command.env['PATH'], 'the PATH of the client holds the trusted entry and the system directories').toBe([join(dir, 'client'), ...SYSTEM_DIRECTORIES].join(':'));
+    expect(command.cwd, 'the client starts where nothing the agent wrote is').toBe(hostDirectory());
+    expect(command.args[command.args.indexOf('-w') + 1], 'the directory inside the container is the workspace').toBe(join(dir, 'work'));
+    expect(planted(), 'the committed client did not run').toBe(false);
+  });
+
+  it('does the same for a process without a terminal and for a check', async () => {
+    plant(join(dir, 'work', 'bin'));
+    const trusted = fakeDockerClient(join(dir, 'client'));
+    const environment = await provider({ dockerBinary: 'docker', hostTools: tools(unsafePath(join(dir, 'work', 'bin'), join(dir, 'client'))) }).prepare(spec);
+    const process = await environment.processCommand?.({ sessionId: 's1', cwd: join(dir, 'work'), args: [] });
+    const tool = await environment.toolCommand({ key: 'c1', cwd: join(dir, 'work'), argv: ['true'], env: { CI: '1' }, network: 'none', writeDirs: [] });
+    expect([process?.file, tool.file, process?.cwd, tool.cwd], 'the trusted client and the empty directory').toEqual([trusted, trusted, hostDirectory(), hostDirectory()]);
+    expect(planted(), 'the committed client did not run').toBe(false);
+  });
+
+  it('refuses to start when the only docker client is in the workspace, found through an absolute, a relative or an empty entry', async () => {
+    plant(join(dir, 'work'));
+    for (const appPath of [join(dir, 'work'), relative(process.cwd(), join(dir, 'work')), ':', '.']) {
+      const environment = await provider({ dockerBinary: 'docker', hostTools: tools(appPath) }).prepare(spec);
+      const failure = await environment.processCommand?.({ sessionId: 's1', cwd: join(dir, 'work'), args: [] }).catch((error: unknown) => error);
+      expect(failure, `PATH ${appPath}`).toBeInstanceOf(IsolationError);
+    }
+    expect(planted(), 'the committed client did not run').toBe(false);
+  });
+
+  it('says that Docker is not installed when the only client is one the agent can write, and runs none of the committed clients for the check or the cleanup', async () => {
+    plant(join(dir, 'work'));
+    const writable = provider({ dockerBinary: 'docker', hostTools: tools(join(dir, 'work')), ownerId: 'o1' });
+    await writable.prepare(spec);
+    expect(await writable.check(), 'check result').toMatchObject({ ok: false, reason: 'Docker is not installed' });
+    await writable.removeOrphans();
+    expect(planted(), 'the committed client did not run for the check or the cleanup').toBe(false);
+  });
+
+  /** A trusted directory with a copy of the fake docker that logs its calls, and a provider that finds docker on the planted directory of the workspace first. */
+  const withPlanted = (options: Partial<ContainerProviderOptions> = {}) => {
+    plant(join(dir, 'work', 'bin'));
+    const docker = fakeDocker({ containers: ['c1'] });
+    mkdirSync(join(dir, 'trusted'));
+    writeFileSync(join(dir, 'trusted', 'docker'), readFileSync(docker.binary), { mode: 0o755 });
+    return { docker, scoped: provider({ dockerBinary: 'docker', hostTools: tools(`${join(dir, 'work', 'bin')}:${join(dir, 'trusted')}`), ownerId: 'o1', image: 'agide-fake-image:0', ...options }) };
+  };
+
+  it('asks the client of the trusted entry, not the committed one, in the check of the provider', async () => {
+    const { docker, scoped } = withPlanted();
+    await scoped.prepare(spec);
+    expect(await scoped.check(), 'the engine answers and the image is local').toEqual({ ok: true });
+    expect(docker.calls().map((call) => call.split(' ')[0]), 'version and the image were asked of the trusted client').toEqual(['version', 'image']);
+    expect(planted(), 'the committed client did not run').toBe(false);
+  });
+
+  it('removes the orphans through the client of the trusted entry, not the committed one', async () => {
+    const { docker, scoped } = withPlanted();
+    await scoped.prepare(spec);
+    await scoped.removeOrphans();
+    expect(docker.calls().map((call) => call.split(' ')[0]), 'the list and the removal went to the trusted client').toEqual(['ps', 'rm']);
+    expect(planted(), 'the committed client did not run').toBe(false);
+  });
+
+  it('kills the container through the client of the trusted entry, not the committed one', async () => {
+    const { docker, scoped } = withPlanted();
+    const environment = await scoped.prepare(spec);
+    await environment.terminate('s1', 'SIGKILL');
+    expect(docker.calls().map((call) => call.split(' ')[0]), 'the kill went to the trusted client').toEqual(['kill']);
+    expect(planted(), 'the committed client did not run').toBe(false);
+  });
+
+  it('does not take a docker client from a directory below a root of the agents workspaces or below the Claude directory of the provider', async () => {
+    for (const root of [join(dir, 'agents', 'swarm', 'tree'), join(dir, 'claude', 'local')]) {
+      plant(join(root, 'bin'));
+      const scoped = provider({ dockerBinary: 'docker', hostTools: tools(join(root, 'bin')), agentRoots: [join(dir, 'agents')] });
+      const environment = await scoped.prepare(spec);
+      const failure = await environment.processCommand?.({ sessionId: 's1', cwd: join(dir, 'work'), args: [] }).catch((error: unknown) => error);
+      expect(failure, `the only docker client is below ${relative(dir, root)}`).toBeInstanceOf(IsolationError);
+    }
+    expect(planted(), 'the committed client did not run').toBe(false);
   });
 });
 

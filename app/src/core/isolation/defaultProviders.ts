@@ -4,6 +4,7 @@ import { CommandError, type CommandRegistry } from '../commands/index';
 import type { ProfileService } from '../profile/types';
 import { describeProvider } from './capabilityStatement';
 import { ContainerProvider, ownerIdOf } from './ContainerProvider';
+import type { HostTools } from './hostTools';
 import { readIsolationOptions, type IsolationOptions } from './providerOptions';
 import type { IsolationStatus, ProviderRow } from './statusTypes';
 import { IsolationProviders } from './providerRegistry';
@@ -17,7 +18,16 @@ export interface ProviderSetup {
   readonly dataDir: string;
   /** The profile's `isolation.options`, read before each provider is built. */
   readonly options: () => unknown;
+  /** Finds the host-side programs of the providers; the profile process builds it from `agentWritableDirectories`. Without it each provider excludes what it lets an agent write itself. */
+  readonly hostTools?: HostTools;
+  /** Directories below which agents get their workspaces (the task base). */
+  readonly agentRoots?: readonly string[];
 }
+
+const hostToolOptions = (setup: ProviderSetup) => ({
+  ...(setup.hostTools === undefined ? {} : { hostTools: setup.hostTools }),
+  ...(setup.agentRoots === undefined ? {} : { agentRoots: setup.agentRoots }),
+});
 
 /** The providers a profile can choose. `fake`, `openshell` and `ssh` are not offered. */
 export const CHOOSABLE_PROVIDERS: readonly ProviderId[] = ['local', 'srt', 'container'];
@@ -29,6 +39,7 @@ export function buildIsolatingProvider(id: ProviderId, setup: ProviderSetup, opt
       sessionFilesDir: setup.sessionFilesDir,
       srtBinary: options.srtBinary ?? process.env['AGIDE_SRT_BIN'] ?? 'srt',
       settingsDir: join(setup.dataDir, 'isolation', 'srt'),
+      ...hostToolOptions(setup),
       ...(options.extraWritePaths === undefined ? {} : { extraWritePaths: options.extraWritePaths }),
       ...(options.extraDenyRead === undefined ? {} : { extraDenyRead: options.extraDenyRead }),
     });
@@ -41,6 +52,7 @@ export function buildIsolatingProvider(id: ProviderId, setup: ProviderSetup, opt
     claudeConfigDir: join(setup.dataDir, 'isolation', 'container', 'claude'),
     user: `${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`,
     ownerId: ownerIdOf(setup.dataDir),
+    ...hostToolOptions(setup),
   });
 }
 

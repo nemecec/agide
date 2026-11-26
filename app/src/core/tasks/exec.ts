@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { hostTools } from '../isolation/hostTools';
 
 export interface ExecOptions {
   readonly env: NodeJS.ProcessEnv;
@@ -11,7 +11,7 @@ export interface ExecResult {
   readonly stdout: string;
 }
 
-/** Runs a program without a shell. Every caller passes values as separate arguments. */
+/** Runs a program without a shell. Every caller passes values as separate arguments and a program name, which `hostTools` finds outside the directories an agent may write. */
 export type Exec = (file: string, args: readonly string[], options: ExecOptions) => Promise<ExecResult>;
 
 export class ExecError extends Error {
@@ -31,7 +31,7 @@ export class ExecError extends Error {
 
 export const execFileNoShell: Exec = (file, args, { env, timeoutMs, encoding = 'utf8' }) =>
   new Promise((resolve, reject) => {
-    execFile(file, [...args], { env, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, encoding }, (error, stdout, stderr) => {
+    hostTools().execFile(file, args, { env, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, encoding }, (error, stdout, stderr) => {
       if (error) reject(new ExecError(error.message, String(stderr)));
       else resolve({ stdout: String(stdout) });
     });

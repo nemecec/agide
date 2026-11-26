@@ -177,6 +177,24 @@ describe('command programs', () => {
     expect([...programs].sort(), 'the programs and no argument').toEqual(['cd', 'env', 'exit', 'gradlew', 'make', 'node', 'pnpm', 'sh', 'tee']);
   });
 
+  it('skips the options of env and the shell keywords before the program', () => {
+    const named = (...argvs: string[][]): string[] => [...commandPrograms(argvs)].sort();
+    expect(named(['env', '-i', './gradlew']), 'env -i').toEqual(['env', 'gradlew']);
+    expect(named(['env', '-u', 'HOME', '-P', '/usr/bin', 'FOO=1', 'gradle']), 'env with values for its options and an assignment').toEqual(['env', 'gradle']);
+    expect(named(['/usr/bin/env', '-S', 'FOO=1 ./gradlew test']), 'the string of -S is not read').toEqual(['env']);
+    expect(named(['env', '--', 'gradle']), 'env with --').toEqual(['env', 'gradle']);
+    expect(named(['env', '-', 'gradle']), 'env with -').toEqual(['env', 'gradle']);
+    expect(named(['sh', '-c', 'if true; then ./gradlew; fi']), 'a conditional').toEqual(['gradlew', 'sh', 'true']);
+    expect(named(['sh', '-c', 'while false; do gradle test; done; until true; do :; done']), 'loops').toEqual([':', 'false', 'gradle', 'sh', 'true']);
+    expect(named(['sh', '-c', '! gradle build || { npm test; }']), 'a negation and a group').toEqual(['gradle', 'npm', 'sh']);
+    expect(named(['sh', '-c', 'if a; then b; elif c; then d; else e; fi']), 'elif and else').toEqual(['a', 'b', 'c', 'd', 'e', 'sh']);
+    expect(named(['sh', '-c', 'env -i FOO=1 time nohup ./gradlew']), 'prefix words in a row').toEqual(['gradlew', 'sh']);
+  });
+
+  it('does not see quoting, so a quoted word that looks like a command counts, and it reads the base policy only', () => {
+    expect([...commandPrograms([['sh', '-c', 'echo "a; gradle"']])].sort(), 'a word inside quotes is taken for a command').toEqual(['echo', 'gradle', 'sh']);
+  });
+
   it('reads no script from a shell without -c or from a program that is not a shell', () => {
     expect([...commandPrograms([['sh', './run.sh', 'gradle'], ['sh'], ['python', '-c', 'gradle test'], []])].sort(), 'only the program of each argv').toEqual(['python', 'sh']);
   });

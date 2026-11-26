@@ -7,7 +7,7 @@ import { createServer as createSocketServer } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { findExecutable, srtToolEnvironment } from '../../isolation/index';
+import { createProfileHostTools, findExecutable, srtToolEnvironment, type HostTools } from '../../isolation/index';
 import { systemSignals } from '../../isolation/signalTable';
 import { findTestSrt, srtTestsUnavailable } from '../../isolation/testRuntimes';
 import { DEFAULT_REVIEW_POLICY, type ReviewPolicy } from '../policy/schema';
@@ -57,7 +57,7 @@ interface Rig {
 const greenBase = (commitId: string): CheckRecord => ({ id: 'chk_stored_green', changesetId: null, target: 'base', commitId, policyHash: POLICY_HASH, command: ['x'], outcome: 'passed', notRunReason: null, exitCode: 0, signal: null, durationMs: 1, outputPath: null, outputTail: '', truncated: false, startedAt: '2026-11-21T10:00:00.000Z', endedAt: '2026-11-21T10:00:01.000Z' });
 
 /** An executor over the real srt. `home` is the home directory the check sees: a fixture directory unless a test needs the real toolchains. */
-function rig(files: Record<string, string | Buffer>, options: { home?: string; extraFiles?: Record<string, string>; env?: Record<string, string>; executables?: string[]; base?: 'run' | 'stored'; loopback?: boolean; srtBinary?: string; appPath?: string } = {}): Rig {
+function rig(files: Record<string, string | Buffer>, options: { home?: string; extraFiles?: Record<string, string>; env?: Record<string, string>; executables?: string[]; base?: 'run' | 'stored'; loopback?: boolean; srtBinary?: string; appPath?: string; hostTools?: HostTools } = {}): Rig {
   repo = makeRepo({ 'base.txt': 'base\n', ...files });
   for (const path of options.executables ?? []) chmodSync(join(repo.main, path), 0o755);
   for (const [path, content] of Object.entries(options.extraFiles ?? { 'agent.txt': 'agent\n' })) write(join(repo.main, path), content);
@@ -73,7 +73,7 @@ function rig(files: Record<string, string | Buffer>, options: { home?: string; e
   write(siblingFiles.registry, 'the registry of the app\n');
   const srtBinary = options.srtBinary ?? findTestSrt()!;
   const settingsDir = join(tempDir('srt-settings'), 'srt');
-  const srt = srtToolEnvironment({ srtBinary, settingsDir, ...(options.appPath === undefined ? {} : { appPath: options.appPath }), extraDenyRead: checkDenyRead({ agent: undefined, appRoot, appDirs: [], claude: claudeConfigPaths({ configured: undefined, home }), home }) });
+  const srt = srtToolEnvironment({ srtBinary, settingsDir, ...(options.appPath === undefined ? {} : { appPath: options.appPath }), ...(options.hostTools === undefined ? {} : { hostTools: options.hostTools }), extraDenyRead: checkDenyRead({ agent: undefined, appRoot, appDirs: [], claude: claudeConfigPaths({ configured: undefined, home }), home }) });
   // The daemon tests bind loopback ports: they ask for the loopback that only a tool entry (Gradle) grants a check otherwise.
   const environment = options.loopback === true ? { ...srt, toolCommand: (launch: ToolLaunch) => srt.toolCommand({ ...launch, loopback: true }) } : srt;
   const clonesRoot = join(repo.root, 'clones');
@@ -309,6 +309,36 @@ suite(`the check under the real srt${unavailable === undefined ? '' : ` [unavail
       const refused = await none.run(['sh', '-c', 'echo tests failed; exit 1']);
       expect([refused.checkpoint.outcome, refused.checkpoint.notRunReason], 'no trusted entry holds srt: the check does not start').toEqual(['not_run', expect.stringContaining('not found as an executable on the trusted PATH')]);
       expect(existsSync(marker), 'the srt stub of the checkout did not run either').toBe(false);
+    }, 120_000);
+
+    it('never runs srt, node, env or any helper that lies in a directory the agents of the profile may write (extraWritePaths, below the Claude directory), and reads the failing check as failed', async () => {
+      const markers = tempDir('srt-agent-writable');
+      const writable = [tempDir('srt-extra-write'), join(tempDir('srt-claude-dir'), 'local')];
+      for (const directory of writable) {
+        for (const name of HELPERS) write(join(directory, 'bin', name), stub(join(markers, `${name}-${directory.length}`)));
+        for (const name of HELPERS) chmodSync(join(directory, 'bin', name), 0o755);
+      }
+      const tools = createProfileHostTools({ options: () => ({ extraWritePaths: [writable[0]!] }), claudeConfigDir: () => dirname(writable[1]!), agentRoots: [], appPath: [...writable.map((directory) => join(directory, 'bin')), dirname(findTestSrt()!), realPath()].join(':') });
+      const r = rig({}, { srtBinary: 'srt', hostTools: tools });
+      const result = await r.run(['sh', '-c', 'echo tests failed; exit 1']);
+      expect([result.checkpoint.outcome, result.checkpoint.exitCode], `the failing check is failed: ${result.checkpoint.outputTail}`).toEqual(['failed', 1]);
+      expect(readdirSync(markers), 'no stand-in ran outside the sandbox').toEqual([]);
+    }, 120_000);
+
+    it('ends not_run with a fixed reason when the only srt lies where an agent may write, and keeps the path in the log of the run', async () => {
+      const markers = tempDir('srt-agent-writable-only');
+      const writable = tempDir('srt-extra-write-only');
+      for (const name of HELPERS) write(join(writable, 'bin', name), stub(join(markers, name)));
+      for (const name of HELPERS) chmodSync(join(writable, 'bin', name), 0o755);
+      const tools = createProfileHostTools({ options: () => ({ extraWritePaths: [writable] }), claudeConfigDir: () => undefined, agentRoots: [], appPath: join(writable, 'bin') });
+      const r = rig({}, { srtBinary: 'srt', hostTools: tools });
+      const result = await r.run(['sh', '-c', 'echo tests failed; exit 1']);
+      expect(result.checkpoint.outcome, 'the check does not start').toBe('not_run');
+      expect(result.checkpoint.notRunReason, 'the reason is the fixed text').toContain('exists only in a directory that an agent may write');
+      expect(result.checkpoint.notRunReason?.includes(writable), 'no path in the reason').toBe(false);
+      const log = readFileSync(join(r.dataDir, result.checkpoint.outputPath!), 'utf8');
+      expect(log, 'the log of the run names the stand-in').toContain(`launch detail: ${join(writable, 'bin', 'srt')}`);
+      expect(readdirSync(markers), 'no stand-in ran').toEqual([]);
     }, 120_000);
 
     it('starts srt outside the checkout: the working directory of the sandbox runtime is not the checkpoint, and the program still starts in the checkout', async () => {

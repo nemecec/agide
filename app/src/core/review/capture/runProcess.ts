@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { requireAbsoluteFile } from '../../isolation/hostTools';
 import { OutputRing } from './outputRing';
 
 export const KILL_GRACE_MS = 5_000;
@@ -51,6 +52,7 @@ export function runProcess(command: ProcessCommand, ring: OutputRing, timeoutMs:
       stop();
     }, timeoutMs);
     try {
+      requireAbsoluteFile(command);
       child = spawn(command.file, [...command.args], { cwd: command.cwd, env: { ...command.env }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     } catch (error) {
       clearTimeout(deadline);

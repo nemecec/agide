@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import type { Unsubscribe } from '../../events/EventBus';
@@ -7,6 +6,7 @@ import { cleanText } from '../../inbox/text';
 import { isLooser, MODE_ORDER } from '../../permissions/modes';
 import type { PermissionMode, SessionId } from '../../session/types';
 import type { NodeId } from '../../tree/types';
+import { systemExecFileSync } from '../../isolation/hostTools';
 import { dependenciesOf } from '../definition';
 import { strictestMode } from '../policy';
 import type { AgentLaunchSpec, AgentRuntime, CanUseToolRequest, RuntimeEvent } from '../runtime/types';
@@ -74,7 +74,7 @@ export const systemProcesses: ProcessControl = {
   },
   commandLine: (pid) => {
     try {
-      return execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).trim();
+      return systemExecFileSync('ps', ['-o', 'command=', '-p', String(pid)]).trim();
     } catch {
       return undefined;
     }

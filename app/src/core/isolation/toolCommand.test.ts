@@ -1,13 +1,17 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ContainerProvider } from './ContainerProvider';
 import { writeFakeSrt } from './fakeSrt';
-import { insideArgv, isWithinAny, neutralDirectory } from './hostLaunch';
+import { insideArgv, isWithinAny } from './hostLaunch';
+import { hostDirectory, SYSTEM_DIRECTORIES } from './hostTools';
+import { createProfileHostTools } from './profileHostTools';
 import { LocalProvider } from './LocalProvider';
-import { SrtProvider } from './SrtProvider';
+import { SrtProvider, srtToolEnvironment } from './SrtProvider';
 import { launcherArgv } from './statusLauncher';
+import { fakeDockerClient } from './fakeDocker';
 import { IsolationError, type AgentEnvironment, type EnvironmentSpec, type ToolLaunch } from './types';
 
 /** `toolCommand` runs a program of the user's project, such as the review check, with no more power than the agent had. */
@@ -50,6 +54,9 @@ describe('local', () => {
   });
 });
 
+/** The PATH of a host-side process: the trusted entries, then the system directories. */
+const hostPath = (...entries: string[]): string => [...entries, ...SYSTEM_DIRECTORIES].join(':');
+
 describe('srt', () => {
   const binDir = () => join(dir, 'bin');
   const provider = (appPath?: string) => {
@@ -72,7 +79,7 @@ describe('srt', () => {
     expect(settings.filesystem.allowWrite, 'the checkout and the temporary directory only').toEqual([join(dir, 'checkout'), join(dir, 'tmp')]);
     expect(settings.filesystem.allowWrite.includes(join(dir, 'claude')), 'the Claude configuration of the profile is not writable').toBe(false);
     expect(settings.network.allowedDomains, 'network none allows no host').toEqual([]);
-    expect(command.env, 'the launch environment, with the trusted PATH of the app for the host-side process').toEqual({ PATH: binDir(), CI: '1' });
+    expect(command.env, 'the launch environment, with the trusted PATH of the app for the host-side process').toEqual({ PATH: hostPath(binDir()), CI: '1' });
   });
 
   it('allows loopback binding only when the launch says the program needs it', async () => {
@@ -95,8 +102,8 @@ describe('srt', () => {
     const environment = await provider(['bin', '', '.', join(checkout, 'bin'), checkout, binDir(), ''].join(':')).prepare(spec);
     const command = await environment.toolCommand(launch({ cwd: checkout, env: { PATH: profilePath, CI: '1' } }));
     expect(command.file, 'srt is the one on the absolute entry outside the checkout').toBe(join(binDir(), 'srt'));
-    expect(command.env['PATH'], 'the host-side PATH has that entry only: nothing relative, empty or inside the checkout').toBe(binDir());
-    expect(command.cwd, 'the working directory of srt is the neutral one').toBe(neutralDirectory(join(dir, 'srt')));
+    expect(command.env['PATH'], 'the host-side PATH has that entry and the system directories only: nothing relative, empty or inside the checkout').toBe(hostPath(binDir()));
+    expect(command.cwd, 'the working directory of srt is the neutral one').toBe(hostDirectory());
     expect(isWithinAny(command.cwd, [checkout]), 'the working directory of srt is not inside the checkout').toBe(false);
     expect(command.args.slice(3, 5), 'the PATH of the profile reaches the program inside the sandbox unchanged').toEqual(['/usr/bin/env', `PATH=${profilePath}`]);
   });
@@ -118,7 +125,7 @@ describe('srt', () => {
     writeFileSync(join(checkout, 'bin', 'srt'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     const environment = await provider(`${join(dir, 'linked-bin')}:${binDir()}`).prepare(spec);
     const command = await environment.toolCommand(launch({ cwd: checkout }));
-    expect([command.file, command.env['PATH']], 'the link to the checkout is dropped').toEqual([join(binDir(), 'srt'), binDir()]);
+    expect([command.file, command.env['PATH']], 'the link to the checkout is dropped').toEqual([join(binDir(), 'srt'), hostPath(binDir())]);
   });
 
   it('allows the development hosts when the launch asks for them', async () => {
@@ -129,13 +136,70 @@ describe('srt', () => {
   });
 });
 
+describe('srt: programs the agents of the profile can write', () => {
+  const PROGRAMS = ['srt', 'node', 'env', 'which', 'bash', 'sed', 'uname', 'dirname', 'git', 'docker'];
+  const markers = (): string[] => (existsSync(join(dir, 'markers')) ? readdirSync(join(dir, 'markers')) : []);
+  const plant = (directory: string): void => {
+    mkdirSync(join(dir, 'markers'), { recursive: true });
+    mkdirSync(directory, { recursive: true });
+    for (const name of PROGRAMS) writeFileSync(join(directory, name), `#!/bin/sh\ntouch '${join(dir, 'markers', name)}'\nexit 0\n`, { mode: 0o755 });
+  };
+  /** The trusted side: the stand-in srt that ends like srt 0.0.83 and a node that is a file. */
+  const trusted = (): string => {
+    mkdirSync(join(dir, 'trusted'), { recursive: true });
+    writeFakeSrt(join(dir, 'trusted'));
+    writeFileSync(join(dir, 'trusted', 'node'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    return join(dir, 'trusted');
+  };
+  const profile = (appPath: string, extraWritePaths: string[] = []) => createProfileHostTools({ options: () => ({ extraWritePaths }), claudeConfigDir: () => join(dir, 'claude'), agentRoots: [join(dir, 'agents')], appPath });
+  const environment = (appPath: string, extraWritePaths: string[] = []) => srtToolEnvironment({ srtBinary: 'srt', settingsDir: join(dir, 'srt-checks'), hostTools: profile(appPath, extraWritePaths) });
+  const spots: [string, () => string, () => string[]][] = [
+    ['a directory of extraWritePaths', () => join(dir, 'cargo'), () => [join(dir, 'cargo')]],
+    ['a directory below the Claude configuration directory', () => join(dir, 'claude', 'local'), () => []],
+    ['a directory below the root of the agents workspaces', () => join(dir, 'agents', 'swarm', 'tree'), () => []],
+  ];
+
+  it.each(spots)('does not start srt, node, env or another program that lies in %s on the PATH of the app: the check fails as the program does', async (_name, spot, extra) => {
+    plant(join(spot(), 'bin'));
+    const tool = environment([join(spot(), 'bin'), trusted()].join(':'), extra());
+    const command = await tool.toolCommand(launch({ cwd: join(dir, 'checkout'), argv: ['/bin/sh', '-c', 'echo tests failed; exit 1'], env: { PATH: '/usr/bin:/bin', CI: '1' } }));
+    expect(command.file, 'the trusted srt').toBe(join(trusted(), 'srt'));
+    mkdirSync(join(dir, 'checkout'), { recursive: true });
+    const finished = spawnSync(command.file, [...command.args], { cwd: command.cwd, env: { ...command.env }, encoding: 'utf8' });
+    expect([finished.status, finished.stdout.trim()], 'the failing check reads as a failure').toEqual([1, 'tests failed']);
+    expect(markers(), 'no stand-in ran').toEqual([]);
+  });
+
+  it.each(spots)('refuses to start the check when the only srt lies in %s, and the reason names no path', async (_name, spot, extra) => {
+    plant(join(spot(), 'bin'));
+    const failure = await environment(join(spot(), 'bin'), extra()).toolCommand(launch()).catch((error: unknown) => error);
+    expect(failure, 'an isolation error').toBeInstanceOf(IsolationError);
+    expect((failure as IsolationError).message, 'the fixed reason').toBe('the sandbox runtime (srt) exists only in a directory that an agent may write, so it was not started');
+    expect((failure as IsolationError).detail, 'the detail names the stand-in').toBe(join(spot(), 'bin', 'srt'));
+    expect(markers(), 'no stand-in ran').toEqual([]);
+  });
+
+  it('does not use a srt that lies in a directory of the launch itself (the checkout, the temporary directory, the clones)', async () => {
+    plant(join(dir, 'clones', 'bin'));
+    const failure = await environment([join(dir, 'clones', 'bin')].join(':')).toolCommand(launch({ writeDirs: [join(dir, 'clones')] })).catch((error: unknown) => error);
+    expect((failure as IsolationError).message, 'the clone directory is excluded for this launch').toContain('exists only in a directory that an agent may write');
+  });
+
+  it('keeps the loader variables of the check environment out of the host-side process', async () => {
+    const command = await environment(trusted()).toolCommand(launch({ env: { PATH: '/usr/bin', CI: '1', NODE_OPTIONS: '--require ./x.cjs', DYLD_INSERT_LIBRARIES: './x.dylib' } }));
+    expect(Object.keys(command.env).sort(), 'the host-side environment has the PATH and CI only').toEqual(['CI', 'PATH']);
+    expect(command.args.slice(3, 7), 'env gives the variables to the launcher and the program').toEqual(['/usr/bin/env', 'PATH=/usr/bin', 'NODE_OPTIONS=--require ./x.cjs', 'DYLD_INSERT_LIBRARIES=./x.dylib']);
+  });
+});
+
 describe('container', () => {
-  const provider = () => new ContainerProvider({ sessionFilesDir: join(dir, 'sessions'), dockerBinary: 'docker', image: 'agide-test-image', claudeConfigDir: join(dir, 'claude'), user: '1000:1000' });
+  /** A docker client that is a file of the test: nothing here talks to an engine. */
+  const provider = () => new ContainerProvider({ sessionFilesDir: join(dir, 'sessions'), dockerBinary: fakeDockerClient(join(dir, 'client')), image: 'agide-test-image', claudeConfigDir: join(dir, 'claude'), user: '1000:1000' });
 
   it('runs the program in the image with the checkout mounted, no network and the environment names only', async () => {
     const environment = await provider().prepare(spec);
     const command = await environment.toolCommand(launch({ env: { PATH: '/usr/bin', CI: '1', TOKEN_FOR_CHECK: 'value-that-must-not-be-an-argument' } }));
-    expect(command.file, 'the docker client').toBe('docker');
+    expect(command.file, 'the docker client, as an absolute file').toBe(join(dir, 'client', 'docker'));
     expect(command.args.slice(0, 4), 'docker run without a terminal and with no network').toEqual(['run', '--network', 'none', '-i']);
     expect(command.args, 'the checkout is mounted').toContain(`type=bind,src=${join(dir, 'checkout')},dst=${join(dir, 'checkout')}`);
     expect(command.args, 'the extra directory is mounted').toContain(`type=bind,src=${join(dir, 'tmp')},dst=${join(dir, 'tmp')}`);

@@ -1,7 +1,8 @@
 import { accessSync, constants } from 'node:fs';
 import { resolveClaudeBinary } from '../session/env';
-import { launchEnv } from './launchEnv';
 import { HostEnvironment } from './HostEnvironment';
+import { hostTools, type HostTools } from './hostTools';
+import { launchEnv } from './launchEnv';
 import { SessionFiles } from './SessionFiles';
 import {
   IsolationError,
@@ -20,6 +21,8 @@ export interface LocalProviderOptions {
   readonly sessionFilesDir: string;
   /** Defaults to `resolveClaudeBinary(process.env)`. */
   readonly claudeBinary?: string;
+  /** Finds the CLI when `claudeBinary` is a name or a relative path. Defaults to the shared instance of the app. */
+  readonly hostTools?: HostTools;
 }
 
 /**
@@ -57,7 +60,7 @@ export class LocalProvider implements IsolationProvider {
     let environment = this.environments.get(id);
     if (environment) environment.spec = spec;
     else {
-      environment = new LocalEnvironment(id, spec, this.claudeBinary, new SessionFiles(this.options.sessionFilesDir));
+      environment = new LocalEnvironment(id, spec, this.claudeBinary, new SessionFiles(this.options.sessionFilesDir), () => this.options.hostTools ?? hostTools());
       this.environments.set(id, environment);
     }
     return Promise.resolve(environment);
@@ -72,6 +75,7 @@ class LocalEnvironment extends HostEnvironment {
     spec: EnvironmentSpec,
     private readonly claudeBinary: string,
     files: SessionFiles,
+    private readonly tools: () => HostTools,
   ) {
     super(id, spec, files);
   }
@@ -82,6 +86,8 @@ class LocalEnvironment extends HostEnvironment {
 
   async processCommand(launch: ProcessLaunch): Promise<PtyCommand> {
     if (this.spec.workspace.mode !== 'bind') throw new IsolationError('unsupported', 'the local provider runs in a host directory only');
-    return { file: this.claudeBinary, args: [...launch.args], cwd: launch.cwd, env: launchEnv(this.spec.profile, this.paths.toEnv, launch.env) };
+    // A name or a relative path would resolve through the PATH of the profile in the workspace, which the agent writes.
+    const file = this.tools().require(this.claudeBinary, [this.spec.workspace.hostPath, launch.cwd], 'the Claude CLI');
+    return { file, args: [...launch.args], cwd: launch.cwd, env: launchEnv(this.spec.profile, this.paths.toEnv, launch.env) };
   }
 }

@@ -126,10 +126,9 @@ describe('git merger', () => {
     git(repo, 'commit', '-q', '-m', 'attributes');
     base = git(repo, 'rev-parse', 'HEAD');
     const steps = [stepOf('one', { 'a.txt': 'one\nTWO\nthree\n' }), stepOf('two', { 'a.txt': 'one\ntwo changed\nthree\n' })];
-    // With the repository as the working directory, git would read its work tree attributes.
-    const home = process.cwd();
-    process.chdir(repo);
-    const outcome = await new GitMerger().merge({ repoPath: repo, commonDir: commonDir(), target: 'main', goal: 'g', steps, dryRun: false }).finally(() => process.chdir(home));
+    // The shared configuration, which an agent can write, names the committed tree as the source of attributes; git itself starts in an empty directory, so the work tree is never read.
+    git(repo, 'config', 'attr.tree', 'HEAD');
+    const outcome = await new GitMerger().merge({ repoPath: repo, commonDir: commonDir(), target: 'main', goal: 'g', steps, dryRun: false });
     expect(outcome, 'the second step conflicts although the file is marked for a union merge').toMatchObject({ ok: false, conflicts: [{ agents: ['two'], files: ['a.txt'] }] });
   });
 

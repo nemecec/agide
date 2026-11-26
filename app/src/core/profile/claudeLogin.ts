@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { hostTools } from '../isolation/hostTools';
 
 export interface LoginStatus {
   readonly signedIn: boolean;
@@ -10,7 +10,7 @@ export type RunStatus = (binary: string, args: string[], env: Record<string, str
 
 const runWithExecFile: RunStatus = (binary, args, env) =>
   new Promise((resolve) => {
-    execFile(binary, args, { env, timeout: 15_000, maxBuffer: 64 * 1024 }, (error, stdout) => {
+    hostTools().execFile(binary, args, { env, timeout: 15_000, maxBuffer: 64 * 1024 }, (error, stdout) => {
       const code = error && typeof (error as { code?: unknown }).code === 'number' ? (error as { code: number }).code : error ? 1 : 0;
       resolve({ exitCode: code, stdout: String(stdout) });
     });

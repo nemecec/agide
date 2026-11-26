@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { AgentEnvironment, PtyCommand } from '../../isolation/types';
+import { IsolationError, type AgentEnvironment, type PtyCommand } from '../../isolation/types';
 import type { ChangesetId, CheckRecord } from '../schemas';
 import type { ChangesetStore, CheckExecutor, CheckOutcomeSet, CheckRequest } from '../types';
 import { readProjectFacts } from './cacheTools';
@@ -257,6 +257,7 @@ export class ProcessCheckExecutor implements CheckExecutor {
     let phase: 'setup' | 'command' = 'command';
     let cloneFailure: string | undefined;
     let cloneDetail = '';
+    let launchDetail = '';
     let clones: RunClones | undefined;
     let swept: SweepOutcome | undefined;
     let sweepFailed = false;
@@ -295,6 +296,8 @@ export class ProcessCheckExecutor implements CheckExecutor {
       }
     } catch (error) {
       result = { kind: 'spawn_failed', error: (error as Error).message };
+      // Where a refused host program was found goes to the log of the run, not into the reason that a reviewer reads.
+      if (error instanceof IsolationError && error.detail !== undefined) launchDetail = `launch detail: ${error.detail}\n`;
     } finally {
       for (const key of keys) environment.environment.release?.(key);
       // Before anything is removed: a process that is still running could write into the directories again.
@@ -314,7 +317,7 @@ export class ProcessCheckExecutor implements CheckExecutor {
     const durationMs = Date.now() - started;
     const noteText = notes.join('');
     const tail = ring.tailText(TAIL_CHARACTERS);
-    const log = Buffer.concat([Buffer.from(noteText + cloneDetail), ring.contents()]);
+    const log = Buffer.concat([Buffer.from(noteText + cloneDetail + launchDetail), ring.contents()]);
     const outputPath = await this.writeLog(request.swarmId, changesetId ?? `base-${commitId.slice(0, 12)}`, runId, log);
     const common = { durationMs, outputPath, outputTail: (noteText + ring.tailText(Math.max(0, TAIL_CHARACTERS - noteText.length))).slice(0, TAIL_CHARACTERS), truncated: ring.truncated };
     const made = (fields: Partial<CheckRecord> & Pick<CheckRecord, 'outcome'>): CheckRecord => this.record(request, target, commitId, changesetId, { ...fields, ...common }, startedAt);

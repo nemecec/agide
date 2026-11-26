@@ -246,11 +246,16 @@ test('the isolation provider chosen for the profile changes how the next session
   expect((await invoke(page, 'isolation_set_provider', { provider: 'srt' })).ok, 'srt passes its check and is chosen').toBe(true);
 
   await startSession(page, folderId);
-  const srtRuns = jsonLines<{ args: string[]; settings: { network: { allowedDomains: string[] }; allowPty?: boolean } }>(file('srt.jsonl'));
+  const srtRuns = jsonLines<{ args: string[]; loader: string[]; cwd: string; path: string; settings: { network: { allowedDomains: string[] }; allowPty?: boolean } }>(file('srt.jsonl'));
   expect(srtRuns, 'the launch went through srt').toHaveLength(1);
   const [run] = srtRuns as [(typeof srtRuns)[number]];
-  expect(run.args.slice(0, 1).concat(run.args.slice(2, 4), run.args.slice(5, 6)), 'srt -s <settings> -- env PATH=<profile PATH> claude').toEqual(['-s', '--', '/usr/bin/env', FAKE_CLAUDE]);
+  const program = run.args.indexOf(FAKE_CLAUDE);
+  expect(run.args.slice(0, 1).concat(run.args.slice(2, 4)), 'srt -s <settings> -- env').toEqual(['-s', '--', '/usr/bin/env']);
+  expect(program, 'claude follows the assignments of env').toBeGreaterThan(4);
   expect(run.args[4], 'the PATH of the profile is put back for claude inside the sandbox').toMatch(/^PATH=./);
+  expect(run.args.slice(5, program).every((assignment) => /^(NODE_OPTIONS|NODE_PATH|DYLD_|LD_)\w*=/.test(assignment)), 'what stands between PATH and claude are loader variables of the profile').toBe(true);
+  expect(run.loader, 'the process of srt has no loader variable: they belong to claude inside the sandbox').toEqual([]);
+  expect(run.path.split(':').every((entry) => entry.startsWith('/')), 'the PATH of the process of srt holds absolute entries only').toBe(true);
   expect(run.settings.network.allowedDomains, 'the profile allowlist reaches the sandbox').toContain('packages.internal.example');
   expect(run.settings.allowPty, 'the TUI needs a PTY inside srt').toBe(true);
   expect(flag(launches().at(-1)?.args ?? [], '--permission-mode'), 'the mode stays the profile default').toBe('auto');

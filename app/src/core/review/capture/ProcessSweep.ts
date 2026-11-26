@@ -1,6 +1,6 @@
-import { execFile, execFileSync } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { basename, sep } from 'node:path';
+import { systemExecFile, systemExecFileSync } from '../../isolation/hostTools';
 
 /**
  * Ends the processes a check run left behind (0040 section 6). A process group kill does not reach a process that
@@ -96,11 +96,11 @@ export function runOfPath(path: string, roots: readonly string[]): string | unde
   return undefined;
 }
 
-type Exec = (file: string, args: readonly string[]) => Promise<{ stdout: string; code: number }>;
+type Exec = (file: 'ps' | 'lsof', args: readonly string[]) => Promise<{ stdout: string; code: number }>;
 
 const run: Exec = (file, args) =>
   new Promise((resolve, reject) => {
-    execFile(file, [...args], { maxBuffer: 256 * 1024 * 1024, encoding: 'utf8' }, (error, stdout) => {
+    systemExecFile(file, args, { maxBuffer: 256 * 1024 * 1024 }, (error, stdout) => {
       if (error === null) resolve({ stdout, code: 0 });
       else if (typeof error.code === 'number') resolve({ stdout, code: error.code });
       else reject(error);
@@ -257,7 +257,7 @@ function signalZero(pid: number): boolean {
 /** Node has no `getpgid`; 0 (no group is spared) when `ps` cannot say. */
 function safePgid(): number {
   try {
-    return Number(execFileSync('ps', ['-o', 'pgid=', '-p', String(process.pid)], { encoding: 'utf8' }).trim()) || 0;
+    return Number(systemExecFileSync('ps', ['-o', 'pgid=', '-p', String(process.pid)]).trim()) || 0;
   } catch {
     return 0;
   }

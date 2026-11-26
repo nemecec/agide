@@ -218,10 +218,33 @@ const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
 const PREFIX_WORDS = new Set(['env', 'exec', 'command', 'time', 'nohup']);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
-/** The program a command starts: its first word that is no assignment and no prefix word, with quotes and directory part dropped. */
+/** Keywords that stand before a command or end a compound one (`if true; then ./gradlew; fi`). */
+const SHELL_KEYWORDS = new Set(['if', 'then', 'else', 'elif', 'fi', 'while', 'until', 'do', 'done', 'esac', '!', '{', '}']);
+/** The options of `env` that take the next word as their value. `-S` takes a string that holds a command line, which is not read. */
+const ENV_OPTIONS_WITH_VALUE = new Set(['-u', '-P', '-C', '-S', '--unset', '--chdir', '--split-string']);
+
+/**
+ * The program a command starts: its first word that is no assignment, shell keyword or prefix word, with quotes and
+ * directory part dropped. After `env` its options (`-i`, `-u NAME`, `-P DIR`, `--`, `-`) are skipped as well. Quoting
+ * is not read: a word inside a quoted string counts as a word of the command.
+ */
 function startedProgram(words: readonly string[]): string | undefined {
-  const first = words.find((word) => word !== '' && !ASSIGNMENT.test(word) && !PREFIX_WORDS.has(basename(word)));
-  return first === undefined ? undefined : basename(first.replace(/^['"]+|['"]+$/g, ''));
+  let afterEnv = false;
+  for (let index = 0; index < words.length; index++) {
+    const word = (words[index] ?? '').replace(/^['"]+|['"]+$/g, '');
+    if (word === '') continue;
+    if (afterEnv && word.startsWith('-')) {
+      if (ENV_OPTIONS_WITH_VALUE.has(word)) index++;
+      continue;
+    }
+    if (ASSIGNMENT.test(word) || SHELL_KEYWORDS.has(word)) continue;
+    if (PREFIX_WORDS.has(basename(word))) {
+      afterEnv = basename(word) === 'env';
+      continue;
+    }
+    return basename(word);
+  }
+  return undefined;
 }
 
 /** The program of each command of a shell script: split at `&&`, `||`, `;`, `|`, `&`, line ends and parentheses. */

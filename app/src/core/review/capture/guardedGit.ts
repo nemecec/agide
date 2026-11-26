@@ -1,6 +1,6 @@
-import { execFile } from 'node:child_process';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { hostTools } from '../../isolation/hostTools';
 import { blankingEnv, driverSettings as sharedDriverSettings } from '../../swarm/workspace/git';
 
 /**
@@ -59,7 +59,7 @@ export type GitExec = (args: readonly string[], options: { readonly env: NodeJS.
 
 export const execGit: GitExec = (args, { env, timeoutMs, cwd }) =>
   new Promise((resolvePromise, reject) => {
-    execFile('git', [...args], { env, timeout: timeoutMs, maxBuffer: GIT_MAX_OUTPUT_BYTES, encoding: 'buffer', ...(cwd === undefined ? {} : { cwd }) }, (error, stdout, stderr) => {
+    hostTools().execFileBuffer('git', args, { env, timeout: timeoutMs, maxBuffer: GIT_MAX_OUTPUT_BYTES, ...(cwd === undefined ? {} : { cwd }) }, (error, stdout, stderr) => {
       if (error === null) resolvePromise({ stdout });
       else reject(new ReviewGitError(firstLine(stderr.toString('utf8')) || error.message, stderr.toString('utf8'), typeof error.code === 'number' ? error.code : undefined));
     });

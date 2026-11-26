@@ -189,6 +189,8 @@ export class IsolationError extends Error {
   constructor(
     readonly code: IsolationErrorCode,
     message: string,
+    /** Where a refused program was found: for the log of the run, never part of a reason that a reviewer reads. */
+    readonly detail?: string,
   ) {
     super(message);
     this.name = 'IsolationError';

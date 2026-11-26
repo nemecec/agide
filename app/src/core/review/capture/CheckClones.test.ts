@@ -337,7 +337,7 @@ describe('the sweep at start', () => {
 describe('the clone call', () => {
   it('names the program per platform and has none for the others', () => {
     expect(cloneCommand('darwin', '/a', '/b'), 'macOS clones with cp -c').toEqual({ file: '/bin/cp', args: ['-cR', '--', '/a', '/b'] });
-    expect(cloneCommand('linux', '/a', '/b'), 'Linux demands a reflink').toEqual({ file: 'cp', args: ['-R', '--reflink=always', '--', '/a', '/b'] });
+    expect(cloneCommand('linux', '/a', '/b'), 'Linux demands a reflink').toEqual({ file: '/bin/cp', args: ['-R', '--reflink=always', '--', '/a', '/b'] });
     expect(cloneCommand('win32', '/a', '/b'), 'no clone elsewhere').toBeUndefined();
   });
 

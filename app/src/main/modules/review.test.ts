@@ -4,8 +4,9 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Caller } from '../../core/commands/types';
+import { hostTools } from '../../core/isolation/hostTools';
 import { catalogueReason, FakeCheckExecutor, FakeRiskRules } from '../../core/review/fakes/fakes';
 import { captureFixture, policySnapshot } from '../../core/review/fakes/fixtures';
 import { REVIEW_COMMANDS, ReviewError, reviewPolicySchema, type CaptureResult, type CaptureService, type Reason } from '../../core/review/index';
@@ -13,6 +14,21 @@ import { repoDifferenceHash } from '../../core/review/capture/GitCaptureService'
 import { DEFAULT_PROFILE_ID, FileProfileStore, profilePaths } from '../../core/profile/index';
 import { startAppModules, type AppModules } from '../appForTests';
 import type { SwarmModuleService } from './swarm';
+
+/** The first `lsof` of the process sweep waits `delayMs` when a test asks for it: the sweep runs `lsof` by its fixed path, so a test cannot put a slow one on the PATH. */
+const slowSweep = vi.hoisted(() => ({ delayMs: 0, used: false }));
+vi.mock('../../core/isolation/hostTools', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../core/isolation/hostTools')>();
+  const systemExecFile: typeof original.systemExecFile = (name, args, options, callback) => {
+    if (name === 'lsof' && slowSweep.delayMs > 0 && !slowSweep.used) {
+      slowSweep.used = true;
+      setTimeout(() => original.systemExecFile(name, args, options, callback), slowSweep.delayMs);
+      return;
+    }
+    original.systemExecFile(name, args, options, callback);
+  };
+  return { ...original, systemExecFile };
+});
 
 const saved = { ...process.env };
 let dir: string;
@@ -40,6 +56,8 @@ afterEach(async () => {
   await app?.close();
   app = undefined;
   process.env = { ...saved };
+  slowSweep.delayMs = 0;
+  slowSweep.used = false;
   rmSync(dir, { recursive: true, force: true });
   rmSync(taskBase, { recursive: true, force: true });
 });
@@ -47,6 +65,30 @@ afterEach(async () => {
 describe('review module in the real module graph', () => {
   const invoke = (id: string, input: unknown, caller: Caller = { kind: 'ui' }) =>
     app!.commands.invoke(id, input, caller) as Promise<{ ok: boolean; value?: unknown; error?: { code: string; message: string } }>;
+
+  it('finds host-side programs outside every directory the profile\'s agents may write: the extraWritePaths of its isolation options and the task base', async () => {
+    const extra = join(dir, 'cargo');
+    const agentBin = join(taskBase, 'worktrees', 'tree', 'bin');
+    const trusted = join(dir, 'trusted');
+    const plant = (directory: string, ...names: string[]): void => {
+      mkdirSync(directory, { recursive: true });
+      for (const name of names) writeFileSync(join(directory, name), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    };
+    plant(join(extra, 'bin'), 'wiring-extra');
+    plant(agentBin, 'wiring-root');
+    plant(trusted, 'wiring-trusted', 'wiring-extra', 'wiring-root');
+    process.env['PATH'] = [join(extra, 'bin'), agentBin, trusted, process.env['PATH'] ?? ''].join(':');
+    app = await startAppModules({ dataDir: dir });
+    expect(hostTools().find('wiring-trusted'), 'the program of a trusted entry is found').toBe(join(trusted, 'wiring-trusted'));
+    expect(hostTools().find('wiring-root'), 'a program below the task base is not used: another agent can write it').toBe(join(trusted, 'wiring-root'));
+    expect(hostTools().find('wiring-extra'), 'before the options list the directory, a program there is found').toBe(join(extra, 'bin', 'wiring-extra'));
+    app.services.profile.store.updateSettings(app.services.profile.id, { isolation: { provider: 'srt', options: { extraWritePaths: [extra] } } } as never);
+    expect(hostTools().find('wiring-extra'), 'once the options list it as writable, the directory is out of the lookup').toBe(join(trusted, 'wiring-extra'));
+    const tools = hostTools();
+    await app.close();
+    app = undefined;
+    expect(hostTools(), 'the instance of the process is put back when the modules end').not.toBe(tools);
+  });
 
   it('registers every review command with a handler and answers swarm_merge for an unknown swarm', async () => {
     app = await startAppModules({ dataDir: dir });
@@ -169,7 +211,7 @@ describe('review module in the real module graph', () => {
 
   it('runs the check of a confined profile under srt with the data directory, the profile tools and the home credentials denied for reads', async () => {
     const copy = join(taskBase, 'srt-settings-copy.json');
-    const fakeSrt = join(taskBase, 'fake-srt');
+    const fakeSrt = join(dir, 'fake-srt');
     writeFileSync(fakeSrt, `#!/bin/sh\ncp "$2" '${copy}'\nexit 0\n`, { mode: 0o755 });
     process.env['AGIDE_SRT_BIN'] = fakeSrt;
     const repo = join(taskBase, 'repo');
@@ -205,7 +247,7 @@ describe('review module in the real module graph', () => {
     const store = new FileProfileStore({ root, ownerId: DEFAULT_PROFILE_ID });
     store.create({ id: DEFAULT_PROFILE_ID, name: 'Default', colour: '#5b7fa6' });
     const copy = join(taskBase, 'srt-settings-copy.json');
-    const fakeSrt = join(taskBase, 'fake-srt');
+    const fakeSrt = join(dir, 'fake-srt');
     writeFileSync(fakeSrt, `#!/bin/sh\ncp "$2" '${copy}'\nexit 0\n`, { mode: 0o755 });
     process.env['AGIDE_SRT_BIN'] = fakeSrt;
     const repo = join(taskBase, 'repo');
@@ -234,14 +276,11 @@ describe('review module in the real module graph', () => {
 
   it('starts no check before the leftovers of a killed app are removed', async () => {
     // The first `lsof` is slow, which is the one of the sweep at module start: it stays busy for longer than the swarm needs to reach its first check, and the sweep of the first run (the second call) is fast.
-    const bin = join(taskBase, 'slow-bin');
-    mkdirSync(bin, { recursive: true });
-    writeFileSync(join(bin, 'lsof'), `#!/bin/sh\nif mkdir '${join(bin, 'first-call')}' 2>/dev/null; then sleep 4; fi\nexec /usr/sbin/lsof "$@"\n`, { mode: 0o755 });
-    process.env['PATH'] = `${bin}:${process.env['PATH'] ?? ''}`;
+    slowSweep.delayMs = 4_000;
     const leftover = join(taskBase, 'review-checks', DEFAULT_PROFILE_ID, 'sw1', 'chk_0123456789abcdef');
     mkdirSync(leftover, { recursive: true });
     const seen = join(taskBase, 'leftover-seen-by-the-check');
-    const fakeSrt = join(taskBase, 'fake-srt');
+    const fakeSrt = join(dir, 'fake-srt');
     writeFileSync(fakeSrt, `#!/bin/sh\nif [ -e '${leftover}' ]; then echo present > '${seen}'; else echo absent > '${seen}'; fi\nexit 0\n`, { mode: 0o755 });
     process.env['AGIDE_SRT_BIN'] = fakeSrt;
     const repo = join(taskBase, 'repo');

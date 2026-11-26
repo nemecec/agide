@@ -1,7 +1,9 @@
 import { checkUrl } from '../../core/browser/addressPolicy';
+import type { SystemToolName } from '../../core/isolation/hostTools';
 
 export interface OpenInChromeDeps {
-  execFile(file: string, args: readonly string[]): Promise<void>;
+  /** Runs a system tool by its fixed path (`systemExecFile`). */
+  execFile(file: SystemToolName, args: readonly string[]): Promise<void>;
   openExternal(url: string): Promise<void>;
 }
 

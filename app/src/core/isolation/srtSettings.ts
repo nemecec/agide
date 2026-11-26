@@ -1,7 +1,10 @@
 import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { claudeTempDir, sessionWriteAllowances } from './agentWritable';
 import type { NetworkPolicy } from './types';
+
+export { claudeTempDir };
 
 /** Hosts the CLI needs for the API and the sign-in flow. Always allowed. */
 export const ANTHROPIC_HOSTS: readonly string[] = ['api.anthropic.com', '*.anthropic.com', 'claude.ai', '*.claude.ai', 'platform.claude.com'];
@@ -51,11 +54,6 @@ export interface SrtSettingsInput {
   readonly platform?: NodeJS.Platform;
 }
 
-/** The temp directory the CLI's Bash tool writes (I1: the tool fails with EPERM when it is not writable). */
-export function claudeTempDir(uid: number, platform: NodeJS.Platform): string {
-  return platform === 'darwin' ? `/private/tmp/claude-${uid}` : `/tmp/claude-${uid}`;
-}
-
 /**
  * Files and directories of a Claude configuration directory that change what a later, unsandboxed session loads
  * (user settings with hooks, instructions, commands, agents, skills, plugins). A sandboxed session reads them and
@@ -81,11 +79,9 @@ export function srtAllowedDomains(network: NetworkPolicy): string[] {
 /** Settings of probe I1 (`notes/probes-m3-isolation.md`) with the paths and hosts of one session. */
 export function buildSrtSettings(input: SrtSettingsInput): SrtSettings {
   const home = input.home ?? homedir();
-  const claude =
-    input.claudeConfigDir === undefined ? [join(home, '.claude'), join(home, '.claude.json')] : [input.claudeConfigDir];
   const configDir = input.claudeConfigDir ?? join(home, '.claude');
   const protectedPaths = CLAUDE_CONFIG_PROTECTED.map((name) => join(configDir, name));
-  const writes = [...input.writeDirs, ...claude, claudeTempDir(input.uid ?? process.getuid?.() ?? 0, input.platform ?? process.platform), ...(input.extraWritePaths ?? [])];
+  const writes = sessionWriteAllowances({ ...input, home });
   return {
     allowPty: true,
     network: { allowedDomains: srtAllowedDomains(input.network), deniedDomains: [], allowLocalBinding: true },

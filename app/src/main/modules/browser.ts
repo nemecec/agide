@@ -1,4 +1,3 @@
-import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -35,6 +34,7 @@ import {
 } from '../../core/browser/index';
 import { CommandError, requireInScope, type Caller } from '../../core/commands/index';
 import type { InboxService } from '../../core/inbox/index';
+import { systemExecFile } from '../../core/isolation/hostTools';
 import type { AppMcpServer } from '../../core/mcp/index';
 import { originAllowed, type PermissionService } from '../../core/permissions/index';
 import type { ProfileService } from '../../core/profile/index';
@@ -521,7 +521,7 @@ export function init(
         if (answer !== 'once' && answer !== 'session' && answer !== 'always') throw new CommandError('failed', `the user did not allow opening ${origin} in Chrome`);
       }
       const result = await openInChrome(url, {
-        execFile: (file, args) => new Promise((resolve, reject) => execFile(file, [...args], (error) => (error ? reject(error) : resolve()))),
+        execFile: (file, args) => new Promise((resolve, reject) => systemExecFile(file, args, {}, (error) => (error ? reject(error) : resolve()))),
         openExternal: (target) => (views ? views.openExternal(target) : Promise.reject(new Error('no default browser in this run'))),
       }).catch((error: unknown) => {
         throw new CommandError('failed', error instanceof Error ? error.message : String(error));

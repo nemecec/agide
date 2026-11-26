@@ -2,6 +2,7 @@ import { chmodSync, existsSync, readFileSync, realpathSync, writeFileSync } from
 import { dirname, join, relative } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { insideArgv } from '../../isolation/hostLaunch';
+import { HostTools } from '../../isolation/hostTools';
 import { launcherArgv } from '../../isolation/statusLauncher';
 import { resolveCheckEnvironment, type CheckEnvironmentInput } from './checkEnvironment';
 import { removeTempDirs, tempDir } from './gitFixtures';
@@ -67,6 +68,15 @@ describe('resolveCheckEnvironment', () => {
     expect(existsSync(command.args[1]!), 'the settings file exists while the run lives').toBe(true);
     resolved.environment.release?.('run-3');
     expect(existsSync(command.args[1]!), 'the settings file is gone after the release').toBe(false);
+  });
+
+  it('does not run the check when the only srt lies in a directory the agents of the profile may write, and says so in a reason that names no path', () => {
+    const bin = dirname(fakeSrt());
+    const settingsDir = tempDir('srt-settings');
+    const resolve = (excluded: string[]) => resolveCheckEnvironment(input({ bashSandbox: true, srt: { binary: 'srt', settingsDir, hostTools: new HostTools({ appPath: bin, excluded: () => excluded, fixedDirectories: [] }) } }));
+    expect(resolve([bin]), 'an excluded directory').toEqual({ kind: 'unavailable', why: 'the sandbox runtime exists only in a directory that an agent may write' });
+    expect(resolve([dirname(bin)]), 'a parent of it is excluded as well').toMatchObject({ kind: 'unavailable' });
+    expect(resolve([join(bin, 'other')]).kind, 'a directory below it or beside it is not').toBe('ready');
   });
 
   it('looks a bare srt name up on the absolute entries of the PATH of the app, never on a relative or empty one', () => {

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { delimiter, join } from 'node:path';
+import { delimiter, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { PermissionMode } from './types';
 
@@ -51,7 +51,7 @@ export function resolveClaudeBinary(env: NodeJS.ProcessEnv = process.env): strin
     join(homedir(), '.local', 'bin', 'claude'),
     '/opt/homebrew/bin/claude',
     '/usr/local/bin/claude',
-    ...(env['PATH'] ?? '').split(delimiter).filter(Boolean).map((dir) => join(dir, 'claude')),
+    ...(env['PATH'] ?? '').split(delimiter).filter(isAbsolute).map((dir) => join(dir, 'claude')),
   ];
   return candidates.find((path) => existsSync(path)) ?? 'claude';
 }

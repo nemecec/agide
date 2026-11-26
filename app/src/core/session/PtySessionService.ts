@@ -13,6 +13,7 @@ import { HookInbox } from './HookInbox';
 import { buildLaunchArgs } from './launchArgs';
 import { mergeContributions, type LaunchContributor } from './launchContributions';
 import { OutputBuffer } from './OutputBuffer';
+import { requireAbsoluteFile } from '../isolation/hostTools';
 import { MemorySessionStore, type SessionStore } from './SessionStore';
 import { statusAfterHook } from './status';
 import type { StreamProcess, StreamSpawner } from './streamSpawner';
@@ -361,6 +362,7 @@ export class PtySessionService implements SessionService {
       const inbox = new HookInbox(inboxDir, (record) => this.onHook(entry, record));
       let proc: nodePty.IPty;
       try {
+        requireAbsoluteFile(command);
         proc = nodePty.spawn(command.file, [...command.args], {
           name: 'xterm-256color',
           cols: entry.cols,

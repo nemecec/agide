@@ -1,4 +1,5 @@
 import { readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { installFakeGh, samplePullRequest } from './fixtures/fakeGh';
 import { GhPullRequestReader } from './GhPullRequestReader';
@@ -11,7 +12,7 @@ afterEach(() => dirs.splice(0).forEach((dir) => rmSync(dir, { recursive: true, f
 function reader(options: Parameters<typeof installFakeGh>[0]) {
   const gh = installFakeGh(options);
   dirs.push(gh.dir);
-  return { gh, reader: new GhPullRequestReader({ env: () => ({ ...process.env, ...gh.env, PATH: gh.path }) }) };
+  return { gh, reader: new GhPullRequestReader({ env: () => ({ ...process.env, ...gh.env, PATH: gh.path }), executable: join(gh.dir, 'bin', 'gh') }) };
 }
 
 describe('pull request reader', () => {
@@ -32,7 +33,7 @@ describe('pull request reader', () => {
   });
 
   it('says so when gh is not installed', async () => {
-    const missing = new GhPullRequestReader({ env: () => ({ PATH: '/nonexistent' }) });
+    const missing = new GhPullRequestReader({ env: () => ({ PATH: '/nonexistent' }), executable: '/nonexistent/gh' });
     await expect(missing.read(source), 'no gh').rejects.toMatchObject({ code: 'gh_failed', message: expect.stringContaining('not installed') });
   });
 

@@ -1,7 +1,7 @@
-import { execFile } from 'node:child_process';
 import { statfsSync } from 'node:fs';
 import { lstat, mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
+import { systemExecFile, systemTool } from '../../isolation/hostTools';
 import { CACHE_TOOLS, EXCLUDED_DIRECTORIES, EXCLUDED_FILES, needsLoopback, selectTools, type CachePart, type CacheTool, type HostPaths, type ProjectFacts } from './cacheTools';
 
 /**
@@ -40,8 +40,8 @@ export type CloneFunction = (source: string, destination: string, signal: AbortS
 
 /** The program that clones a tree on a platform without falling back to a copy; undefined when the platform has none. */
 export function cloneCommand(platform: NodeJS.Platform, source: string, destination: string): { file: string; args: string[] } | undefined {
-  if (platform === 'darwin') return { file: '/bin/cp', args: ['-cR', '--', source, destination] };
-  if (platform === 'linux') return { file: 'cp', args: ['-R', '--reflink=always', '--', source, destination] };
+  if (platform === 'darwin') return { file: systemTool('cp', 'darwin'), args: ['-cR', '--', source, destination] };
+  if (platform === 'linux') return { file: systemTool('cp', 'linux'), args: ['-R', '--reflink=always', '--', source, destination] };
   return undefined;
 }
 
@@ -49,7 +49,7 @@ export const cloneWithCp: CloneFunction = (source, destination, signal) => {
   const command = cloneCommand(process.platform, source, destination);
   if (command === undefined) return Promise.reject(new CloneError(`cloning is not supported on ${process.platform}`));
   return new Promise<void>((resolve, reject) => {
-    execFile(command.file, command.args, { signal, timeout: 0 }, (error, _stdout, stderr) => {
+    systemExecFile('cp', command.args, { signal, timeout: 0 }, (error, _stdout, stderr) => {
       if (error === null) resolve();
       else if (signal.aborted) reject(signal.reason);
       else reject(new CloneError('cp -c could not clone a cache', `${command.file} ${command.args.join(' ')}: ${stderr.trim() || error.message}`.slice(0, 2_000)));
@@ -85,7 +85,7 @@ export function cloneRefusal(facts: VolumeFacts): string | undefined {
 /** The filesystem of an absolute path: the first column of `df -P`. */
 export function filesystemOf(path: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile('df', ['-P', path], (error, stdout) => {
+    systemExecFile('df', ['-P', path], {}, (error, stdout) => {
       const line = stdout.trim().split('\n').pop() ?? '';
       const match = /^(.+?)\s+\d+\s+\d+\s+\d+\s+\d+%\s/.exec(line);
       if (error !== null || match === null) reject(new CloneError('the filesystem of a directory could not be read', path));
@@ -283,7 +283,7 @@ export async function removeTree(path: string): Promise<void> {
   try {
     await rm(path, { recursive: true, force: true });
   } catch {
-    await new Promise<void>((resolve) => execFile('chmod', ['-R', 'u+rwX', '--', path], () => resolve()));
+    await new Promise<void>((resolve) => systemExecFile('chmod', ['-R', 'u+rwX', '--', path], {}, () => resolve()));
     await rm(path, { recursive: true, force: true });
   }
 }

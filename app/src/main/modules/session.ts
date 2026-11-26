@@ -2,10 +2,12 @@ import { mkdirSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { z } from 'zod';
 import { CommandError, requireInScope, type Caller } from '../../core/commands/index';
-import { createIsolationProviders, registerIsolationCommands, type McpEndpoint } from '../../core/isolation/index';
+import { createIsolationProviders, createProfileHostTools, registerIsolationCommands, setHostTools, type McpEndpoint } from '../../core/isolation/index';
+import { readIsolationOptions } from '../../core/isolation/providerOptions';
 import type { AppMcpServer } from '../../core/mcp/index';
 import { PermissionError, type PermissionService } from '../../core/permissions/index';
 import { profilePaths, type ProfileService } from '../../core/profile/index';
+import { taskBaseDir } from '../../core/tasks/index';
 import {
   claudeArgsFromEnv,
   defaultSessionCwd,
@@ -40,10 +42,19 @@ export async function init(
   const { port } = await mcp.start();
   const appRoot = ctx.profile?.root ?? ctx.dataDir;
   const paths = profilePaths(appRoot, deps.profile.id);
+  // Every host-side program of this process (git, docker, srt, node, the system tools) is found through these tools, outside the directories the profile's agents may write.
+  const tools = createProfileHostTools({
+    options: () => readIsolationOptions(deps.profile.settings().isolation.options),
+    claudeConfigDir: () => profileLaunchSpec(deps.profile.settings(), paths, process.env).claudeConfigDir,
+    agentRoots: [taskBaseDir()],
+  });
+  const restoreTools = setHostTools(tools);
   const providers = createIsolationProviders({
     sessionFilesDir: join(ctx.dataDir, 'sessions'),
     dataDir: ctx.dataDir,
     options: () => deps.profile.settings().isolation.options,
+    hostTools: tools,
+    agentRoots: [taskBaseDir()],
   });
   const providerOf = () => providers.get(deps.profile.settings().isolation.provider);
   const sessions = new PtySessionService({
@@ -296,6 +307,7 @@ export async function init(
     dispose: async () => {
       for (const off of [...unregister, ...unsubscribers]) off();
       await sessions.shutdown();
+      restoreTools();
     },
   };
 }

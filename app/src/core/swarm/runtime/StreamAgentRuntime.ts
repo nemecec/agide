@@ -6,6 +6,7 @@ import type { StreamProcess, StreamSpawner, StreamSpawnRequest } from '../../ses
 import { SessionError, type SessionId, type SessionService } from '../../session/types';
 import type { NdjsonItem } from './ndjson';
 import { StreamChannel } from './StreamChannel';
+import { requireAbsoluteFile } from '../../isolation/hostTools';
 import { normalizeMessage } from './normalize';
 import { streamContribution } from './streamLaunch';
 import { RuntimeError, type AgentLaunchSpec, type AgentRuntime, type PermissionAnswer, type RuntimeEvent } from './types';
@@ -146,6 +147,7 @@ export class StreamAgentRuntime implements AgentRuntime, StreamSpawner {
     if (spec === undefined) throw new RuntimeError('spawn', `no launch spec for session ${sessionId}`);
     if (this.alive(sessionId) !== undefined) throw new RuntimeError('already_running', `session ${sessionId} runs`);
     const command = await request.environment.processCommand({ sessionId, cwd: request.session.cwd, args: request.args, env: request.env });
+    requireAbsoluteFile(command);
     // Its own process group, so `stop` can end the agent's children with it.
     const child = spawn(command.file, [...command.args], { cwd: command.cwd, env: { ...command.env }, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     await new Promise<void>((resolve, reject) => {

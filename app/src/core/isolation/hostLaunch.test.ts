@@ -1,9 +1,9 @@
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { findExecutable, hostLaunch, insideArgv, isWithinAny, locateHostBinary, neutralDirectory, trustedPath } from './hostLaunch';
-import { IsolationError } from './types';
+import { caseInsensitiveVolume } from './caseProbe';
+import { findExecutable, insideArgv, isLoaderVariable, isWithinAny, locateHostBinary, splitLoaderVariables, trustedPath } from './hostLaunch';
 
 let dir: string;
 beforeEach(() => {
@@ -47,6 +47,26 @@ describe('isWithinAny', () => {
   });
 });
 
+describe('isWithinAny and the letter case of a volume', () => {
+  it.skipIf(!caseInsensitiveVolume())('finds a path below an excluded directory that is spelled in another case, because the volume names one directory', () => {
+    mkdirSync(join(dir, 'CaseDir', 'bin'), { recursive: true });
+    expect(isWithinAny(join(dir, 'casedir', 'BIN'), [join(dir, 'CaseDir')]), 'the lower-case spelling of the excluded directory').toBe(true);
+    expect(isWithinAny(join(dir, 'CASEDIR'), [join(dir, 'casedir', 'bin')]), 'a parent is not inside its child').toBe(false);
+    expect(trustedPath(join(dir, 'CASEDIR', 'bin'), [join(dir, 'casedir')]), 'the PATH entry in another case is dropped').toBe('');
+  });
+
+  it.skipIf(!caseInsensitiveVolume())('finds a missing path below an existing excluded directory in another case', () => {
+    mkdirSync(join(dir, 'CaseDir'));
+    expect(isWithinAny(join(dir, 'casedir', 'later', 'bin'), [join(dir, 'CaseDir')]), 'a directory that does not exist yet').toBe(true);
+  });
+
+  it('keeps a directory whose name differs in more than its case', () => {
+    mkdirSync(join(dir, 'CaseDir'));
+    mkdirSync(join(dir, 'CaseDir2'));
+    expect(isWithinAny(join(dir, 'CaseDir2'), [join(dir, 'CaseDir')]), 'a sibling with the same prefix').toBe(false);
+  });
+});
+
 describe('findExecutable', () => {
   it('finds a name on the PATH it is given and takes a path with a directory part as it is', () => {
     const file = program(join(dir, 'bin'));
@@ -72,15 +92,17 @@ describe('locateHostBinary', () => {
   });
 });
 
-describe('hostLaunch', () => {
-  it('returns the absolute file and the trusted PATH of the app', () => {
-    const file = program(join(dir, 'bin'));
-    expect(hostLaunch('srt', ['bin', '', join(dir, 'bin'), '/usr/bin', '.'].join(':'), []), 'the file and the PATH without the relative and empty entries').toEqual({ file, path: `${join(dir, 'bin')}:/usr/bin` });
+describe('loader variables', () => {
+  it('names NODE_OPTIONS, NODE_PATH and every DYLD_ and LD_ variable and nothing else', () => {
+    const names = ['NODE_OPTIONS', 'NODE_PATH', 'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH', 'LD_PRELOAD', 'LD_LIBRARY_PATH'];
+    expect(names.map(isLoaderVariable), 'the loader variables').toEqual(names.map(() => true));
+    expect(['PATH', 'HOME', 'NODE_ENV', 'NODE_EXTRA_CA_CERTS', 'OLD_PRELOAD', 'LDFLAGS', 'XDYLD_X'].map(isLoaderVariable), 'names that only look like them').toEqual([false, false, false, false, false, false, false]);
   });
 
-  it('refuses when no trusted entry holds the program', () => {
-    program(join(dir, 'checkout'));
-    expect(() => hostLaunch('srt', `${join(dir, 'checkout')}:checkout:`, [join(dir, 'checkout')]), 'the only srt is in the checkout').toThrow(IsolationError);
+  it('splits an environment into the host-side part and the variables for inside the sandbox', () => {
+    const { host, inside } = splitLoaderVariables({ PATH: '/p', HOME: '/h', NODE_OPTIONS: '--require ./x.cjs', NODE_PATH: './lib', DYLD_INSERT_LIBRARIES: './x.dylib', LD_PRELOAD: './x.so' });
+    expect(host, 'no loader variable stays').toEqual({ PATH: '/p', HOME: '/h' });
+    expect(inside, 'the loader variables with their values').toEqual({ NODE_OPTIONS: '--require ./x.cjs', NODE_PATH: './lib', DYLD_INSERT_LIBRARIES: './x.dylib', LD_PRELOAD: './x.so' });
   });
 });
 
@@ -88,17 +110,6 @@ describe('insideArgv', () => {
   it('sets the PATH of the profile for the program, verbatim, and removes it when the profile has none', () => {
     expect(insideArgv('a::b:.', ['x', 'y']), 'a PATH with an empty and a relative entry is passed on unchanged').toEqual(['/usr/bin/env', 'PATH=a::b:.', 'x', 'y']);
     expect(insideArgv(undefined, ['x']), 'no PATH').toEqual(['/usr/bin/env', '-u', 'PATH', 'x']);
-  });
-});
-
-describe('neutralDirectory', () => {
-  it('is the empty system directory when there is one', () => {
-    expect(neutralDirectory(join(dir, 'root'), dir), 'the directory it is given as the system one').toBe(dir);
-  });
-
-  it('makes a private empty directory below the fallback root when the system has none', () => {
-    const made = neutralDirectory(join(dir, 'root'), join(dir, 'absent'));
-    expect([made, statSync(made).mode & 0o777], 'below the root, mode 0700').toEqual([join(dir, 'root', '.cwd'), 0o700]);
-    expect(neutralDirectory(join(dir, 'root'), join(dir, 'absent')), 'the same directory the second time').toBe(made);
+    expect(insideArgv('/p', ['x'], { NODE_OPTIONS: '--a b', LD_PRELOAD: 'l' }), 'the variables for the program come after the PATH and before the program').toEqual(['/usr/bin/env', 'PATH=/p', 'NODE_OPTIONS=--a b', 'LD_PRELOAD=l', 'x']);
   });
 });

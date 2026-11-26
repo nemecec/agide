@@ -4,7 +4,10 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CommandRegistry } from '../commands/CommandRegistry';
 import type { ProfileService, ProfileSettings } from '../profile/types';
-import { createIsolationProviders, registerIsolationCommands } from './defaultProviders';
+import { buildIsolatingProvider, createIsolationProviders, registerIsolationCommands } from './defaultProviders';
+import { HostTools } from './hostTools';
+import type { ContainerProvider } from './ContainerProvider';
+import type { SrtProvider } from './SrtProvider';
 import type { IsolationStatus } from './statusTypes';
 
 let dir: string;
@@ -87,5 +90,21 @@ describe('isolation_set_provider', () => {
   it('returns to local and refuses an unknown provider', async () => {
     expect(await invoke('isolation_set_provider', { provider: 'local' }), 'local accepted').toEqual({ ok: true, value: { provider: 'local' } });
     expect((await invoke('isolation_set_provider', { provider: 'openshell' })).ok, 'openshell is not offered').toBe(false);
+  });
+});
+
+describe('buildIsolatingProvider', () => {
+  it('hands the host tools and the agent roots of the profile process to the srt and the container provider', () => {
+    const hostTools = new HostTools({ appPath: '/usr/bin' });
+    const setup = { sessionFilesDir: join(dir, 'sessions'), dataDir: dir, options: () => undefined, hostTools, agentRoots: [join(dir, 'agents')] };
+    for (const id of ['srt', 'container'] as const) {
+      const provider = buildIsolatingProvider(id, setup, {}) as SrtProvider | ContainerProvider;
+      expect([provider.options.hostTools, provider.options.agentRoots], `${id} gets the tools and the roots`).toEqual([hostTools, [join(dir, 'agents')]]);
+    }
+  });
+
+  it('leaves them out when the setup has none, so each provider excludes what it lets an agent write itself', () => {
+    const provider = buildIsolatingProvider('srt', { sessionFilesDir: join(dir, 'sessions'), dataDir: dir, options: () => undefined }, {}) as SrtProvider;
+    expect([provider.options.hostTools, provider.options.agentRoots], 'no tools and no roots').toEqual([undefined, undefined]);
   });
 });

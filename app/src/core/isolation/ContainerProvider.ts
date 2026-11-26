@@ -1,12 +1,11 @@
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { promisify } from 'node:util';
+import { join } from 'node:path';
+import { agentWritableDirectories } from './agentWritable';
 import { buildDockerRunArgs, containerEnvNames, containerName, CONTAINER_RUN_FLAGS, type Mount } from './dockerArgs';
 import { HostEnvironment, signalProcess } from './HostEnvironment';
+import { hostDirectory, HostTools } from './hostTools';
 import { launchEnv } from './launchEnv';
-import { findExecutable } from './SrtProvider';
 import { SessionFiles } from './SessionFiles';
 import type { SessionId } from '../session/types';
 import {
@@ -21,8 +20,6 @@ import {
   type PtyCommand,
   type ToolLaunch,
 } from './types';
-
-const run = promisify(execFile);
 
 /** Inputs of the container provider, from probe I2 (`notes/probes-m3-isolation.md`). */
 export interface ContainerProviderOptions {
@@ -42,6 +39,12 @@ export interface ContainerProviderOptions {
   readonly hostAlias?: string;
   /** Fingerprint of the owning profile process; labels its containers so start-up cleanup removes only those. */
   readonly ownerId?: string;
+  /** The PATH the docker client is looked up on, outside the container: the app's own, never the profile's. Defaults to `process.env.PATH`. Ignored when `hostTools` is given. */
+  readonly appPath?: string;
+  /** Finds the docker client. Defaults to one over `appPath` that excludes what the containers of this provider may write. */
+  readonly hostTools?: HostTools;
+  /** Directories below which agents get their workspaces (the task base); no program is looked up there. */
+  readonly agentRoots?: readonly string[];
 }
 
 export const DEFAULT_HOST_ALIAS = 'host.docker.internal';
@@ -72,21 +75,31 @@ export class ContainerProvider implements IsolationProvider {
     inspectorHook: 'unavailable',
   };
   private readonly environments = new Map<string, ContainerEnvironment>();
+  /** The workspaces of the environments prepared so far: a container writes them, so no program is looked up there. */
+  private readonly known = new Set<string>();
+  private readonly tools: HostTools;
 
-  constructor(readonly options: ContainerProviderOptions) {}
+  constructor(readonly options: ContainerProviderOptions) {
+    this.tools = options.hostTools ?? new HostTools({ ...(options.appPath === undefined ? {} : { appPath: options.appPath }), excluded: () => this.writable() });
+  }
+
+  /** Everything the containers of this provider may write, for the lookup of host-side programs. */
+  private writable(): string[] {
+    return agentWritableDirectories({ writeDirs: [...this.known], claudeConfigDir: this.options.claudeConfigDir, agentRoots: this.options.agentRoots });
+  }
 
   async check(): Promise<ProviderCheck> {
     const { dockerBinary, image } = this.options;
-    if (findExecutable(dockerBinary) === undefined) {
+    if (this.tools.find(dockerBinary, this.writable()) === undefined) {
       return { ok: false, reason: 'Docker is not installed', fix: 'Install Docker Desktop, or enter the docker path in the field of this provider.' };
     }
     try {
-      await run(dockerBinary, ['version', '--format', '{{.Server.Version}}'], { timeout: DOCKER_TIMEOUT_MS });
+      await this.tools.run(dockerBinary, ['version', '--format', '{{.Server.Version}}'], { env: process.env, timeout: DOCKER_TIMEOUT_MS, excluded: this.writable() });
     } catch {
       return { ok: false, reason: 'Docker is installed but its engine is not running', fix: 'Start Docker Desktop and check again.' };
     }
     try {
-      await run(dockerBinary, ['image', 'inspect', '--format', '{{.Id}}', image], { timeout: DOCKER_TIMEOUT_MS });
+      await this.tools.run(dockerBinary, ['image', 'inspect', '--format', '{{.Id}}', image], { env: process.env, timeout: DOCKER_TIMEOUT_MS, excluded: this.writable() });
     } catch {
       return { ok: false, reason: `The image ${image} is not present locally`, fix: 'Build or pull the image yourself. The app never pulls images.' };
     }
@@ -98,9 +111,10 @@ export class ContainerProvider implements IsolationProvider {
     const { dockerBinary, ownerId } = this.options;
     if (ownerId === undefined) return;
     try {
-      const { stdout } = await run(dockerBinary, ['ps', '-aq', '--filter', `label=${CONTAINER_RUN_FLAGS.ownerLabel}=${ownerId}`], { timeout: DOCKER_TIMEOUT_MS });
+      const call = { env: process.env, excluded: this.writable() };
+      const { stdout } = await this.tools.run(dockerBinary, ['ps', '-aq', '--filter', `label=${CONTAINER_RUN_FLAGS.ownerLabel}=${ownerId}`], { ...call, timeout: DOCKER_TIMEOUT_MS });
       const ids = stdout.split('\n').filter(Boolean);
-      if (ids.length > 0) await run(dockerBinary, ['rm', '-f', ...ids], { timeout: DOCKER_TIMEOUT_MS * 2 });
+      if (ids.length > 0) await this.tools.run(dockerBinary, ['rm', '-f', ...ids], { ...call, timeout: DOCKER_TIMEOUT_MS * 2 });
     } catch {
       // No Docker, or the engine is down: nothing to clean.
     }
@@ -108,10 +122,11 @@ export class ContainerProvider implements IsolationProvider {
 
   prepare(spec: EnvironmentSpec): Promise<AgentEnvironment> {
     const id = ['container', spec.key.profileId, spec.key.sessionId].filter(Boolean).join(':');
+    if (spec.workspace.mode === 'bind') this.known.add(spec.workspace.hostPath);
     let environment = this.environments.get(id);
     if (environment) environment.spec = spec;
     else {
-      environment = new ContainerEnvironment(id, spec, new SessionFiles(this.options.sessionFilesDir), this.options);
+      environment = new ContainerEnvironment(id, spec, new SessionFiles(this.options.sessionFilesDir), this.options, this.tools, () => this.writable());
       this.environments.set(id, environment);
     }
     return Promise.resolve(environment);
@@ -126,8 +141,16 @@ class ContainerEnvironment extends HostEnvironment {
     spec: EnvironmentSpec,
     files: SessionFiles,
     private readonly options: ContainerProviderOptions,
+    private readonly tools: HostTools,
+    private readonly writable: () => readonly string[],
   ) {
     super(id, spec, files);
+  }
+
+  /** The docker client as an absolute file, with the trusted PATH and a working directory that holds nothing: `docker run -w` sets the directory inside the container. */
+  private dockerLaunch(directories: readonly string[], env: Readonly<Record<string, string>>): { readonly file: string; readonly cwd: string; readonly env: Record<string, string> } {
+    const { file, path } = this.tools.launch(this.options.dockerBinary, [...this.writable(), ...directories], 'the docker client');
+    return { file, cwd: hostDirectory(), env: { ...env, PATH: path } };
   }
 
   protected override appHost(): string {
@@ -174,7 +197,8 @@ class ContainerEnvironment extends HostEnvironment {
       claudeArgs: launch.args,
       tty,
     });
-    return { file: this.options.dockerBinary, args, cwd: launch.cwd, env };
+    const host = this.dockerLaunch(mounts.filter((mount) => !mount.readOnly).map((mount) => mount.hostPath), env);
+    return { ...host, args };
   }
 
   /** `docker run -i` of the program with the checkout and `writeDirs` mounted and no network unless the launch asks for it. */
@@ -198,14 +222,14 @@ class ContainerEnvironment extends HostEnvironment {
       tty: false,
     });
     if (launch.network === 'none') args.splice(1, 0, '--network', 'none');
-    return { file: this.options.dockerBinary, args, cwd: launch.cwd, env: { ...launch.env } };
+    return { ...this.dockerLaunch(mounts.map((mount) => mount.hostPath), launch.env), args };
   }
 
   /** SIGTERM to the docker client is forwarded and ends the session cleanly; SIGKILL of the client leaves the container, so `docker kill` goes first. */
   override async terminate(sessionId: SessionId, signal: 'SIGTERM' | 'SIGKILL'): Promise<void> {
     const pid = this.pids.get(sessionId);
     if (signal === 'SIGKILL') {
-      await run(this.options.dockerBinary, ['kill', containerName(sessionId)], { timeout: DOCKER_TIMEOUT_MS }).catch(() => undefined);
+      await this.tools.run(this.options.dockerBinary, ['kill', containerName(sessionId)], { env: process.env, timeout: DOCKER_TIMEOUT_MS, excluded: this.writable() }).catch(() => undefined);
     }
     if (pid !== undefined) signalProcess(pid, signal);
   }

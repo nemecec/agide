@@ -164,6 +164,26 @@ describe('the launcher shell of a check, on any system', () => {
     expect([assignment.code, assignment.stderr], 'a first word with = is refused with the line of the toolchain pattern, and the rest never runs').toEqual([127, 'check-launcher: FOO=bar: command not found\n']);
   });
 
+  it('refuses a first word that is . or .. or names a directory like a word with =: 127 and the line of the toolchain pattern, never 126', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'launcher-dir-'));
+    try {
+      mkdirSync(join(directory, 'sub'));
+      mkdirSync(join(directory, 'test'));
+      for (const word of ['.', '..', './sub', 'sub/', directory]) {
+        const refused = await runCapturing(launcherArgv([word], { directory }));
+        expect([refused.code, refused.stderr], `the word ${word} is refused`).toEqual([127, `check-launcher: ${word}: command not found\n`]);
+      }
+      const plain = await runCapturing(launcherArgv(['.']));
+      expect(plain.code, 'the plain launcher without a directory refuses it as well').toBe(127);
+      const program = join(directory, 'prog');
+      writeFileSync(program, '#!/bin/sh\nexit 3\n', { mode: 0o755 });
+      expect((await run(launcherArgv(['./prog'], { directory }))).code, 'an executable file with a directory part runs').toBe(3);
+      expect((await run(launcherArgv(['test', '-d', 'sub'], { directory }))).code, 'a program found on the PATH runs although a directory of its name is in the checkout').toBe(0);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('changes into the directory it is given before it runs the program, and fails when it cannot', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'launcher-cd-'));
     try {
