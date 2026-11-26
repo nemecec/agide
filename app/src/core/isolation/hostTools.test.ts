@@ -146,7 +146,7 @@ describe('HostTools.require', () => {
 
   it('refuses a program that exists only where an agent may write, with a reason that names no path and the path in the detail', () => {
     const planted = program(join(dir, 'agent', 'bin'), 'srt');
-    const tools = new HostTools({ appPath: join(dir, 'agent', 'bin'), excluded: () => [join(dir, 'agent')] });
+    const tools = new HostTools({ appPath: join(dir, 'agent', 'bin'), excluded: () => [join(dir, 'agent')], fixedDirectories: [] });
     let error: unknown;
     try {
       tools.require('srt', [], 'the sandbox runtime');
@@ -162,7 +162,7 @@ describe('HostTools.require', () => {
   it('refuseHidden throws for a hidden program and is silent for a missing one and for one that a trusted directory holds', () => {
     program(join(dir, 'agent'), 'node');
     program(join(dir, 'safe'), 'trusted');
-    const tools = new HostTools({ appPath: `${join(dir, 'agent')}:${join(dir, 'safe')}`, excluded: () => [join(dir, 'agent')] });
+    const tools = new HostTools({ appPath: `${join(dir, 'agent')}:${join(dir, 'safe')}`, excluded: () => [join(dir, 'agent')], fixedDirectories: [] });
     expect(() => tools.refuseHidden('node'), 'only in the excluded directory').toThrow('exists only in a directory that an agent may write');
     expect(() => tools.refuseHidden('host-tools-missing'), 'not anywhere').not.toThrow();
     expect(() => tools.refuseHidden('trusted'), 'in a trusted directory').not.toThrow();
