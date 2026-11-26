@@ -132,3 +132,101 @@ The rule under test: reject an absolute or lexically escaping path, resolve the 
 - Memory and CPU in the Electron main process at 20000 files (P51 ran as Node; P50 showed the same event behaviour in the main process).
 - How editors other than the patterns of P50 save (VS Code, vim with `backupcopy`, JetBrains safe write, Obsidian).
 - FTS5 cost and database size at 20000 notes or for indexing mounted files.
+
+## P57 adaptive watching (2026-11-26, run `decisions-amend`)
+
+The user asked for near real-time updates of small mounts and less frequent ones above about 1,000 files (0044 section 4.8). P57 measures what the two tiers cost and how fast a change arrives, on the same host as P50 to P53 (Apple silicon, 8 cores, APFS; load average about 7 to 17 during the runs), Node 22.22.3 twice and Electron 45.3.3 as Node (`ELECTRON_RUN_AS_NODE=1`, its Node 24.22.3) once. No model was started. The script and its working directories lived under `/tmp/agide-amend/` (the trees were removed by the script; the directory itself is left for the coordinator to remove, since the permission system denied the removal); the script is not in `probes/` because this run could add files only under `docs/measurements/`, so it is reproduced below. The evidence files (`p57_run1.json`, `p57_run2.json`, `p57_electron.json`) were not kept; the numbers below are copied from them.
+
+Method, for trees of 200, 1,000, 5,000 and 20,000 files in directories of 100 files: the entry count by a recursive `readdir` (5 runs, median); a full walk, `readdir` with types and `lstat` of every entry, with its CPU time (5 runs, median); the re-list of one directory of 100 entries (20 runs, median); 40 single appends 150 ms apart under one recursive `fs.watch`, the time from the write to the first event naming the file; and a burst of 100 new files in a new directory, the first and the last event after the burst started.
+
+| Entries | Count | Full walk | Walk CPU | Re-list of 100 | Single change: median, 95th percentile, max | Burst of 100: first, last event |
+|---|---|---|---|---|---|---|
+| 202 | 1.2 to 1.6 ms | 0.7 to 0.9 ms | 1.0 to 1.4 ms | 0.2 to 0.3 ms | 13 ms; 15 to 19 ms; 16 to 160 ms | 9 to 30 ms; 54 to 59 ms |
+| 1,010 | 3.2 to 4.2 ms | 2.0 to 2.8 ms | 2.0 to 3.7 ms | 0.2 ms | 13 ms; 15 to 19 ms; 17 to 23 ms | 7 to 11 ms; 56 to 57 ms |
+| 5,050 | 16 to 21 ms | 14 to 15 ms | 14 to 16 ms | 0.2 to 0.3 ms | 12 to 14 ms; 15 to 16 ms; 16 to 19 ms | 10 to 29 ms; 56 to 60 ms |
+| 20,200 | 71 to 79 ms | 52 to 57 ms | 52 to 57 ms | 0.2 ms | 12 to 14 ms; 13 to 23 ms; 15 to 26 ms | 7 to 31 ms; 54 to 65 ms |
+
+Each range spans the three runs. No run lost an event: every single change and every file of each burst was named (101 events per burst, the directory and its files). The 160 ms maximum was one change in one Node run at 202 entries.
+
+### Design effects
+
+1. The latency of an event does not depend on the size of the mount; the walk and the count grow with it. The tiers of 0044 section 4.8 therefore change the walk and reconcile intervals and the batching, not the watcher.
+2. Up to about 1,000 entries a full walk costs a few milliseconds, so a walk every 30 s (about 0.01 % of a core) can stand in for a reconcile of the cached directories and finds lost events in directories the user never opened.
+3. A 30 ms trailing debounce gathers a burst (events within about 55 to 65 ms) into few batches and shows a single change about 45 to 60 ms after it happened; 150 ms as the latest run bounds the delay under a stream of events.
+4. Above 1,000 entries a walk costs tens of milliseconds (about 55 ms at 20,000), so the relaxed tier walks every 30 minutes and re-lists only the cached directories every 5 minutes, with a 250 ms debounce and at most 2 s per batch.
+
+### Not verified
+
+- The tiers in the Electron main process with a renderer attached; a busy main process.
+- Event loss under the bursts of P51 at the new debounce of 30 ms (P51 used 100 ms; the loss comes from FSEvents, not the debounce).
+- Network and cloud volumes, as for P50 to P53.
+
+<details>
+<summary>Script <code>p57_watch_tiers.mjs</code> (run as <code>node p57_watch_tiers.mjs &lt;empty directory&gt;</code>)</summary>
+
+```js
+// P57: costs and latencies that decide the adaptive mount watching (node only, no model).
+// Usage: node p57_watch_tiers.mjs <workdir>
+import { mkdirSync, writeFileSync, appendFileSync, readdirSync, lstatSync, rmSync, watch, realpathSync } from 'node:fs';
+import { join } from 'node:path';
+import { performance } from 'node:perf_hooks';
+
+const work = realpathSync(process.argv[2]);
+const sizes = [200, 1000, 5000, 20000];
+const PER_DIR = 100;
+const median = (xs) => { const s = [...xs].sort((a, b) => a - b); return s[Math.floor(s.length / 2)]; };
+const pct = (xs, p) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(s.length * p))]; };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const r2 = (x) => Math.round(x * 100) / 100;
+
+function build(root, n) {
+  mkdirSync(root, { recursive: true });
+  const dirs = [];
+  for (let d = 0; d < Math.ceil(n / PER_DIR); d++) {
+    const dir = join(root, `d${d}`); mkdirSync(dir); dirs.push(dir);
+    for (let f = 0; f < PER_DIR && d * PER_DIR + f < n; f++) writeFileSync(join(dir, `f${f}.md`), `# note ${d}-${f}\n`);
+  }
+  return dirs;
+}
+function listDir(dir) { const out = []; for (const e of readdirSync(dir, { withFileTypes: true })) { const s = lstatSync(join(dir, e.name)); out.push([e.name, s.size, s.mtimeMs]); } return out; }
+function reconcile(root) { let entries = 0; const stack = ['']; while (stack.length) { const rel = stack.pop(); const dir = join(root, rel); for (const e of readdirSync(dir, { withFileTypes: true })) { lstatSync(join(dir, e.name)); entries++; if (e.isDirectory()) stack.push(join(rel, e.name)); } } return entries; }
+function count(root) { return readdirSync(root, { recursive: true }).length; }
+
+const report = { node: process.version, platform: process.platform, tiers: [] };
+for (const n of sizes) {
+  const root = join(work, `m${n}`);
+  const dirs = build(root, n);
+  const t = { files: n, dirs: dirs.length };
+  // entry count at mount time
+  const c = []; for (let i = 0; i < 5; i++) { const a = performance.now(); t.entries = count(root); c.push(performance.now() - a); }
+  t.countMs = r2(median(c));
+  // full reconcile (readdir with types + lstat per entry, every directory)
+  const rc = []; const cpu = [];
+  for (let i = 0; i < 5; i++) { const u = process.cpuUsage(); const a = performance.now(); reconcile(root); rc.push(performance.now() - a); const d = process.cpuUsage(u); cpu.push((d.user + d.system) / 1000); }
+  t.reconcileMs = r2(median(rc)); t.reconcileCpuMs = r2(median(cpu));
+  // one directory re-list (100 entries)
+  const rl = []; for (let i = 0; i < 20; i++) { const a = performance.now(); listDir(dirs[0]); rl.push(performance.now() - a); }
+  t.relistDirMs = r2(median(rl));
+  // event latency for single appends, 40 changes 150 ms apart
+  const seen = new Map(); const w = watch(root, { recursive: true }, (_type, name) => { if (name && !seen.has(name)) seen.set(name, performance.now()); });
+  await sleep(300);
+  const lat = []; let lost = 0;
+  for (let i = 0; i < 40; i++) {
+    const dir = dirs[(i * 7) % dirs.length]; const f = `f${(i * 13) % PER_DIR}.md`; const rel = join(dir.slice(root.length + 1), f);
+    seen.delete(rel); const a = performance.now(); appendFileSync(join(dir, f), `line ${i}\n`);
+    await sleep(150); const b = seen.get(rel); if (b === undefined) lost++; else lat.push(b - a);
+  }
+  t.singleChangeMs = { median: r2(median(lat)), p95: r2(pct(lat, 0.95)), max: r2(Math.max(...lat)), lost };
+  // a burst of 100 new files in one directory: first and last event after the burst started
+  seen.clear(); const bdir = join(root, 'burst'); const a0 = performance.now(); mkdirSync(bdir);
+  for (let i = 0; i < 100; i++) writeFileSync(join(bdir, `b${i}.md`), 'x');
+  await sleep(1500); const times = [...seen.values()].map((v) => v - a0);
+  t.burst100 = { events: times.length, firstMs: r2(Math.min(...times)), lastMs: r2(Math.max(...times)) };
+  w.close();
+  rmSync(root, { recursive: true, force: true });
+  report.tiers.push(t);
+}
+console.log(JSON.stringify(report, null, 2));
+```
+
+</details>

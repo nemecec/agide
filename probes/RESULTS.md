@@ -305,3 +305,20 @@ Differences from the documentation: hooks and the sandbox (above), the 30 s idle
 Not run: the 600 s default hook timeout to its end, holds beyond 330 s, `SessionEnd` in `-p`, HTTPS and non-loopback receivers, redirects, Linux and container providers, an entry `timeout` above 600000, an SSE reply with progress in the TUI, whether the CLI closes open requests on exit.
 
 New scripts: `p16_slow_mcp.mjs`, `p16_mcp_timeout.mjs`, `p16_mcp_timeout_pty.py`, `p45_hook_server.mjs`, `p45_http_hook.mjs`, `p45_http_hook_pty.py`.
+
+## Adaptive mount watching probe P57 (2026-11-26)
+
+macOS (APFS), Node 22.22.3 twice and Electron 45.3.3 as Node once. Details and the script in `notes/probes-m6-notes.md` (section P57); the evidence files were not kept. No model was started; the script and its directories lived under `/tmp/agide-amend/`; the script removed its trees, and the directory is left for the coordinator to remove (the permission system denied the removal). Run by `decisions-amend` for the adaptive watcher of 0044 section 4.8.
+
+| Probe | Result | Short finding |
+|---|---|---|
+| P57 watch tiers | pass | A single change reaches a recursive watcher after about 13 ms (median; 95th percentile 13 to 23 ms) at every size from 200 to 20,000 files; a burst of 100 new files is named within 54 to 65 ms. A full walk (`readdir` with types and `lstat`) costs 2 to 3 ms at 1,000 entries and 52 to 57 ms at 20,000; the entry count 3 to 4 ms and 71 to 79 ms; the re-list of one directory of 100 about 0.2 ms. No event was lost. |
+
+### Design effects
+
+1. Mounts of up to about 1,000 entries: a 30 ms debounce, at most 150 ms per batch, and a full walk every 30 s.
+2. Larger mounts: a 250 ms debounce, at most 2 s per batch, a re-list of the cached directories every 5 minutes and a full walk every 30 minutes.
+
+Not run: the Electron main process with a renderer, network and cloud volumes, bursts large enough to lose events at the 30 ms debounce.
+
+New scripts: none in `probes/` (the script is in the notes).
