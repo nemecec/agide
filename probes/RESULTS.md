@@ -243,3 +243,65 @@ srt 0.0.83 (`srt --version`), macOS, Node 22.22.3 and Electron 45.3.3 as Node, n
 Not run: pip, go, git over HTTPS, Docker, uv with a header option, `credentials.sigv4`, a real Electron main process, Linux and Windows, real remote registries (see the notes).
 
 New scripts: `p_cred_lib.mjs`, `p44_calibrate.mjs`, `p44_tools.mjs`, `p44_safety.mjs`, `p44_embed.mjs`.
+
+## Milestone 6 notes and mounts probes P50 to P53 (2026-11-26)
+
+macOS (APFS, case-insensitive), Node 22.22.3 and Electron 45.3.3 (as Node for every probe, as a main process for P50). Details in `notes/probes-m6-notes.md`; evidence in `probes/out/p50_*` to `p53_*`. No model was started; directories under `/tmp/agide-notes-design/`, removed by each probe. P45 to P49 are left to the R21 design run of the same day.
+
+| Probe | Result | Short finding |
+|---|---|---|
+| P50 watch events | pass with limits | One recursive `fs.watch` reports create, change, atomic saves (the temporary name too), renames (old and new name, unpaired), moves in and out, `chmod`, `utimes`, hidden files and every file of a 300-file burst, about 10 ms after the call. The event type is unusable (`rename` for appends in Node; `change` or `rename` in the Electron main process). Links are not followed: changes behind a link to the outside give no event. A moved or removed root gives one event with the root's own name; a directory recreated at the path is watched again. A watcher on a single file goes silent after the first atomic save; a watcher on its parent keeps working. |
+| P51 watch scale | pass with limits | At 20000 files in 200 directories: full listing 26 to 44 ms, `lstat` of all 57 to 86 ms, watcher setup about 1 ms, no extra descriptors or memory, no idle CPU. A burst of 2000 appends to 2000 files delivered between 1910 and 2000 events (up to about 4.5 % lost in Electron as Node); 5000 new files lost nothing. Review reruns: 2000, 2000 (Node) and 1997, 2000 (Electron as Node). |
+| P52 paths | pass | `realpathSync.native` gives the real root (`/tmp` is `/private/tmp`) and the spelling on disk; containment of the real path refuses links out, chains, dangling links and `/dev/zero`; FIFOs need a type check; hard links cannot be told apart except by `nlink`. `O_NOFOLLOW` checks only the last component; an open followed by `fstat`, a second resolve and a device and inode comparison catches a parent swapped for a link (a review check confirmed it with the swap between the resolve and the open). A temporary file with `O_EXCL` and `O_NOFOLLOW` plus `rename` replaces a link in the last component and leaves its target unchanged; a parent swapped for a link before the `rename` sends the write outside (review check). Reading 50 MB takes about 0.1 s. |
+| P53 FTS5 | pass | `node:sqlite` in Node 22 and Electron 45 has FTS5 with `unicode61` (diacritics folded: `ohtu` finds `õhtu`) and `trigram`; 2000 notes of 2.3 KB index in about 0.1 s and queries with `bm25` and `snippet` take under 7 ms; an unbalanced quote in user text is a syntax error, quoting each word avoids it. |
+
+### Design effects
+
+1. One recursive watcher per mounted directory in the main process; ignore the event type; debounce, list the named parent directories again and reconcile on focus, wake and a timer, since bursts lose events.
+2. Watch a mounted file or a file note through its parent directory; check the root's device and inode after a root event.
+3. Read through the checked open, write through a temporary file and `rename`, key paths by `realpathSync.native`.
+4. Search notes with FTS5 `unicode61 remove_diacritics 2` and quote user text word by word.
+
+Not run: network and cloud volumes, the Electron main process at 20000 files, other editors' save patterns, FTS at 20000 notes.
+
+New scripts: `p_notes_lib.mjs`, `p50_watch_events.mjs`, `p51_watch_scale.mjs`, `p52_paths.mjs`, `p53_sqlite_fts.mjs`.
+
+## Check follow-up probes P54 to P56 (2026-11-26)
+
+macOS (APFS), Node 22.22.3, vitest 5.1.0 (the app's own), cargo 1.99.0, cargo-nextest 0.9.149, Gradle 9.5.1 offline with JUnit Jupiter 6.1.3. Details in `notes/probes-checks-design.md`; evidence in `probes/out/p54_*` to `p56_*`. No model was started and nothing was downloaded (fast-xml-parser came from the local npm cache); directories under `/tmp/agide-checks-design/`, left for the coordinator to remove (the permission system denied the removal). P45 to P49 stay with the R21 run. An independent review reran P55 on the same day with the same outcomes.
+
+| Probe | Result | Short finding |
+|---|---|---|
+| P54 report samples | pass with limits | Real JUnit from vitest (one suite per file, `<describe> > <test>` names, `todo` as skipped, BEL dropped from names), nextest (one suite per test binary, a thread id in each failure message, ignored tests absent from the report) and Gradle (one file per class, every exception as `<failure>`, BEL as U+FFFD, `hostname` in each suite); real libtest text from `cargo test`. A failing test's printed `test <name> ... ok` lands in its `failures:` section and a line reader counts it; with `--nocapture` it lands inside the list. pytest, Maven surefire and jest were not available offline: their formats are from the documentation. |
+| P55 XML parsers | pass for saxes with limits around it | saxes 6.0.0 (in the lockfile through jsdom) expanded no entity, read no external file, streamed 200 MB in 1.8 s at 84 MB, and has no depth or attribute limit of its own. fast-xml-parser 5.11.2 left entities as literal text, refused the external entity and deep nesting, and took about 1.8 GB for 200 MB (a tree from one string). The prototype subset reader refused every hostile case and also a valid raw `>` in an attribute. |
+| P56 zero tests | pass | Exit 0 with nothing executed: cargo test (no tests, a filter that matches nothing, every test ignored), vitest with a filter that matches nothing or every test skipped, Gradle without test sources or with every test disabled. Non-zero: vitest without test files (1), nextest (4), Gradle with test sources and no tests (`failOnNoDiscoveredTests`) or an unmatched `--tests` filter (1). |
+
+### Design effects
+
+1. Count executed tests as passed plus failed; a check that exits 0 with none is a case to catch, from reports or libtest blocks only.
+2. Read libtest only as blocks (`running N tests`, N case lines, the result line) and refuse a block whose counts disagree.
+3. Key a test by suite and name; leave messages, times and thread ids out.
+4. Parse JUnit with saxes behind a handler with byte, depth, attribute and case limits that refuses a DOCTYPE.
+
+Not run: pytest, Maven surefire and jest; saxes in the Electron main process; report reading under `srt`.
+
+New scripts: `p_checks_lib.mjs`, `p54_report_samples.mjs`, `p55_xml_parsers.mjs`, `p56_zero_tests.mjs`.
+
+## Milestone 6 R21 probes P16 and P45 (2026-11-26)
+
+`claude --version` reports 2.1.332. Haiku, empty temporary directories under `/tmp/agide-r21-probes/`, `--setting-sources user`, `--strict-mcp-config`. Details, tables and the design reading are in `notes/probes-m6-r21.md`; evidence in `probes/out/p16_mcp_report.json`, `p16_pty_report_*.json`, `p45_report.json`, `p45_pty_report_*.json` and the per-case server logs. P16 was open since milestone 3; the old `p16_srt.py` is an isolation probe whose file name predates the ids.
+
+| Probe | Result | Short finding |
+|---|---|---|
+| P16 MCP call duration, `-p` | pass | Without an entry `timeout` a silent JSON reply dies at 60 s (`The operation timed out.`); with `timeout` 600000 or `MCP_TOOL_TIMEOUT=600000` calls of 65, 130 and 310 s completed. An SSE reply that sends its first byte at once is outside the 60 s timer and lives until the idle window of 300 s; progress notifications every 60 s kept a 330 s call alive. The entry `timeout` is a hard wall-clock limit (aborted at 100 s with progress every 20 s). A `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` of 15000 ms aborted at 30 s. The model sees the error text of each case. |
+| P16 what the server sees | pass | The request carries `_meta.progressToken` (the request id) and `_meta["claudecode/toolUseId"]`. An interrupt (control request in `-p`, Esc in the TUI) and a wall-clock timeout send `notifications/cancelled`; the CLI does not close the HTTP request on interrupt, wall-clock or idle abort. The idle abort sends nothing. The 60 s request timer closes the connection with no notification. |
+| P16 PTY | pass | Same 60 s abort and idle abort. A main-conversation call still running after 120 s moves to a background task: `PostToolUse` at 120 s with a "moved to the background" result, `Stop`, then a `<task-notification>` turn with the answer. `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0` keeps the call in the foreground (150 s). `-p` never backgrounds. Esc ends the call with the standard rejection text and no hook. A line feed in typed text and a bracketed paste both keep a two-line prompt in one submission. |
+| P45 http hook payloads and answers | pass | `PermissionRequest`, `PreToolUse`, `PostToolUse`, `Notification`, `Stop`, `UserPromptSubmit` and (TUI) `SessionEnd` post the command hook's JSON; allow and deny work through `hookSpecificOutput` for `PermissionRequest` (with `message`, `interrupt`) and `PreToolUse`; `additionalContext` in a `UserPromptSubmit` reply reaches the model in both paths. A `SessionStart` http hook posted nothing. |
+| P45 failure and holds | pass | Receiver down, 500, non-JSON body, schema-invalid body and a slow receiver are non-blocking errors (the call goes on to the normal permission flow); `onFailure: "block"` blocks, and denies a `PermissionRequest`. A request was held for 330 s in `-p` and 150 s in the TUI. Esc in the TUI closes the held request; Enter does not (the request stays open and a late answer is ignored); the hook `timeout` closes it and the dialog stays; an empty reply leaves the dialog in charge. |
+| P45 headers and sandbox | partial | `Authorization: Bearer $VAR` with `allowedEnvVars` works (unlisted variables become empty), no argument list held the value, a literal value in a settings file passed by path works, and the agent's Bash command can print the variable. Under srt the hook needs `allowLocalBinding`; under the CLI's own sandbox setting the hook's request is gated by the sandbox network rules (403 and a `SandboxNetworkAccess` request), contrary to the documentation that hooks run outside the sandbox. One run per case. |
+
+Differences from the documentation: hooks and the sandbox (above), the 30 s idle floor for a 15 s setting, the notification and connection behavior on abort (above), and the silent `SessionStart` http hook. The documentation matches on the 60 s request timer, the wall-clock limit that progress does not extend, the 2 minute background move, header interpolation and the non-blocking failure rules.
+
+Not run: the 600 s default hook timeout to its end, holds beyond 330 s, `SessionEnd` in `-p`, HTTPS and non-loopback receivers, redirects, Linux and container providers, an entry `timeout` above 600000, an SSE reply with progress in the TUI, whether the CLI closes open requests on exit.
+
+New scripts: `p16_slow_mcp.mjs`, `p16_mcp_timeout.mjs`, `p16_mcp_timeout_pty.py`, `p45_hook_server.mjs`, `p45_http_hook.mjs`, `p45_http_hook_pty.py`.

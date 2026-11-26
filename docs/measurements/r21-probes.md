@@ -1,0 +1,15 @@
+# r21-probes
+
+Start: 2026-11-26 12:55 UTC (date -u). End: 2026-11-26 14:05 UTC (date -u). Wall time about 70 minutes.
+
+Built six probe scripts (`probes/p16_slow_mcp.mjs`, `p16_mcp_timeout.mjs`, `p16_mcp_timeout_pty.py` for P16; `p45_hook_server.mjs`, `p45_http_hook.mjs`, `p45_http_hook_pty.py` for the http hook) and ran them against the real `claude` 2.1.332 on Haiku, at most three processes at a time. Wrote `notes/probes-m6-r21.md`, appended a section to `probes/RESULTS.md` and added one row to `docs/README.md`. Read the hooks, MCP and sandboxing documentation with WebFetch; the hooks page is longer than one fetch, so the Notification and Stop sections were not read and the measured payloads stand in for them.
+
+What took time: the long waits (the 310 s, 330 s and 330 s hold cases, the PTY background move at 120 s) and three harness faults that cost reruns: the tool-result lookup picked the `ToolSearch` result instead of the slow tool's result; a fresh `/tmp` directory raised the folder-trust dialog and the first PTY helper pressed the key before the dialog settled (the new scripts carry the settled-screen helper of `p16_srt.py`); the `-p` host answered the `can_use_tool` request before the `PermissionRequest` hook started, so the hook decision looked ignored until the host answered after a delay. Concurrent runs also overwrote each other's report entries until the report was re-read before each save. The machine hit its process limit once for a few minutes (fork failures in the shell) while other work ran; no probe process was involved and nothing of mine was left running.
+
+Not finished: the 600 s default hook timeout to its end, holds beyond 330 s, `SessionEnd` in `-p`, HTTPS and non-loopback receivers, an entry `timeout` above 600000, Linux and container providers, an SSE reply with progress in the TUI. Listed in `notes/probes-m6-r21.md` under "Not verified". The report entries of two `-p` hold runs and the first srt runs were overwritten before the fix; the srt cases were run again, and the hold cases are recorded in the run logs and the per-case receiver logs.
+
+Existing file touched: `probes/out/p16_report.json` (written earlier by the isolation probe `p16_srt.py`) received my entries once before I moved them to `probes/out/p16_mcp_report.json` and restored the original content; the scripts now write `p16_mcp_report.json`.
+
+Sandbox: no step was blocked by the sandbox. The permission system denied two cleanup commands that contained `pkill` and `rm -rf` on my own paths; they were not repeated in another form (the processes were ended by process id).
+
+Temporary files: everything lives under `/tmp/agide-r21-probes/` (per-case working directories were removed by the scripts; run logs, `ord.py`, the `srt-*.json` settings and the `*.settings.json` header-case files remain). The permission system denied `rm -rf /tmp/agide-r21-probes`, so the coordinator needs to remove that directory. The CLI also created its own scratch directories under `/tmp/claude-<uid>/` for the temporary working directories (names containing `agide-r21-probes`); they are not mine to remove. Output under `probes/out/` is git-ignored.
