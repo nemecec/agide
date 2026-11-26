@@ -915,6 +915,9 @@ Other changes that follow: the slots of section 4.15 come from 0043's c-m6, so i
 
 ### 13. Open questions for the user
 
+**Decided 2026-11-27 (record 0046).** An independent agent decided the open questions below while the user was away; the decisions and the text changes that follow from them are in `0046-decisions-while-the-user-was-away.md`, which the user reviews. The contract step applies those changes to this record.
+
+
 1. A granted write into a read-only mount: should the app perform such single writes (the mount stays read-only, each write is one card with its diff), or refuse agent writes into read-only mounts until you switch the mount to read-write? Recommendation: perform single writes; the card shows exactly what changes and the read-only switch keeps governing your own editor and every other request.
 2. "Allow for this session" on a note change applies the session's later changes to that note without a card (with the agent mark and a revision each). Recommendation: yes; it is what the scope means, and the revisions undo it. The alternative is to keep showing each change and only skip the click.
 3. A removal of notes by an agent removes their history with them (as a removal by you does). Should removed notes go to a trash for some days first? Recommendation: not in the first slice; the card says that the history goes with the note, and a trash fits better when the user's own removals get one too.

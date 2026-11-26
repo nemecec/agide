@@ -867,6 +867,9 @@ Other changes that follow: c-m6 starts after the ninth hardening pass (A1); c-m6
 
 ### 13. Open questions for the user
 
+**Decided 2026-11-27 (record 0046).** An independent agent decided the open questions below while the user was away; the decisions and the text changes that follow from them are in `0046-decisions-while-the-user-was-away.md`, which the user reviews. The contract step applies those changes to this record.
+
+
 1. Per-port loopback: should the w-hooks real-CLI test also try `127.0.0.1:<port>` of the app's listener in the CLI's own sandbox (a few cents), and the launch write that narrower form from the start if it works? Recommendation: yes; it would shrink the accepted risk of B8 to the app's own listener at no cost to the user.
 2. "Allow for this session" ends when the session's process exits, so a resumed session asks again. Recommendation: yes; a grant that outlives the process would need its own store and an end the user can see, and asking again once after a resume is cheap.
 3. A target setting that refuses every agent request without an item (a "never ask" per note or mount) beyond the per-session quiet deny: now or later? Recommendation: later, if the quiet deny and the limits prove too noisy in use.
