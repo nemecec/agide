@@ -1,5 +1,6 @@
 import type { SessionId } from '../../session/types';
 import type { SwarmId } from '../../swarm/types';
+import { failureSetsSchema, testRunSummarySchema, type Baseline, type FailureSets, type TestFailure, type TestRunSummary } from '../reports/types';
 import type {
   ChangesetFile,
   ChangesetId,
@@ -15,14 +16,16 @@ import type {
   SeenMark,
   StoredReason,
 } from '../schemas';
-import { ReviewError, type ChangesetFilter, type ChangesetStore, type ChangesetUpdate } from '../types';
+import { ReviewError, type ChangesetFilter, type ChangesetStore, type ChangesetUpdate, type TestRunStore } from '../types';
 
 const byNewest = (a: ChangesetRecord, b: ChangesetRecord): number => b.createdAt.localeCompare(a.createdAt) || b.seq - a.seq;
 const reasonKey = (reason: { readonly id: string; readonly subject: string }): string => `${reason.id}\0${reason.subject}`;
 const seenKey = (mark: SeenMark): string => `${mark.scope}\0${mark.level}\0${mark.subjectHash}`;
 
+const FAILURE_LIMITS = { suite: 1_024, name: 1_024, message: 2_000 } as const;
+
 /** The review tables in memory, for tests and the contract suite. Records are copied in and out. */
-export class InMemoryChangesetStore implements ChangesetStore {
+export class InMemoryChangesetStore implements ChangesetStore, TestRunStore {
   private readonly policies = new Map<string, PolicySnapshot>();
   private readonly changesets = new Map<ChangesetId, ChangesetRecord>();
   private readonly fileRows = new Map<ChangesetId, ChangesetFile[]>();
@@ -34,6 +37,8 @@ export class InMemoryChangesetStore implements ChangesetStore {
   private readonly reportRows = new Map<string, ReviewReport>();
   private readonly commentRows = new Map<string, CommentRecord>();
   private readonly seenRows = new Map<string, SeenMark>();
+  private readonly testRuns = new Map<string, { summary: TestRunSummary; failures: TestFailure[]; listPath: string | null; sets: FailureSets | null }>();
+  private readonly baselines = new Map<string, Baseline>();
 
   putPolicy(snapshot: PolicySnapshot): void {
     if (!this.policies.has(snapshot.hash)) this.policies.set(snapshot.hash, structuredClone(snapshot));
@@ -131,16 +136,57 @@ export class InMemoryChangesetStore implements ChangesetStore {
     return structuredClone(this.reasonRows.get(id) ?? []);
   }
 
+  /** `tests` is not stored with the row: it is read from the test run of the check, as the SQLite store joins it. */
   putCheck(check: CheckRecord): void {
-    this.checkRows.set(check.id, structuredClone(check));
+    if (check.rerunOf !== undefined && check.rerunOf !== null && !this.checkRows.has(check.rerunOf)) throw new ReviewError('refused', `check ${check.id} repeats an unknown check`);
+    const { tests: _tests, ...row } = check;
+    this.checkRows.set(check.id, structuredClone(row));
   }
 
   checks(id: ChangesetId): CheckRecord[] {
-    return [...this.checkRows.values()].filter((check) => check.changesetId === id).map((check) => structuredClone(check));
+    return [...this.checkRows.values()].filter((check) => check.changesetId === id).map((check) => this.withTests(check));
   }
 
   baseCheck(commitId: string, policyHash: string): CheckRecord | undefined {
     const found = [...this.checkRows.values()].findLast((check) => check.target === 'base' && check.commitId === commitId && check.policyHash === policyHash);
+    return found === undefined ? undefined : this.withTests(found);
+  }
+
+  private withTests(check: CheckRecord): CheckRecord {
+    const run = this.testRuns.get(check.id);
+    return structuredClone(run === undefined ? check : { ...check, tests: run.summary });
+  }
+
+  putTestRun(checkId: string, summary: TestRunSummary, failures: readonly TestFailure[], listPath: string | null, sets: FailureSets | null = null): void {
+    if (!this.checkRows.has(checkId)) throw new ReviewError('not_found', `no check ${checkId}`);
+    if (!testRunSummarySchema.safeParse(summary).success) throw new ReviewError('refused', 'the test run counts are not valid');
+    const seen = new Set<string>();
+    for (const failure of failures) {
+      if (failure.key.length !== 64 || failure.suite.length > FAILURE_LIMITS.suite || failure.name.length > FAILURE_LIMITS.name || (failure.message?.length ?? 0) > FAILURE_LIMITS.message)
+        throw new ReviewError('refused', 'a failing test is outside the limits of the table');
+      if (seen.has(failure.key)) throw new ReviewError('refused', 'a failing test appears twice');
+      seen.add(failure.key);
+    }
+    if (sets !== null && !failureSetsSchema.safeParse(sets).success) throw new ReviewError('refused', 'the failure sets are outside the limits of the table');
+    this.testRuns.set(checkId, { summary: structuredClone(summary), failures: structuredClone([...failures]), listPath, sets: structuredClone(sets) });
+  }
+
+  failureSets(checkId: string): FailureSets | undefined {
+    const sets = this.testRuns.get(checkId)?.sets;
+    return sets === null || sets === undefined ? undefined : structuredClone(sets);
+  }
+
+  testFailures(checkId: string): TestFailure[] {
+    return structuredClone(this.testRuns.get(checkId)?.failures ?? []);
+  }
+
+  putBaseline(baseline: Baseline): void {
+    this.baselines.delete(baseline.jobId);
+    this.baselines.set(baseline.jobId, structuredClone(baseline));
+  }
+
+  baseline(commitId: string, policyHash: string): Baseline | undefined {
+    const found = [...this.baselines.values()].findLast((candidate) => candidate.commitId === commitId && candidate.policyHash === policyHash);
     return found === undefined ? undefined : structuredClone(found);
   }
 

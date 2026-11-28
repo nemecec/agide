@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { migrate, openStore } from '../../store/Store';
 import { SWARM_MODULE, swarmMigrations } from '../../swarm/manager/swarmMigrations';
-import { describeChangesetStoreContract } from './changesetStoreContract';
+import { describeChangesetStoreContract, describeTestRunStoreContract } from './changesetStoreContract';
 import { InMemoryChangesetStore } from './InMemoryChangesetStore';
 import { REVIEW_MODULE, reviewMigrations } from './reviewMigrations';
 import { sqliteHarness } from './sqliteHarness';
@@ -11,12 +11,14 @@ describeChangesetStoreContract('in-memory store', async () => ({ store: new InMe
 
 describeChangesetStoreContract('sqlite store', async () => sqliteHarness());
 
+describeTestRunStoreContract('in-memory store', async () => ({ store: new InMemoryChangesetStore(), close: () => undefined }));
+
 describe('review migration', () => {
   it('applies after the tree and swarm migrations and refuses rows the design forbids', () => {
     const db: DatabaseSync = openStore(':memory:');
     db.exec('CREATE TABLE tree_nodes (id TEXT PRIMARY KEY)');
     migrate(db, SWARM_MODULE, swarmMigrations);
-    expect(migrate(db, REVIEW_MODULE, reviewMigrations), 'the review module is at version 1').toBe(1);
+    expect(migrate(db, REVIEW_MODULE, reviewMigrations), 'the review module is at version 2').toBe(2);
     db.exec(
       "INSERT INTO review_policies (hash, source, repo_path, base_commit, effective_json, created_at) VALUES ('p', 'default', '/r', 'b', '{}', 't')",
     );

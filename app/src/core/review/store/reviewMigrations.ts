@@ -3,6 +3,9 @@ import type { Migration } from '../../store/Store';
 export const REVIEW_MODULE = 'review';
 
 /**
+ * Migration 2 adds the base jobs, the test runs with their failures, the baselines and `rerun_of` on a check
+ * (0045 section 4.4). A row that outlives its swarm carries the swarm id without a foreign key, as the changesets do.
+ *
  * Migration 1 is the schema of 0040 section 3.3 with the decision actions of 0041 (`start_check`,
  * `review_failed`, `undeliverable`), the policy warnings, the swarm's policy on its repository snapshot and the
  * prompt version on a reviewer run. The module is migrated after `swarm`, whose
@@ -246,6 +249,71 @@ CREATE TABLE review_spend (
   reserved_usd REAL NOT NULL DEFAULT 0 CHECK (reserved_usd >= 0),
   reported_usd REAL NOT NULL DEFAULT 0 CHECK (reported_usd >= 0)
 );
+`,
+  },
+  {
+    version: 2,
+    sql: `
+CREATE TABLE review_base_jobs (
+  id TEXT PRIMARY KEY,
+  swarm_id TEXT NOT NULL,                      -- no foreign key: the job and its baseline outlive the swarm row
+  commit_id TEXT NOT NULL,
+  policy_hash TEXT NOT NULL,
+  trigger TEXT NOT NULL CHECK (trigger IN ('swarm_start', 'merge', 'capture', 'user')),
+  state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'confirming', 'green', 'red', 'not_run', 'cancelled')),
+  check_ids TEXT NOT NULL DEFAULT '[]',        -- JSON array of review_checks ids, in run order
+  requested_at TEXT NOT NULL,
+  ended_at TEXT,
+  CHECK ((state IN ('queued', 'running', 'confirming')) = (ended_at IS NULL))
+);
+CREATE INDEX review_base_jobs_pair ON review_base_jobs (commit_id, policy_hash, requested_at);
+CREATE UNIQUE INDEX review_base_jobs_open ON review_base_jobs (commit_id, policy_hash) WHERE ended_at IS NULL;
+
+CREATE TABLE review_base_job_swarms (          -- every swarm that requested the job, for release and alerts
+  job_id TEXT NOT NULL REFERENCES review_base_jobs(id),
+  swarm_id TEXT NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  PRIMARY KEY (job_id, swarm_id)
+);
+
+CREATE TABLE review_test_runs (                -- one row per check run whose reports were looked for
+  check_id TEXT PRIMARY KEY REFERENCES review_checks(id) ON DELETE CASCADE,
+  source TEXT CHECK (source IS NULL OR source IN ('junit', 'libtest')),
+  status TEXT NOT NULL CHECK (status IN ('parsed', 'partial', 'refused', 'missing', 'not_configured')),
+  refusal TEXT CHECK (refusal IS NULL OR length(refusal) <= 300),   -- app text
+  files INTEGER NOT NULL DEFAULT 0 CHECK (files >= 0),
+  bytes INTEGER NOT NULL DEFAULT 0 CHECK (bytes >= 0),
+  executed INTEGER NOT NULL DEFAULT 0 CHECK (executed >= 0),
+  passed INTEGER NOT NULL DEFAULT 0 CHECK (passed >= 0),
+  failed INTEGER NOT NULL DEFAULT 0 CHECK (failed >= 0),
+  skipped INTEGER NOT NULL DEFAULT 0 CHECK (skipped >= 0),
+  list_path TEXT,                              -- JSON lines of every case, relative to the profile data directory
+  sets TEXT CHECK (sets IS NULL OR json_valid(sets)),   -- the failure sets of a checkpoint run against the baseline; untrusted text
+  CHECK (executed = passed + failed)
+);
+
+CREATE TABLE review_test_failures (            -- failed and errored cases; untrusted text
+  check_id TEXT NOT NULL REFERENCES review_checks(id) ON DELETE CASCADE,
+  test_key TEXT NOT NULL CHECK (length(test_key) = 64),
+  suite TEXT NOT NULL CHECK (length(suite) <= 1024),
+  name TEXT NOT NULL CHECK (length(name) <= 1024),
+  status TEXT NOT NULL CHECK (status IN ('failed', 'error')),
+  message TEXT CHECK (message IS NULL OR length(message) <= 2000),
+  PRIMARY KEY (check_id, test_key)
+);
+
+CREATE TABLE review_baselines (
+  job_id TEXT PRIMARY KEY REFERENCES review_base_jobs(id),
+  commit_id TEXT NOT NULL,
+  policy_hash TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('clean', 'flaky', 'red', 'no_tests', 'unparsed')),
+  known TEXT NOT NULL DEFAULT '[]',            -- JSON array of test keys
+  flaky TEXT NOT NULL DEFAULT '[]',
+  executed INTEGER NOT NULL CHECK (executed >= 0),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX review_baselines_pair ON review_baselines (commit_id, policy_hash, created_at);
+
+ALTER TABLE review_checks ADD COLUMN rerun_of TEXT REFERENCES review_checks(id) ON DELETE SET NULL;
 `,
   },
 ];

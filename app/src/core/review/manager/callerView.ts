@@ -1,5 +1,6 @@
 import { cleanLine } from '../../inbox/text';
 import { quotedValue, untrustedBlock } from '../../swarm/manager/inputs';
+import type { FailureSets, TestRef } from '../reports/types';
 import type { ChangesetDetail, ReviewCaller } from '../types';
 
 export const HUNK_TEXT_MAX = 100 * 1024;
@@ -8,6 +9,15 @@ const wrap = (source: string, text: string): { readonly untrusted: string } => (
 
 const isUntrustedText = (value: unknown): value is { untrusted: true; text: string } =>
   typeof value === 'object' && value !== null && (value as { untrusted?: unknown }).untrusted === true && typeof (value as { text?: unknown }).text === 'string';
+
+/** The text of a failing test was written by the code under test: a session reads suite, name and message as quoted data. */
+function testRefForCaller(ref: TestRef): unknown {
+  return { key: ref.key, suite: quotedValue(ref.suite), name: quotedValue(ref.name), message: ref.message === null ? null : wrap('test-report', ref.message) };
+}
+
+function failuresForCaller(failures: FailureSets): unknown {
+  return { ...failures, new: failures.new.map(testRefForCaller), known: failures.known.map(testRefForCaller), flaky: failures.flaky.map(testRefForCaller), fixed: failures.fixed.map(testRefForCaller) };
+}
 
 /** Evidence with agent text in tagged blocks; the ref names and tips of the user's other branches stay out. */
 function evidenceFor(reasonId: string, evidence: unknown): unknown {
@@ -48,6 +58,7 @@ export function detailForCaller(detail: ChangesetDetail, caller: ReviewCaller): 
     files: detail.files.map((file) => ({ ...file, oldPath: file.oldPath === null ? null : quotedValue(file.oldPath), newPath: file.newPath === null ? null : quotedValue(file.newPath) })),
     ...(hunks === undefined ? {} : { hunks, hunksTruncated: cut || detail.hunks!.length > hunks.length }),
     checks: detail.checks.map((check) => ({ ...check, outputTail: check.outputTail === null ? null : wrap('check', check.outputTail), outputPath: undefined })),
+    ...(detail.failures === undefined ? {} : { failures: failuresForCaller(detail.failures) }),
     ...(detail.report === undefined
       ? {}
       : {

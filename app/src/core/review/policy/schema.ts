@@ -22,6 +22,9 @@ const reasonIdKey = z.string().regex(/^[a-z]+(\.[a-z_]+)*$/);
 const reviewerTier = z.enum(['strong', 'mid']);
 const effortB = z.enum(['medium', 'high', 'xhigh']);
 const effortHuman = z.enum(['high', 'xhigh']);
+/** Relative to the checkout, no `..`; `$TMPDIR/` as the first part names the run's temporary directory (0045 section 3.6). */
+const reportGlob = glob.refine((value) => !value.startsWith('/') && !value.split('/').includes('..'), 'a glob relative to the checkout');
+const reportGlobs = z.array(reportGlob).max(32);
 
 export const reviewPolicySchema = z
   .object({
@@ -36,6 +39,21 @@ export const reviewPolicySchema = z
         timeoutSeconds: z.number().int().min(10).max(3_600).default(600),
         network: z.enum(['none', 'development']).default('none'),
         env: z.array(envName).max(32).default([]),
+        reports: z
+          .object({
+            notes,
+            junit: reportGlobs.default([]),
+            /** Read the check's own output as libtest text (`cargo test`). */
+            libtest: z.boolean().default(false),
+          })
+          .strict()
+          .optional(),
+        /** Fewer executed tests than this is `check.no_tests`; 1 applies when `reports` names a source and this is absent. */
+        minTests: z.number().int().min(0).max(1_000_000).optional(),
+        /** On a red base: send back the failures the base does not have, or nothing. */
+        redBaseSendBack: z.enum(['new_failures', 'never']).default('new_failures'),
+        /** Opt-in: a failure set that the base has entirely reads as rung B (`check.known_failures`). */
+        baselineLowers: z.boolean().default(false),
       })
       .strict()
       .optional(),
@@ -112,6 +130,10 @@ export const userPolicySchema = z
         timeoutSeconds: z.number().int().min(10).max(3_600).optional(),
         network: z.enum(['none', 'development']).optional(),
         env: z.array(envName).max(32).optional(),
+        reports: z.object({ notes, junit: reportGlobs.optional(), libtest: z.boolean().optional() }).strict().optional(),
+        minTests: z.number().int().min(0).max(1_000_000).optional(),
+        redBaseSendBack: z.enum(['new_failures', 'never']).optional(),
+        baselineLowers: z.boolean().optional(),
       })
       .strict()
       .optional(),

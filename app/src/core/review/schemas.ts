@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { agentNameSchema, tierSchema } from '../swarm/definition';
 import { reviewPolicySchema } from './policy/schema';
+import { testRunSummarySchema } from './reports/types';
 
 /**
  * Records of the review ladder (0040 sections 3 and 7, 0041). The SQLite store and the in-memory store keep the
@@ -205,6 +206,10 @@ export const checkRecordSchema = z
     /** Untrusted: agent-written code produced it. */
     outputTail: z.string().max(8_000).nullable(),
     truncated: z.boolean(),
+    /** The counts of the test reports of this run; absent for a run whose reports were not looked for (0045 section 4.3). */
+    tests: testRunSummarySchema.nullable().optional(),
+    /** The check this run repeated, for the one rerun of a checkpoint whose failures are all flaky on the base. */
+    rerunOf: z.string().nullable().optional(),
     startedAt: isoTime,
     endedAt: isoTime.nullable(),
   })

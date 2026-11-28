@@ -16,6 +16,25 @@ const example = {
   ],
 };
 
+describe('swarm purpose', () => {
+  const fix = { kind: 'base_fix', commitId: 'a'.repeat(40), policyHash: 'b'.repeat(64) };
+
+  it('is absent by default and accepts a fix of a base commit', () => {
+    expect(swarmDefinitionSchema.parse(example).purpose, 'a definition without a purpose has none').toBeUndefined();
+    expect(swarmDefinitionSchema.parse({ ...example, purpose: fix }).purpose, 'the purpose is kept').toEqual(fix);
+  });
+
+  it.each([
+    ['another kind', { ...fix, kind: 'other' }],
+    ['a branch name as the commit', { ...fix, commitId: 'main' }],
+    ['a short policy hash', { ...fix, policyHash: 'abc' }],
+    ['an unknown key', { ...fix, extra: true }],
+    ['a missing policy hash', { kind: 'base_fix', commitId: 'a'.repeat(40) }],
+  ])('refuses %s', (_name, purpose) => {
+    expect(swarmDefinitionSchema.safeParse({ ...example, purpose }).success, 'the purpose is refused').toBe(false);
+  });
+});
+
 describe('swarm definition schema', () => {
   it('accepts the example of 0037 and fills the defaults', () => {
     const parsed = swarmDefinitionSchema.parse(example);

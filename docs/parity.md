@@ -87,6 +87,10 @@ A command with a UI binding must be an MCP tool unless it declares `mcpExempt` w
 | `report_review` | none | reviewer set only | ok |
 | `review_accept` | bound | no | exempt: agents never decide reviews |
 | `review_accept_repo_change` | bound | no | exempt: agents never accept changes outside their worktrees |
+| `review_base_fix_draft` | bound | no | exempt: the user starts a fix swarm from the start dialog; agents use swarm_start |
+| `review_base_rerun` | bound | no | exempt: a base result is the user's precondition; an agent could rerun a flaky base until it reads green |
+| `review_base_status` | bound | yes | ok |
+| `review_base_verdict` | bound | no | exempt: the start dialog's view for the user; agents see their swarm's base through review_base_status |
 | `review_comment` | bound | no | exempt: line comments are the user's words to the agent |
 | `review_demote` | bound | no | exempt: agents never decide reviews |
 | `review_escalate` | bound | no | exempt: agents use review_request_escalation |

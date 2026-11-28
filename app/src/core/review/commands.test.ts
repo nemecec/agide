@@ -17,8 +17,8 @@ describe('review commands', () => {
   it('lists each report tool in its own tool set only and the reviewer nothing else', () => {
     const registry = new CommandRegistry();
     registerReviewCommands(registry, {});
-    expect(reviewTools(registry, 'default'), 'a default session').toEqual(['review_get', 'review_list', 'review_request_escalation']);
-    expect(reviewTools(registry, 'worker'), 'a worktree agent').toEqual(['report_outcome', 'review_get', 'review_list', 'review_request_escalation']);
+    expect(reviewTools(registry, 'default'), 'a default session').toEqual(['review_base_status', 'review_get', 'review_list', 'review_request_escalation']);
+    expect(reviewTools(registry, 'worker'), 'a worktree agent').toEqual(['report_outcome', 'review_base_status', 'review_get', 'review_list', 'review_request_escalation']);
     expect(
       toolsFrom(registry, 'app', 'reviewer').map((tool) => tool.name),
       'a reviewer',
@@ -49,6 +49,29 @@ describe('review commands', () => {
       ok: false,
       error: { code: 'not_found' },
     });
+  });
+
+  it('answers a base command without a handler as not built and gives only the status to a session', async () => {
+    const registry = new CommandRegistry();
+    registerReviewCommands(registry, {});
+    const pair = { swarmId: 'sw1', commitId: 'a'.repeat(40), policyHash: 'b'.repeat(64) };
+    expect(await registry.invoke('review_base_status', { swarmId: 'sw1' }, ui), 'status').toMatchObject({ ok: false, error: { code: 'not_built' } });
+    expect(await registry.invoke('review_base_verdict', { commitId: pair.commitId }, ui), 'verdict').toMatchObject({ ok: false, error: { code: 'not_built' } });
+    expect(await registry.invoke('review_base_rerun', pair, ui), 'rerun').toMatchObject({ ok: false, error: { code: 'not_built' } });
+    expect(await registry.invoke('review_base_fix_draft', pair, ui), 'fix draft').toMatchObject({ ok: false, error: { code: 'not_built' } });
+    expect(await registry.invoke('review_base_rerun', pair, mcp), 'a session cannot rerun a base').toMatchObject({ ok: false, error: { code: 'not_found' } });
+    expect(await registry.invoke('review_base_verdict', { commitId: pair.commitId }, mcp), 'a session cannot read the verdict of a commit').toMatchObject({ ok: false, error: { code: 'not_found' } });
+    expect(await registry.invoke('review_base_fix_draft', pair, mcp), 'a session cannot draft a fix swarm').toMatchObject({ ok: false, error: { code: 'not_found' } });
+    expect(await registry.invoke('review_base_status', { swarmId: 'sw1' }, mcp), 'the status is a tool').toMatchObject({ ok: false, error: { code: 'not_built' } });
+  });
+
+  it('refuses a base command with a commit or a policy hash that is not one', async () => {
+    const registry = new CommandRegistry();
+    registerReviewCommands(registry, { review_base_rerun: () => ({ queued: true }) });
+    const pair = { swarmId: 'sw1', commitId: 'a'.repeat(40), policyHash: 'b'.repeat(64) };
+    expect(await registry.invoke('review_base_rerun', pair, ui), 'a valid pair reaches the handler').toMatchObject({ ok: true });
+    expect(await registry.invoke('review_base_rerun', { ...pair, commitId: 'main' }, ui), 'a branch name').toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    expect(await registry.invoke('review_base_rerun', { ...pair, policyHash: 'short' }, ui), 'a short hash').toMatchObject({ ok: false, error: { code: 'invalid_input' } });
   });
 
   it('asks for the file at level file and hunk and the hunk at level hunk', async () => {

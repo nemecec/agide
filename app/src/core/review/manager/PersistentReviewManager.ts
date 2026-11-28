@@ -85,7 +85,9 @@ export class PersistentReviewManager extends InMemoryReviewManager {
     const checkpoint = store.checks(changeset.id).findLast((check) => check.target === 'checkpoint');
     if (checkpoint === undefined) return undefined;
     const base = store.baseCheck(changeset.baseCommit, changeset.policyHash);
-    return base === undefined ? { checkpoint } : { checkpoint, base };
+    const failures = this.deps.tests?.failureSets(checkpoint.id);
+    const baseline = this.deps.tests?.baseline(changeset.baseCommit, changeset.policyHash);
+    return { checkpoint, ...(base === undefined ? {} : { base }), ...(failures === undefined ? {} : { failures }), ...(baseline === undefined ? {} : { baseline }) };
   }
 
   private guarded(work: Promise<unknown>): Promise<void> {

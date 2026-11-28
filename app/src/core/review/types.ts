@@ -1,11 +1,13 @@
 import type { Unsubscribe } from '../events/EventBus';
 import type { SessionId } from '../session/types';
-import type { Effort, Tier, Workspace } from '../swarm/definition';
+import type { Effort, SwarmPurpose, Tier, Workspace } from '../swarm/definition';
 import type { AgentRunState, SwarmId } from '../swarm/types';
 import type { TurnResult } from '../swarm/runtime/types';
 import type { NodeId } from '../tree/types';
 import type { ReviewCommandInput } from './commands';
+import type { BaseChangedEvent } from './base/types';
 import type { ReviewPolicy, UserPolicy } from './policy/schema';
+import type { Baseline, FailureSets, TestFailure, TestRunSummary } from './reports/types';
 import type {
   CaptureSubject,
   CaptureTrigger,
@@ -81,6 +83,8 @@ export interface ReviewSwarmView {
   readonly defaultTarget?: string;
   /** The user's repository and the base commit the swarm started from; absent for a swarm without a repository. */
   readonly repository?: { readonly path: string; readonly baseCommit: string };
+  /** Why the swarm exists when it is more than its goal: a fix of a red base commit (0045 section 3.5). */
+  readonly purpose?: SwarmPurpose;
   /** In definition order, which is the merge order within a stage. */
   readonly agents: readonly {
     readonly name: string;
@@ -204,12 +208,28 @@ export interface CheckRequest {
   readonly baseCommit: string;
   readonly policyHash: string;
   readonly policy: ReviewPolicy;
+  /** The id of the check this run repeats: the one rerun of a checkpoint whose failures are all flaky on the base (0045 section 3.3). */
+  readonly rerunOf?: string;
 }
 
-/** The checkpoint run and the base run, which ran first or is the stored green result of the pair (0040 section 6, base comparison). */
+/** The failing cases and the list file of the checkpoint run that `CheckRecord.tests` counts; the manager stores them with the record. */
+export interface CheckTestRun {
+  readonly failures: readonly TestFailure[];
+  /** Relative to the profile data directory; null when no list was written. */
+  readonly listPath: string | null;
+}
+
+/**
+ * The checkpoint run and the base run, which ran first or is the stored green result of the pair (0040 section 6,
+ * base comparison). `failures` and `baseline` are set when the run had reports and the pair has a usable baseline
+ * (0045 section 3.7); a check without reports has neither.
+ */
 export interface CheckOutcomeSet {
   readonly checkpoint: CheckRecord;
   readonly base?: CheckRecord;
+  readonly failures?: FailureSets;
+  readonly baseline?: Baseline;
+  readonly testRun?: CheckTestRun;
 }
 
 /** Runs the base policy's check in a fresh checkout of the checkpoint, never with more power than the agent had. */
@@ -234,6 +254,8 @@ export interface AssessInput {
   /** The agent's `owns` globs and the paths other agents changed, for `path.outside_owns` and `path.overlap`. */
   readonly owns: readonly string[];
   readonly otherAgentsPaths: Readonly<Record<string, readonly string[]>>;
+  /** The purpose of the swarm the changeset belongs to; `check.base_fix` follows from it (0045 section 4.5). */
+  readonly swarmPurpose?: SwarmPurpose;
 }
 
 /**
@@ -274,6 +296,8 @@ export interface ReviewRunRequest {
   readonly hunks: readonly Hunk[];
   /** The latest check of the checkpoint; its output tail is untrusted. */
   readonly check?: CheckRecord;
+  /** The failing sets of that check run against the baseline; test names are untrusted text. */
+  readonly failures?: FailureSets;
   readonly reasons: readonly StoredReason[];
   /** Agent text, introduced as a claim to verify. */
   readonly claim: Claim | null;
@@ -396,6 +420,7 @@ export interface ChangesetStore {
   addReasons(id: ChangesetId, reasons: readonly Reason[], createdAt: string): StoredReason[];
   reasons(id: ChangesetId): StoredReason[];
 
+  /** Stores or replaces a check row. `refused` when `rerunOf` names a check the store does not have. */
   putCheck(check: CheckRecord): void;
   checks(id: ChangesetId): CheckRecord[];
   /** The latest base run for (commit, policy), shared by every changeset on that base. */
@@ -420,6 +445,24 @@ export interface ChangesetStore {
   /** Inserts or replaces the mark of (scope, level, subject hash). */
   putSeen(mark: SeenMark): void;
   seen(scope: string): SeenMark[];
+}
+
+/**
+ * The test runs and baselines of 0045 section 4.4. A separate interface so that `SqliteChangesetStore` still
+ * satisfies `ChangesetStore` until w-base adds the statements. `InMemoryChangesetStore` implements both; a check
+ * record read from the store carries `tests` once `putTestRun` stored its summary.
+ */
+export interface TestRunStore {
+  /** Stores or replaces the counts, the failing cases, the list file and the failure sets of a check run (a put without sets clears the sets of an earlier put). `not_found` for an unknown check; `refused` for a row the tables refuse. */
+  putTestRun(checkId: string, summary: TestRunSummary, failures: readonly TestFailure[], listPath: string | null, sets?: FailureSets | null): void;
+  /** The failure sets stored with the test run of a check; undefined when none were stored. Test names are untrusted text. */
+  failureSets(checkId: string): FailureSets | undefined;
+  /** The failed and errored cases of a check run in the order they were stored. */
+  testFailures(checkId: string): TestFailure[];
+  /** Stores the baseline of a job; one per job id, a second put replaces it. */
+  putBaseline(baseline: Baseline): void;
+  /** The newest stored baseline of the pair. */
+  baseline(commitId: string, policyHash: string): Baseline | undefined;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -461,6 +504,8 @@ export interface ChangesetDetail {
   readonly hunks?: readonly Hunk[];
   readonly reasons: readonly StoredReason[];
   readonly checks: readonly CheckRecord[];
+  /** The failing sets of the latest checkpoint run against the baseline; test names are untrusted text. */
+  readonly failures?: FailureSets;
   readonly runs: readonly ReviewRunRecord[];
   readonly report?: ReviewReport;
   readonly decisions: readonly DecisionRecord[];
@@ -501,7 +546,9 @@ export interface SwarmMergeResult {
 
 export type ReviewEvent =
   | { readonly type: 'review.changed'; readonly changesetId: ChangesetId; readonly swarmId: SwarmId; readonly agent: string; readonly state: ChangesetState; readonly rung: Rung }
-  | { readonly type: 'review.seen'; readonly changesetId: ChangesetId; readonly level: SeenLevel };
+  | { readonly type: 'review.seen'; readonly changesetId: ChangesetId; readonly level: SeenLevel }
+  /** A base job of the pair changed state (0045 section 4.7); sent by the review module from `BaseChecks.subscribe`. */
+  | BaseChangedEvent;
 
 /**
  * The state machine and the actions of every actor (0040 sections 9 to 16). The commands call it with the
@@ -542,8 +589,27 @@ export interface ReviewService {
 /** Inbox origin of the alert for a changed repository; its payload is `{ swarmId, repoDifferenceHash? }`. */
 export const REPO_ALERT_ORIGIN = 'review:repo';
 
-/** Inbox origin of the alert for a check that fails on the base commit; its payload is `{ swarmId, baseCommit, policyHash }`. */
+/** Inbox origin of the alert for a check that fails on the base commit; its payload is `BaseAlertPayload`. */
 export const BASE_ALERT_ORIGIN = 'review:base';
+
+/** Inbox origin of the info alert for a base whose check runs no tests (0045 section 4.8); its payload is `BaseAlertPayload`. */
+export const BASE_NO_TESTS_ALERT_ORIGIN = 'review:base_no_tests';
+
+/**
+ * The `payload` of the base alerts. The fields after `policyHash` are optional because the open alerts posted
+ * before the upgrade lack them; the actions then read the job through `review_base_status`. `canFix` is false
+ * for a swarm whose purpose is `base_fix`, so a fix swarm does not offer a fix of itself.
+ */
+export interface BaseAlertPayload {
+  readonly swarmId: SwarmId;
+  readonly baseCommit: string;
+  readonly policyHash: string;
+  readonly jobId?: string;
+  readonly state?: BaseChangedEvent['state'];
+  /** Failing tests on the base when the reports were parsed; null when they were not. */
+  readonly failing?: number | null;
+  readonly canFix?: boolean;
+}
 
 /** Inbox origin of review items (0040 section 12). */
 export const REVIEW_ITEM_ORIGIN = 'review:changeset';

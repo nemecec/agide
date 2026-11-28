@@ -45,10 +45,20 @@ export const agentSpecSchema = z
   })
   .strict();
 
+/** Why a swarm exists when it is more than a goal: a fix of a red base commit (0045 section 3.5). */
+export const swarmPurposeSchema = z
+  .object({
+    kind: z.literal('base_fix'),
+    commitId: z.string().regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/, 'a full git object id'),
+    policyHash: z.string().regex(/^[0-9a-f]{64}$/, 'a SHA-256 hash in hex'),
+  })
+  .strict();
+
 export const swarmDefinitionSchema = z
   .object({
     version: z.literal(1),
     goal: z.string().min(1).max(2_000),
+    purpose: swarmPurposeSchema.optional(),
     repository: z
       .object({ path: z.string().min(1), base: z.string().min(1).max(200).optional() })
       .strict()
@@ -76,6 +86,7 @@ export type SwarmDefinitionInput = z.input<typeof swarmDefinitionSchema>;
 /** The parsed definition with every default filled in. The app stores this copy with the swarm. */
 export type SwarmDefinition = z.output<typeof swarmDefinitionSchema>;
 export type AgentSpec = SwarmDefinition['agents'][number];
+export type SwarmPurpose = z.output<typeof swarmPurposeSchema>;
 export type Tier = z.output<typeof tierSchema>;
 export type AgentRole = AgentSpec['role'];
 export type Workspace = AgentSpec['workspace'];

@@ -155,7 +155,7 @@ function setup(options: { clones?: CloneService; files?: Record<string, string>;
       checkpointCommit: checkpoint,
       baseCommit: r.base,
       policyHash: POLICY_HASH,
-      policy: { ...DEFAULT_REVIEW_POLICY, check: { command, timeoutSeconds: 600, network: 'none', env: [], ...patch } },
+      policy: { ...DEFAULT_REVIEW_POLICY, check: { command, timeoutSeconds: 600, network: 'none', env: [], redBaseSendBack: 'new_failures', baselineLowers: false, ...patch } },
     }),
   };
 }

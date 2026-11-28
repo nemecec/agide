@@ -82,12 +82,38 @@ export function mergeOverlay(project: ReviewPolicy, overlay: UserPolicy | undefi
   return reviewPolicySchema.parse(merged);
 }
 
-/** The project's check wins; the user's applies only when the project has none. `network: none` wins either way. */
-function mergeCheck(project: ReviewPolicy['check'], overlay: UserPolicy['check']): { check?: NonNullable<ReviewPolicy['check']> } {
+type Check = NonNullable<ReviewPolicy['check']>;
+
+/**
+ * The project's check wins; the user's applies only when the project has none. `network: none` wins either way.
+ * The report fields merge per field and only add information or tighten (0045 section 4.2): the union of the
+ * report globs and `libtest` on when either side has it, the larger `minTests` (the default 1 counts as the
+ * project's value), `never` over `new_failures`, and `baselineLowers` only when both sides allow it, so the
+ * overlay never turns it on.
+ */
+function mergeCheck(project: ReviewPolicy['check'], overlay: UserPolicy['check']): { check?: Check } {
   if (project !== undefined) {
     const network = project.network === 'none' || overlay?.network === 'none' ? 'none' : 'development';
-    return { check: { ...project, network } };
+    return { check: { ...project, network, ...mergeReportFields(project, overlay) } };
   }
   if (overlay?.command === undefined) return {};
-  return { check: { ...overlay, command: overlay.command, timeoutSeconds: overlay.timeoutSeconds ?? 600, network: overlay.network ?? 'none', env: overlay.env ?? [] } };
+  const { reports: _reports, minTests: _minTests, ...rest } = overlay;
+  const own = mergeReportFields({ redBaseSendBack: 'new_failures', baselineLowers: false }, overlay);
+  return { check: { ...rest, command: overlay.command, timeoutSeconds: overlay.timeoutSeconds ?? 600, network: overlay.network ?? 'none', env: overlay.env ?? [], ...own } };
+}
+
+type ReportFields = Pick<Check, 'reports' | 'minTests' | 'redBaseSendBack' | 'baselineLowers'>;
+
+function mergeReportFields(project: Pick<Check, 'redBaseSendBack' | 'baselineLowers'> & Partial<Pick<Check, 'reports' | 'minTests'>>, overlay: UserPolicy['check']): ReportFields {
+  const junit = union(project.reports?.junit ?? [], overlay?.reports?.junit);
+  const libtest = project.reports?.libtest === true || overlay?.reports?.libtest === true;
+  // A source that only the overlay names adds a report entry; an overlay entry without a source adds nothing.
+  const reports = project.reports !== undefined ? { ...project.reports, junit, libtest } : junit.length > 0 || libtest ? { junit, libtest } : undefined;
+  const minTests = overlay?.minTests === undefined ? undefined : Math.max(project.minTests ?? 1, overlay.minTests);
+  return {
+    ...(reports === undefined ? {} : { reports }),
+    ...(minTests === undefined ? {} : { minTests }),
+    redBaseSendBack: project.redBaseSendBack === 'never' || overlay?.redBaseSendBack === 'never' ? 'never' : 'new_failures',
+    baselineLowers: project.baselineLowers && overlay?.baselineLowers !== false,
+  };
 }

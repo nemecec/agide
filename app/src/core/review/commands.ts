@@ -1,12 +1,14 @@
 import { z } from 'zod';
 import type { Unsubscribe } from '../events/EventBus';
-import { CommandError, type Caller, type Command, type CommandRegistry, type ToolSet } from '../commands/index';
+import { CommandError, notBuilt, type Caller, type Command, type CommandRegistry, type ToolSet } from '../commands/index';
 import { CHANGESET_STATES, changesetIdSchema, reportOutcomeInputSchema, reportReviewInputSchema, rungSchema } from './schemas';
 import { ReviewError } from './types';
 
 const swarmId = z.string().min(1).max(64);
 const changesetRef = { changesetId: changesetIdSchema };
 const hashSchema = z.string().regex(/^[0-9a-f]{64}$/, 'a SHA-256 hash in hex');
+const commitSchema = z.string().regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/, 'a full git object id');
+const basePair = { swarmId, commitId: commitSchema, policyHash: hashSchema };
 
 /** Input schemas of the review commands and report tools (0040 section 11). The command id is the MCP tool name. */
 export const REVIEW_COMMAND_INPUTS = {
@@ -43,7 +45,14 @@ export const REVIEW_COMMAND_INPUTS = {
     .strict()
     .refine((input) => input.level === 'summary' || input.file !== undefined, { message: 'file is required at level file and hunk', path: ['file'] })
     .refine((input) => input.level !== 'hunk' || input.hunk !== undefined, { message: 'hunk is required at level hunk', path: ['hunk'] }),
+  review_base_status: z.object({ swarmId }).strict(),
+  review_base_verdict: z.object({ commitId: commitSchema }).strict(),
+  review_base_rerun: z.object(basePair).strict(),
+  review_base_fix_draft: z.object(basePair).strict(),
 } as const;
+
+/** The commands of the base check (0045 section 4.7); their handlers answer `not_built` until w-base fills them. */
+export const BASE_COMMAND_IDS = ['review_base_status', 'review_base_verdict', 'review_base_rerun', 'review_base_fix_draft'] as const satisfies readonly ReviewCommandId[];
 
 export type ReviewCommandId = keyof typeof REVIEW_COMMAND_INPUTS;
 export type ReviewCommandInput<K extends ReviewCommandId> = z.output<(typeof REVIEW_COMMAND_INPUTS)[K]>;
@@ -135,6 +144,34 @@ export const REVIEW_COMMANDS: Readonly<Record<ReviewCommandId, ReviewCommandMeta
     mcpExempt: 'agents never accept changes outside their worktrees',
   },
   review_seen: { title: 'Mark as seen', description: 'Records that the user looked at a summary, file or hunk.', ui: {}, mcp: false, mcpExempt: 'seen marks record what the user looked at' },
+  review_base_status: {
+    title: 'Show the base check',
+    description:
+      'Shows the check on the base commit of your swarm: whether it is green, red, queued or running, which job ran it and why, the test counts of the deciding run and the state of the test baseline. It returns counts and states only, no test names.',
+    ui: {},
+    mcp: true,
+  },
+  review_base_verdict: {
+    title: 'Show the stored base check of a commit',
+    description: 'Shows the newest stored result of the project check for each policy that ran it on a commit, for the start dialog of a swarm.',
+    ui: {},
+    mcp: false,
+    mcpExempt: "the start dialog's view for the user; agents see their swarm's base through review_base_status",
+  },
+  review_base_rerun: {
+    title: 'Run the base check again',
+    description: 'Queues a new run of the project check on a base commit; refused while a run of that commit and policy is open.',
+    ui: {},
+    mcp: false,
+    mcpExempt: "a base result is the user's precondition; an agent could rerun a flaky base until it reads green",
+  },
+  review_base_fix_draft: {
+    title: 'Draft a swarm that fixes the base',
+    description: 'Returns a swarm definition with one worktree agent whose goal is to make the project check pass on a red base commit; the user starts it from the start dialog.',
+    ui: {},
+    mcp: false,
+    mcpExempt: 'the user starts a fix swarm from the start dialog; agents use swarm_start',
+  },
 };
 
 const ERROR_CODES = {
@@ -150,7 +187,7 @@ const ERROR_CODES = {
 export function registerReviewCommands(registry: CommandRegistry, handlers: ReviewCommandHandlers): Unsubscribe[] {
   return (Object.keys(REVIEW_COMMANDS) as ReviewCommandId[]).map((id) => {
     const meta = REVIEW_COMMANDS[id];
-    const handler = handlers[id] as ((input: unknown, caller: Caller) => unknown) | undefined;
+    const handler = (handlers[id] ?? ((BASE_COMMAND_IDS as readonly string[]).includes(id) ? () => notBuilt(id) : undefined)) as ((input: unknown, caller: Caller) => unknown) | undefined;
     return registry.register({
       id,
       title: meta.title,

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { captureFixture, changesetRecord, policySnapshot, sha256Of } from '../fakes/fixtures';
-import { changesetFileSchema, changesetSchema, hunkSchema, type DecisionRecord, type ReviewReport, type ReviewRunRecord } from '../schemas';
-import type { ChangesetStore } from '../types';
+import { captureFixture, changesetRecord, policySnapshot, sha1Of, sha256Of } from '../fakes/fixtures';
+import type { Baseline, FailureSets, TestFailure, TestRunSummary } from '../reports/types';
+import { changesetFileSchema, changesetSchema, hunkSchema, type CheckRecord, type DecisionRecord, type ReviewReport, type ReviewRunRecord } from '../schemas';
+import type { ChangesetStore, TestRunStore } from '../types';
 
 export interface StoreHarness {
   readonly store: ChangesetStore;
@@ -218,6 +219,166 @@ export function describeChangesetStoreContract(name: string, setup: () => Promis
       read.state = 'accepted';
       expect(h.store.get(changeset.id)?.state, 'the stored state is unchanged').toBe('captured');
       expect(h.store.policy(policy.hash)?.hash, 'the policy is stored').toBe(policy.hash);
+    });
+  });
+}
+
+export interface TestRunStoreHarness {
+  readonly store: ChangesetStore & TestRunStore;
+  close(): Promise<void> | void;
+}
+
+const summary = (patch: Partial<TestRunSummary> = {}): TestRunSummary => ({ source: 'junit', status: 'parsed', refusal: null, files: 1, bytes: 400, executed: 5, passed: 3, failed: 2, skipped: 1, ...patch });
+
+/** Behaviour of the test runs, the failing cases, the baselines and `rerunOf` of a check (0045 section 4.4). */
+export function describeTestRunStoreContract(name: string, setup: () => Promise<TestRunStoreHarness>, options: { readonly pending?: string } = {}): void {
+  const suite = options.pending === undefined ? describe : describe.skip;
+  suite(`${name} (TestRunStore contract)${options.pending === undefined ? '' : ` [pending ${options.pending}]`}`, () => {
+    let h: TestRunStoreHarness;
+    const policy = policySnapshot();
+    beforeEach(async () => {
+      h = await setup();
+      h.store.putPolicy(policy);
+    });
+    afterEach(async () => {
+      await h.close();
+    });
+
+    const changeset = () => {
+      const rows = changesetRecord(captureFixture({ seed: 'tests', policyHash: policy.hash }));
+      h.store.insert(rows.changeset, rows.files, rows.hunks);
+      return rows.changeset;
+    };
+    const check = (id: string, owner: { id: string; checkpointCommit: string } | null, patch: Partial<CheckRecord> = {}): CheckRecord => ({
+      id,
+      changesetId: owner === null ? null : owner.id,
+      target: owner === null ? 'base' : 'checkpoint',
+      commitId: owner === null ? sha1Of('base') : owner.checkpointCommit,
+      policyHash: policy.hash,
+      command: ['pnpm', 'test'],
+      outcome: 'failed',
+      notRunReason: null,
+      exitCode: 1,
+      signal: null,
+      durationMs: 10,
+      outputPath: null,
+      outputTail: 'boom',
+      truncated: false,
+      startedAt: T(1),
+      endedAt: T(2),
+      ...patch,
+    });
+    const failure = (seed: string, patch: Partial<TestFailure> = {}): TestFailure => ({ key: sha256Of(seed), suite: 'suite', name: `test ${seed}`, status: 'failed', message: `message ${seed}`, ...patch });
+    const ref = (seed: string) => ({ key: sha256Of(seed), suite: 'suite', name: `test ${seed}`, message: `message ${seed}` });
+    const sets = (patch: Partial<FailureSets> = {}): FailureSets => ({ against: 'baseline', baselineState: 'red', new: [ref('n')], known: [ref('k')], flaky: [ref('f')], fixed: [ref('x')], missing: 2, truncated: false, ...patch });
+    const baseline = (jobId: string, patch: Partial<Baseline> = {}): Baseline => ({ commitId: sha1Of('base'), policyHash: policy.hash, jobId, state: 'red', known: [sha256Of('a')], flaky: [], executed: 5, ...patch });
+
+    it('reads the counts of a run back on the check of a changeset and on the base check of a pair', () => {
+      const owner = changeset();
+      h.store.putCheck(check('chk_cp', owner));
+      h.store.putCheck(check('chk_base', null));
+      expect(h.store.checks(owner.id)[0]?.tests ?? null, 'a check without a stored test run has no counts').toBeNull();
+      h.store.putTestRun('chk_cp', summary(), [failure('x'), failure('y', { status: 'error' })], 'review/sw1/chk_cp.tests.jsonl');
+      h.store.putTestRun('chk_base', summary({ executed: 7, passed: 7, failed: 0 }), [], null);
+      expect(h.store.checks(owner.id)[0]?.tests, 'the counts joined to the check of the changeset').toEqual(summary());
+      expect(h.store.baseCheck(sha1Of('base'), policy.hash)?.tests?.executed, 'the counts joined to the base check').toBe(7);
+    });
+
+    it('keeps counts out of the check row: only a stored test run makes them appear', () => {
+      const owner = changeset();
+      h.store.putCheck(check('chk_cp', owner, { tests: summary() }));
+      expect(h.store.checks(owner.id)[0]?.tests ?? null, 'counts on the record given to putCheck are not stored').toBeNull();
+    });
+
+    it('returns the failing cases in the order they were stored and replaces them on a second put', () => {
+      const owner = changeset();
+      h.store.putCheck(check('chk_cp', owner));
+      h.store.putTestRun('chk_cp', summary(), [failure('b'), failure('a', { status: 'error', message: null })], null);
+      expect(h.store.testFailures('chk_cp').map((row) => [row.name, row.status, row.message]), 'order, status and message').toEqual([
+        ['test b', 'failed', 'message b'],
+        ['test a', 'error', null],
+      ]);
+      h.store.putTestRun('chk_cp', summary({ failed: 1, passed: 4 }), [failure('c')], null);
+      expect(h.store.testFailures('chk_cp').map((row) => row.name), 'the second put replaces the first').toEqual(['test c']);
+      expect(h.store.testFailures('chk_unknown'), 'no failures for a check without a test run').toEqual([]);
+    });
+
+    it('refuses a test run for an unknown check and rows outside the limits of the tables', () => {
+      const owner = changeset();
+      h.store.putCheck(check('chk_cp', owner));
+      expect(() => h.store.putTestRun('chk_unknown', summary(), [], null), 'an unknown check').toThrow(expect.objectContaining({ code: 'not_found' }));
+      expect(() => h.store.putTestRun('chk_cp', summary({ executed: 4 }), [], null), 'executed is passed plus failed').toThrow(expect.objectContaining({ code: 'refused' }));
+      expect(() => h.store.putTestRun('chk_cp', summary({ refusal: 'x'.repeat(301) }), [], null), 'a refusal text over 300 characters').toThrow(expect.objectContaining({ code: 'refused' }));
+      expect(() => h.store.putTestRun('chk_cp', summary(), [failure('a', { key: 'short' })], null), 'a key that is not 64 characters').toThrow(expect.objectContaining({ code: 'refused' }));
+      expect(() => h.store.putTestRun('chk_cp', summary(), [failure('a', { suite: 's'.repeat(1_025) })], null), 'a suite over 1,024 characters').toThrow(expect.objectContaining({ code: 'refused' }));
+      expect(() => h.store.putTestRun('chk_cp', summary(), [failure('a', { name: 'n'.repeat(1_025) })], null), 'a name over 1,024 characters').toThrow(expect.objectContaining({ code: 'refused' }));
+      expect(() => h.store.putTestRun('chk_cp', summary(), [failure('a', { message: 'm'.repeat(2_001) })], null), 'a message over 2,000 characters').toThrow(expect.objectContaining({ code: 'refused' }));
+      expect(() => h.store.putTestRun('chk_cp', summary(), [failure('a'), failure('a')], null), 'one test twice').toThrow(expect.objectContaining({ code: 'refused' }));
+      expect(h.store.checks(owner.id)[0]?.tests ?? null, 'a refused put stores nothing').toBeNull();
+    });
+
+    it('stores the failure sets with the test run, replaces them on a second put and clears them when the second put has none', () => {
+      const owner = changeset();
+      h.store.putCheck(check('chk_cp', owner));
+      expect(h.store.failureSets('chk_cp'), 'no sets before a test run').toBeUndefined();
+      h.store.putTestRun('chk_cp', summary(), [failure('a')], null);
+      expect(h.store.failureSets('chk_cp'), 'a test run without sets').toBeUndefined();
+      h.store.putTestRun('chk_cp', summary(), [failure('a')], null, sets());
+      expect(h.store.failureSets('chk_cp'), 'the sets as given, with their test text').toEqual(sets());
+      h.store.putTestRun('chk_cp', summary(), [failure('a')], null, sets({ new: [], missing: 0, truncated: true }));
+      expect(h.store.failureSets('chk_cp'), 'the second put replaces the first').toEqual(sets({ new: [], missing: 0, truncated: true }));
+      h.store.putTestRun('chk_cp', summary(), [failure('a')], null);
+      expect(h.store.failureSets('chk_cp'), 'a put without sets clears them').toBeUndefined();
+      expect(h.store.failureSets('chk_unknown'), 'a check without a test run').toBeUndefined();
+    });
+
+    it('refuses failure sets outside the limits of the table and stores nothing of the put', () => {
+      const owner = changeset();
+      h.store.putCheck(check('chk_cp', owner));
+      const put = (patch: Partial<FailureSets>) => () => h.store.putTestRun('chk_cp', summary(), [], null, sets(patch));
+      expect(put({ new: [{ ...ref('a'), key: 'short' }] }), 'a key that is not 64 characters').toThrow(expect.objectContaining({ code: 'refused' }));
+      expect(put({ known: [{ ...ref('a'), name: 'n'.repeat(1_025) }] }), 'a name over 1,024 characters').toThrow(expect.objectContaining({ code: 'refused' }));
+      expect(put({ flaky: [{ ...ref('a'), message: 'm'.repeat(2_001) }] }), 'a message over 2,000 characters').toThrow(expect.objectContaining({ code: 'refused' }));
+      expect(put({ fixed: Array.from({ length: 2_001 }, (_, index) => ref(`f${index}`)) }), 'a set over the limit of stored failures').toThrow(expect.objectContaining({ code: 'refused' }));
+      expect(h.store.checks(owner.id)[0]?.tests ?? null, 'a refused put stores nothing').toBeNull();
+      expect(h.store.failureSets('chk_cp'), 'and no sets').toBeUndefined();
+    });
+
+    it('keeps the check a run repeats and refuses a repeat of an unknown check', () => {
+      const owner = changeset();
+      h.store.putCheck(check('chk_first', owner));
+      h.store.putCheck(check('chk_second', owner, { outcome: 'passed', exitCode: 0, rerunOf: 'chk_first' }));
+      expect(h.store.checks(owner.id).map((row) => [row.id, row.rerunOf ?? null]), 'the rerun names the first run').toEqual([
+        ['chk_first', null],
+        ['chk_second', 'chk_first'],
+      ]);
+      expect(() => h.store.putCheck(check('chk_third', owner, { rerunOf: 'chk_missing' })), 'a repeat of an unknown check').toThrow(expect.objectContaining({ code: 'refused' }));
+    });
+
+    it('returns the newest baseline of a pair, replaces the baseline of a job and keeps pairs apart', () => {
+      expect(h.store.baseline(sha1Of('base'), policy.hash), 'no baseline before a job stored one').toBeUndefined();
+      h.store.putBaseline(baseline('bjob_1', { state: 'flaky' }));
+      h.store.putBaseline(baseline('bjob_2'));
+      h.store.putBaseline(baseline('bjob_3', { commitId: sha1Of('other') }));
+      expect(h.store.baseline(sha1Of('base'), policy.hash)?.jobId, 'the newest job of the pair').toBe('bjob_2');
+      h.store.putBaseline(baseline('bjob_1', { state: 'clean', known: [] }));
+      expect(h.store.baseline(sha1Of('base'), policy.hash), 'a replaced baseline is the newest of its pair again').toMatchObject({ jobId: 'bjob_1', state: 'clean', known: [] });
+      expect(h.store.baseline(sha1Of('other'), policy.hash)?.jobId, 'another commit has its own baseline').toBe('bjob_3');
+      expect(h.store.baseline(sha1Of('base'), sha256Of('other policy')), 'another policy has none').toBeUndefined();
+    });
+
+    it('returns copies of test runs and baselines', () => {
+      const owner = changeset();
+      h.store.putCheck(check('chk_cp', owner));
+      h.store.putTestRun('chk_cp', summary(), [failure('a')], null);
+      h.store.putBaseline(baseline('bjob_1'));
+      (h.store.testFailures('chk_cp')[0] as { name: string }).name = 'changed';
+      (h.store.baseline(sha1Of('base'), policy.hash) as { state: string }).state = 'clean';
+      expect(h.store.testFailures('chk_cp')[0]?.name, 'the stored failure is unchanged').toBe('test a');
+      expect(h.store.baseline(sha1Of('base'), policy.hash)?.state, 'the stored baseline is unchanged').toBe('red');
+      h.store.putTestRun('chk_cp', summary(), [], null, sets());
+      (h.store.failureSets('chk_cp')?.new[0] as { name: string }).name = 'changed';
+      expect(h.store.failureSets('chk_cp')?.new[0]?.name, 'the stored sets are unchanged').toBe('test n');
     });
   });
 }

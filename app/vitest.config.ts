@@ -34,6 +34,7 @@ export default defineConfig({
         'src/core/agents/agentStoreContract.ts',
         // Test doubles, contracts and fixtures of the review ladder.
         'src/core/review/fakes/**',
+        'src/core/review/base/baseChecksContract.ts',
         'src/core/review/manager/{reviewManagerContract,reviewDecisionContract,persistentRig}.ts',
         'src/core/review/reviewer/reviewerRuntimeContract.ts',
         'src/core/review/store/{changesetStoreContract,sqliteHarness}.ts',

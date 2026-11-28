@@ -106,7 +106,7 @@ function rig(files: Record<string, string | Buffer>, options: { home?: string; e
         checkpointCommit: checkpoint,
         baseCommit: r.base,
         policyHash: POLICY_HASH,
-        policy: { ...DEFAULT_REVIEW_POLICY, check: { command, timeoutSeconds: 170, network: 'none', env: [], ...patch } },
+        policy: { ...DEFAULT_REVIEW_POLICY, check: { command, timeoutSeconds: 170, network: 'none', env: [], redBaseSendBack: 'new_failures', baselineLowers: false, ...patch } },
       } satisfies CheckRequest),
   };
 }

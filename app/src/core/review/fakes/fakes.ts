@@ -1,7 +1,9 @@
 import type { SessionId } from '../../session/types';
 import type { SwarmId } from '../../swarm/types';
+import type { SwarmPurpose } from '../../swarm/definition';
 import type { NodeId } from '../../tree/types';
 import { REASON_CATALOGUE, type ReasonId } from '../reasonCatalogue';
+import type { Baseline, FailureSets, TestFailure, TestRunSummary } from '../reports/types';
 import type { ChangesetId, CheckRecord, PolicySnapshot, Reason } from '../schemas';
 import type {
   AssessInput,
@@ -35,16 +37,30 @@ export class FakeCheckExecutor implements CheckExecutor {
   readonly requests: CheckRequest[] = [];
   readonly cancelled: ChangesetId[] = [];
   private readonly outcomes = new Map<ChangesetId, { checkpoint: CheckRecord['outcome']; base?: CheckRecord['outcome'] }>();
+  private readonly reruns = new Map<ChangesetId, CheckRecord['outcome']>();
+  private readonly tests = new Map<ChangesetId, { summary: TestRunSummary; failures: readonly TestFailure[]; sets?: FailureSets; rerunSets?: FailureSets; baseline?: Baseline }>();
 
   set(changesetId: ChangesetId, checkpoint: CheckRecord['outcome'], base?: CheckRecord['outcome']): void {
     this.outcomes.set(changesetId, { checkpoint, ...(base === undefined ? {} : { base }) });
   }
 
+  /** The outcome of the run that repeats the checkpoint run (`rerunOf` set); without it the repeat passes. */
+  setRerun(changesetId: ChangesetId, outcome: CheckRecord['outcome']): void {
+    this.reruns.set(changesetId, outcome);
+  }
+
+  /** Test counts and failing cases that every checkpoint run of the changeset reports, with the failure sets and baseline of the comparison when given (`rerunSets` for the run that repeats the checkpoint run). */
+  setTests(changesetId: ChangesetId, summary: TestRunSummary, failures: readonly TestFailure[], comparison: { readonly sets?: FailureSets; readonly rerunSets?: FailureSets; readonly baseline?: Baseline } = {}): void {
+    this.tests.set(changesetId, { summary, failures, ...comparison });
+  }
+
   async run(request: CheckRequest): Promise<CheckOutcomeSet> {
     this.requests.push(request);
-    const planned = this.outcomes.get(request.changesetId) ?? { checkpoint: 'passed' as const };
+    const planned = request.rerunOf === undefined ? (this.outcomes.get(request.changesetId) ?? { checkpoint: 'passed' as const }) : { checkpoint: this.reruns.get(request.changesetId) ?? ('passed' as const) };
+    const tests = this.tests.get(request.changesetId);
+    const sets = request.rerunOf === undefined ? tests?.sets : (tests?.rerunSets ?? tests?.sets);
     const record = (target: 'checkpoint' | 'base', outcome: CheckRecord['outcome'], commitId: string): CheckRecord => ({
-      id: `chk_${target}_${request.changesetId}`,
+      id: `chk_${target}_${request.changesetId}${request.rerunOf === undefined || target === 'base' ? '' : '_rerun'}`,
       changesetId: target === 'checkpoint' ? request.changesetId : null,
       target,
       commitId,
@@ -58,12 +74,17 @@ export class FakeCheckExecutor implements CheckExecutor {
       outputPath: null,
       outputTail: outcome === 'failed' ? 'FAIL one test' : '',
       truncated: false,
+      ...(target === 'checkpoint' && request.rerunOf !== undefined ? { rerunOf: request.rerunOf } : {}),
+      ...(target === 'checkpoint' && tests !== undefined ? { tests: tests.summary } : {}),
       startedAt: '2026-11-21T10:00:00.000Z',
       endedAt: '2026-11-21T10:00:01.000Z',
     });
     return {
       checkpoint: record('checkpoint', planned.checkpoint, request.checkpointCommit),
       ...(planned.base === undefined ? {} : { base: record('base', planned.base, request.baseCommit) }),
+      ...(tests === undefined ? {} : { testRun: { failures: tests.failures, listPath: null } }),
+      ...(sets === undefined ? {} : { failures: sets }),
+      ...(tests?.baseline === undefined ? {} : { baseline: tests.baseline }),
     };
   }
 
@@ -75,7 +96,7 @@ export class FakeCheckExecutor implements CheckExecutor {
 /**
  * Rules that return the reasons set per changeset id (or per agent), plus `check.failed` for a failed checkpoint
  * that the base does not share, `check.base_red` when it does (also for a checkpoint that did not run), and `check.none` without a check command,
- * each at the policy's `rungs` entry when it has one.
+ * and `check.base_fix` for a changeset of a fix swarm, each at the policy's `rungs` entry when it has one.
  */
 export class FakeRiskRules implements RiskRules {
   readonly inputs: AssessInput[] = [];
@@ -96,6 +117,7 @@ export class FakeRiskRules implements RiskRules {
     else if (check?.checkpoint.outcome === 'failed') reasons.push(fromPolicy(check.base?.outcome === 'failed' ? 'check.base_red' : 'check.failed'));
     else if (check?.checkpoint.outcome === 'timed_out') reasons.push(fromPolicy('check.timed_out'));
     else if (check?.checkpoint.outcome === 'not_run') reasons.push(fromPolicy(check.base?.outcome === 'failed' ? 'check.base_red' : 'check.not_run'));
+    if (input.swarmPurpose?.kind === 'base_fix') reasons.push(fromPolicy('check.base_fix'));
     return reasons;
   }
 }
@@ -183,16 +205,23 @@ interface FactAgent {
 
 /** Swarms, their agents and folders as the review manager reads them. */
 export class InMemorySwarmFacts implements ReviewSwarmFacts {
-  private readonly swarms = new Map<SwarmId, { goal: string; folderId: NodeId; callerSessionId?: SessionId; defaultTarget?: string; agents: FactAgent[] }>();
+  private readonly swarms = new Map<SwarmId, { goal: string; folderId: NodeId; callerSessionId?: SessionId; defaultTarget?: string; purpose?: SwarmPurpose; agents: FactAgent[] }>();
   private readonly parents = new Map<NodeId, NodeId | null>();
 
   addFolder(id: NodeId, parentId: NodeId | null = null): void {
     this.parents.set(id, parentId);
   }
 
-  addSwarm(swarmId: SwarmId, input: { goal?: string; folderId: NodeId; callerSessionId?: SessionId; defaultTarget?: string }): void {
+  addSwarm(swarmId: SwarmId, input: { goal?: string; folderId: NodeId; callerSessionId?: SessionId; defaultTarget?: string; purpose?: SwarmPurpose }): void {
     if (!this.parents.has(input.folderId)) this.addFolder(input.folderId);
-    this.swarms.set(swarmId, { goal: input.goal ?? 'contract goal', folderId: input.folderId, agents: [], ...(input.callerSessionId === undefined ? {} : { callerSessionId: input.callerSessionId }), defaultTarget: input.defaultTarget ?? 'main' });
+    this.swarms.set(swarmId, {
+      goal: input.goal ?? 'contract goal',
+      folderId: input.folderId,
+      agents: [],
+      ...(input.callerSessionId === undefined ? {} : { callerSessionId: input.callerSessionId }),
+      ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
+      defaultTarget: input.defaultTarget ?? 'main',
+    });
   }
 
   addAgent(swarmId: SwarmId, agent: Partial<FactAgent> & { name: string }): void {
@@ -232,6 +261,7 @@ export class InMemorySwarmFacts implements ReviewSwarmFacts {
       goal: swarm.goal,
       ...(swarm.defaultTarget === undefined ? {} : { defaultTarget: swarm.defaultTarget }),
       repository: { path: '/repo', baseCommit: sha1Of('base') },
+      ...(swarm.purpose === undefined ? {} : { purpose: swarm.purpose }),
       agents: swarm.agents.map(({ name, stage, workspace, state, task, owns }) => ({ name, stage, workspace, state, task, owns })),
     };
   }

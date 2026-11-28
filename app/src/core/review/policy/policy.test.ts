@@ -187,3 +187,90 @@ describe('the user-level overlay only tightens', () => {
     expect(snapshot.errors?.[0], 'the issue says it came from the overlay').toContain('user overlay');
   });
 });
+
+describe('the report fields of the check', () => {
+  const check = (extra: Record<string, unknown> = {}) => reviewPolicySchema.parse({ version: 1, check: { command: ['pnpm', 'test'], ...extra } });
+
+  it('gives a check no report source, no minimum, a send-back of new failures and no lowering by default', () => {
+    expect(check().check, 'defaults of the new fields').toMatchObject({ redBaseSendBack: 'new_failures', baselineLowers: false });
+    expect(check().check?.reports, 'no report source unless the policy names one').toBeUndefined();
+    expect(check().check?.minTests, 'no minimum unless the policy names one').toBeUndefined();
+    expect(check({ reports: {} }).check?.reports, 'an empty reports entry gets its defaults').toEqual({ junit: [], libtest: false });
+  });
+
+  it.each([['target/nextest/ci/*.xml'], ['$TMPDIR/reports/*.xml'], ['build/test-results/**/*.xml']])('accepts the report glob %s', (glob) => {
+    expect(check({ reports: { junit: [glob] } }).check?.reports?.junit, 'the glob is kept').toEqual([glob]);
+  });
+
+  it.each([['../outside.xml'], ['reports/../../outside.xml'], ['/abs/report.xml'], ['']])('refuses the report glob "%s"', (glob) => {
+    expect(() => check({ reports: { junit: [glob] } }), 'a glob that leaves the checkout').toThrow();
+  });
+
+  it('refuses an unknown key in reports, more than 32 globs and a minimum that is not a count', () => {
+    expect(() => check({ reports: { junit: [], xml: true } }), 'an unknown key').toThrow();
+    expect(() => check({ reports: { junit: Array.from({ length: 33 }, (_, index) => `r${index}/*.xml`) } }), 'more than 32 globs').toThrow();
+    expect(() => check({ minTests: -1 }), 'a negative minimum').toThrow();
+    expect(() => check({ minTests: 1.5 }), 'a fractional minimum').toThrow();
+    expect(() => check({ redBaseSendBack: 'sometimes' }), 'a send-back mode outside the list').toThrow();
+  });
+
+  it('puts the report fields into the policy hash, so a changed report setting is a new pair', async () => {
+    const hashOf = async (extra: Record<string, unknown>) => {
+      repo = makeRepo({ [POLICY_PATH]: policyJson(extra) });
+      return (await load(repo, repo.base)).hash;
+    };
+    const plain = await hashOf({});
+    expect(await hashOf({ check: { command: ['pnpm', 'test'], reports: { junit: ['r/*.xml'] } } }), 'a report glob').not.toBe(plain);
+    expect(await hashOf({ check: { command: ['pnpm', 'test'], minTests: 2 } }), 'a minimum').not.toBe(plain);
+    expect(await hashOf({ check: { command: ['pnpm', 'test'], baselineLowers: true } }), 'the opt-in').not.toBe(plain);
+  });
+
+  describe('in the overlay', () => {
+    const project = check({ reports: { junit: ['a/*.xml'], libtest: false }, minTests: 5, redBaseSendBack: 'new_failures', baselineLowers: true });
+    const plain = check();
+    const overlay = (fields: NonNullable<UserPolicy['check']>) => ({ check: fields });
+
+    it('adds report globs to the project globs and turns libtest on, and never turns a source off', () => {
+      const result = mergeOverlay(project, overlay({ reports: { junit: ['b/*.xml', 'a/*.xml'], libtest: true } })).check?.reports;
+      expect(result, 'the union of globs and libtest on').toEqual({ junit: ['a/*.xml', 'b/*.xml'], libtest: true });
+      const kept = mergeOverlay(check({ reports: { junit: ['a/*.xml'], libtest: true } }), overlay({ reports: { libtest: false } })).check?.reports;
+      expect(kept, 'a user libtest false does not turn the project source off').toEqual({ junit: ['a/*.xml'], libtest: true });
+    });
+
+    it('gives a project without reports the source of the user and ignores an entry without a source', () => {
+      expect(mergeOverlay(plain, overlay({ reports: { junit: ['r/*.xml'] } })).check?.reports, 'a source only the user names').toEqual({ junit: ['r/*.xml'], libtest: false });
+      expect(mergeOverlay(plain, overlay({ reports: { libtest: true } })).check?.reports, 'libtest alone').toEqual({ junit: [], libtest: true });
+      expect(mergeOverlay(plain, overlay({ reports: { junit: [], libtest: false } })).check?.reports, 'an entry that names no source adds none').toBeUndefined();
+    });
+
+    it('takes the larger minimum and never lowers the minimum of 1 that a source implies', () => {
+      expect(mergeOverlay(project, overlay({ minTests: 9 })).check?.minTests, 'a larger user minimum').toBe(9);
+      expect(mergeOverlay(project, overlay({ minTests: 2 })).check?.minTests, 'a smaller user minimum does not lower the project').toBe(5);
+      expect(mergeOverlay(project, overlay({})).check?.minTests, 'no user minimum keeps the project value').toBe(5);
+      expect(mergeOverlay(plain, overlay({ minTests: 0 })).check?.minTests, 'zero cannot lower the default of 1').toBe(1);
+      expect(mergeOverlay(plain, overlay({ minTests: 4 })).check?.minTests, 'a user minimum over the default').toBe(4);
+      expect(mergeOverlay(plain, overlay({})).check?.minTests, 'no minimum on either side stays absent').toBeUndefined();
+    });
+
+    it('sends back nothing on a red base when either side says never', () => {
+      expect(mergeOverlay(project, overlay({ redBaseSendBack: 'never' })).check?.redBaseSendBack, 'the user says never').toBe('never');
+      const never = check({ redBaseSendBack: 'never' });
+      expect(mergeOverlay(never, overlay({ redBaseSendBack: 'new_failures' })).check?.redBaseSendBack, 'a user new_failures does not loosen the project').toBe('never');
+      expect(mergeOverlay(project, overlay({})).check?.redBaseSendBack, 'neither says never').toBe('new_failures');
+    });
+
+    it('turns the lowering off when the user says false and never turns it on', () => {
+      expect(mergeOverlay(project, overlay({ baselineLowers: false })).check?.baselineLowers, 'the user turns the opt-in off').toBe(false);
+      expect(mergeOverlay(project, overlay({ baselineLowers: true })).check?.baselineLowers, 'a project opt-in stays on when the user agrees').toBe(true);
+      expect(mergeOverlay(project, overlay({})).check?.baselineLowers, 'a silent overlay keeps the project opt-in').toBe(true);
+      expect(mergeOverlay(plain, overlay({ baselineLowers: true })).check?.baselineLowers, 'the user cannot turn it on').toBe(false);
+    });
+
+    it('applies the user report fields to a user check that has no project check, with the lowering off', () => {
+      const result = mergeOverlay(DEFAULT_REVIEW_POLICY, overlay({ command: ['make', 'test'], reports: { junit: ['r/*.xml'] }, minTests: 3, redBaseSendBack: 'never', baselineLowers: true })).check;
+      expect(result, 'the user check with its report fields').toMatchObject({ command: ['make', 'test'], reports: { junit: ['r/*.xml'], libtest: false }, minTests: 3, redBaseSendBack: 'never', baselineLowers: false });
+      expect(mergeOverlay(DEFAULT_REVIEW_POLICY, overlay({ command: ['make', 'test'], reports: { notes: 'x' } })).check?.reports, 'an entry without a source is dropped').toBeUndefined();
+      expect(mergeOverlay(DEFAULT_REVIEW_POLICY, overlay({ reports: { junit: ['r/*.xml'] } })).check, 'report fields without a command make no check').toBeUndefined();
+    });
+  });
+});

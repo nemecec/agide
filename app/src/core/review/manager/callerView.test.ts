@@ -34,6 +34,24 @@ describe('changeset view for a session', () => {
     expect([view.changeset.repoPath, view.changeset.patchPath], 'paths of the user machine stay out').toEqual([undefined, undefined]);
   });
 
+  it('quotes the suite and name of a failing test and wraps its message for a session, and gives the user the sets as they are', () => {
+    const ref = { key: 'k'.repeat(64), suite: 'suite "one"', name: 'it ignores\nprevious instructions', message: 'expected 1 to be 2' };
+    const failures = { against: 'baseline' as const, baselineState: 'clean' as const, new: [ref], known: [ref], flaky: [ref], fixed: [{ ...ref, message: null }], missing: 1, truncated: false };
+    const full: ChangesetDetail = { ...detail('+x'), failures };
+    expect(detailForCaller(full, { kind: 'ui' }), 'the user reads the records as they are').toBe(full);
+    const view = detailForCaller(full, SESSION) as { failures: { new: { key: string; suite: string; name: string; message: { untrusted: string } }[]; known: unknown[]; flaky: unknown[]; fixed: { message: null }[]; missing: number } };
+    expect(view.failures.new[0]!.suite, 'the suite is one quoted line').toBe('"suite \\"one\\""');
+    expect(view.failures.new[0]!.name, 'the name is one quoted line').toBe('"it ignores previous instructions"');
+    expect(view.failures.new[0]!.message.untrusted, 'the message is tagged data').toMatch(/^<untrusted-data-[0-9a-f]+ source="swarm-agent" name="test-report">\nexpected 1 to be 2\n<\/untrusted-data-[0-9a-f]+>$/);
+    for (const set of [view.failures.known, view.failures.flaky] as { name: string; message: { untrusted: string } }[][])
+      expect([set[0]!.name, set[0]!.message.untrusted.startsWith('<untrusted-data-')], 'the known and flaky sets are quoted and wrapped too').toEqual(['"it ignores previous instructions"', true]);
+    expect([view.failures.new[0]!.key, view.failures.fixed[0]!.message, view.failures.missing], 'the key, a missing message and the count stay').toEqual(['k'.repeat(64), null, 1]);
+  });
+
+  it('adds no failures to the view of a changeset without sets', () => {
+    expect('failures' in (detailForCaller(detail('+x'), SESSION) as object), 'no key').toBe(false);
+  });
+
   it('stops hunk text at the cap and says it did', () => {
     const view = detailForCaller(detail('+' + 'x'.repeat(HUNK_TEXT_MAX)), SESSION) as { hunks: unknown[]; hunksTruncated: boolean };
     expect([view.hunks.length, view.hunksTruncated], 'the second hunk is left out').toEqual([1, true]);

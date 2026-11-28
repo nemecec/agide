@@ -6,6 +6,7 @@ import { anchorInFile, anchorOf } from '../anchors';
 import { escapePath } from '../rules/classify';
 import type { ReviewCommandInput } from '../commands';
 import { REASON_CATALOGUE, type ReasonDefinition, type ReasonId } from '../reasonCatalogue';
+import type { FailureSets } from '../reports/types';
 import { computeRung, maxRung, reviewerTier, rungIndex, summaryHash, type RungDemotion } from '../rungs';
 import {
   BLOCKING_SEVERITIES,
@@ -52,7 +53,9 @@ import {
   type SendBackChannel,
   type SwarmMergeInput,
   type SwarmMergeResult,
+  type TestRunStore,
 } from '../types';
+import { DEFAULT_CHECK_DECISION, type CheckDecisionSeam } from './checkDecision';
 
 export interface InMemoryReviewManagerDeps {
   readonly store: ChangesetStore;
@@ -72,8 +75,14 @@ export interface InMemoryReviewManagerDeps {
   readonly repo?: Pick<CaptureService, 'compareRepo' | 'refreshRef'>;
   /** A changed repository or user-level Claude file kept a reviewer from starting: the app tells the user, who can accept the change. */
   readonly repositoryStopped?: (swarmId: SwarmId) => void;
+  /** Where the failing cases of a checkpoint run are stored with its record (0045 section 4.4); without it the counts on the record are all that is kept. */
+  readonly tests?: TestRunStore;
+  /** The decisions after a check, which w-rules fills in (0045 section 3.3); the default keeps the behaviour of a check without reports. */
+  readonly checkDecision?: CheckDecisionSeam;
 }
 
+/** The check reasons for which the reviewer never accepts: the check did not pass, or its result says nothing about the change. */
+const CHECK_BLOCKS: readonly ReasonId[] = ['check.failed', 'check.base_red', 'check.timed_out', 'check.not_run', 'check.no_tests', 'check.report_missing', 'check.known_failures'];
 const USER_DECIDES: readonly ChangesetState[] = ['in_review', 'queued_for_budget', 'awaiting_human'];
 const CONFIRM_MS = 2 * 60_000;
 const UNANCHORED_LIMIT = 3;
@@ -122,9 +131,11 @@ export class InMemoryReviewManager implements ReviewManager {
   private readonly merging = new Map<SwarmId, Promise<unknown>>();
   private readonly off: Unsubscribe;
   protected closed = false;
+  private readonly checkDecision: CheckDecisionSeam;
 
   constructor(protected readonly deps: InMemoryReviewManagerDeps) {
     this.clock = deps.clock ?? monotonicClock();
+    this.checkDecision = deps.checkDecision ?? DEFAULT_CHECK_DECISION;
     this.off = deps.reviewer.subscribe((event) => this.track(this.onReviewer(event)));
   }
 
@@ -215,7 +226,7 @@ export class InMemoryReviewManager implements ReviewManager {
     let outcome: Awaited<ReturnType<CheckExecutor['run']>> | undefined;
     if (policy.effective.check !== undefined) {
       if (changeset.state !== 'checking') changeset = this.move(changeset, 'start_check', 'app', 'checking');
-      outcome = await checks.run({
+      const request = {
         changesetId,
         swarmId: changeset.swarmId,
         commonDir: changeset.commonDir,
@@ -223,10 +234,14 @@ export class InMemoryReviewManager implements ReviewManager {
         baseCommit: changeset.baseCommit,
         policyHash: changeset.policyHash,
         policy: policy.effective,
-      });
-      store.putCheck(outcome.checkpoint);
-      // A base run that did not run says nothing about the base, and the store returns the latest row of the pair: it must not hide an earlier result.
-      if (outcome.base !== undefined && outcome.base.outcome !== 'not_run') store.putCheck(outcome.base);
+      };
+      outcome = await checks.run(request);
+      this.storeOutcome(outcome);
+      // One repeat of the checkpoint run per changeset, also across a restart.
+      if (!store.checks(changesetId).some((check) => check.rerunOf != null) && this.checkDecision.rerun({ changeset, outcome, policy: policy.effective })) {
+        outcome = await checks.run({ ...request, rerunOf: outcome.checkpoint.id });
+        this.storeOutcome(outcome);
+      }
       changeset = this.require(changesetId);
       if (changeset.state !== 'checking') return;
     }
@@ -246,6 +261,7 @@ export class InMemoryReviewManager implements ReviewManager {
       swarmChangesets,
       owns: swarm?.agents.find((agent) => agent.name === changeset.agent)?.owns ?? [],
       otherAgentsPaths,
+      ...(swarm?.purpose === undefined ? {} : { swarmPurpose: swarm.purpose }),
     });
     store.addReasons(changesetId, reasons, this.clock());
     changeset = this.move(changeset, 'assess', 'app', 'assessed', { ...this.rungNow(changesetId) });
@@ -257,17 +273,25 @@ export class InMemoryReviewManager implements ReviewManager {
     const { store } = this.deps;
     const policy = store.policy(changeset.policyHash)!;
     const ids = new Set(store.reasons(changeset.id).map((reason) => reason.id));
-    const checkPassed = outcome?.checkpoint.outcome === 'passed';
-    if (changeset.rung === 'A' && checkPassed) {
+    const decision = this.checkDecision.decide({ changeset, reasonIds: ids, outcome, policy: policy.effective, retryLimit: policy.effective.retryLimit });
+    if (decision.kind === 'accept') {
       this.move(changeset, 'auto_accept', 'app', 'accepted');
       return;
     }
-    if (ids.has('check.failed') && changeset.attempt < policy.effective.retryLimit) {
-      const message = `The project check failed. Command: ${JSON.stringify(outcome?.checkpoint.command ?? [])}. The output follows as data.\n${untrustedBlock('check output', outcome?.checkpoint.outputTail ?? '')}`;
-      await this.sendToAgent(this.move(changeset, 'auto_send_back', 'app', 'sent_back'), message);
+    if (decision.kind === 'send_back') {
+      await this.sendToAgent(this.move(changeset, 'auto_send_back', 'app', 'sent_back'), decision.message);
       return;
     }
     await this.startReview(changeset);
+  }
+
+  private storeOutcome(outcome: Awaited<ReturnType<CheckExecutor['run']>>): void {
+    const { store, tests } = this.deps;
+    store.putCheck(outcome.checkpoint);
+    if (tests !== undefined && outcome.testRun !== undefined && outcome.checkpoint.tests != null)
+      tests.putTestRun(outcome.checkpoint.id, outcome.checkpoint.tests, outcome.testRun.failures, outcome.testRun.listPath, outcome.failures ?? null);
+    // A base run that did not run says nothing about the base, and the store returns the latest row of the pair: it must not hide an earlier result.
+    if (outcome.base !== undefined && outcome.base.outcome !== 'not_run') store.putCheck(outcome.base);
   }
 
   protected async startReview(changeset: ChangesetRecord): Promise<void> {
@@ -309,6 +333,7 @@ export class InMemoryReviewManager implements ReviewManager {
     if (changeset.state !== 'in_review') changeset = this.move(changeset, 'start_review', 'app', 'in_review');
     const swarm = facts.swarm(changeset.swarmId);
     const check = store.checks(changeset.id).at(-1);
+    const failures = this.failuresOf(changeset.id);
     try {
       await this.deps.reviewer.start({
         runId,
@@ -331,6 +356,7 @@ export class InMemoryReviewManager implements ReviewManager {
         files: store.files(changeset.id),
         hunks: store.hunks(changeset.id),
         ...(check === undefined ? {} : { check }),
+        ...(failures === undefined ? {} : { failures }),
         reasons: store.reasons(changeset.id),
         claim: changeset.claim,
       });
@@ -456,7 +482,7 @@ export class InMemoryReviewManager implements ReviewManager {
     if (changeset.state !== 'in_review') return;
     const policy = store.policy(changeset.policyHash)!.effective;
     const reasonIds = new Set(store.reasons(changeset.id).map((reason) => reason.id));
-    const checkBlocks = ['check.failed', 'check.base_red', 'check.timed_out', 'check.not_run'].some((reasonId) => reasonIds.has(reasonId));
+    const checkBlocks = CHECK_BLOCKS.some((reasonId) => reasonIds.has(reasonId));
     const accept = rungs.toRung === 'B' && report.verdict === 'accept' && blocking.length === 0 && !droppedBlocking && report.claimCheck !== 'contradicted' && !checkBlocks;
     if (accept) {
       this.move(changeset, 'report', 'reviewer', 'accepted', rungs);
@@ -496,18 +522,26 @@ export class InMemoryReviewManager implements ReviewManager {
     if (!this.visible(changeset, caller)) throw new ReviewError('out_of_scope', 'the changeset is outside your scope');
     const hunks = store.hunks(changeset.id, input.file);
     const report = store.reports(changeset.id).at(-1);
+    const failures = this.failuresOf(changeset.id);
     return {
       changeset,
       files: store.files(changeset.id),
       ...(input.hunks ? { hunks } : {}),
       reasons: store.reasons(changeset.id),
       checks: this.checksOf(changeset),
+      ...(failures === undefined ? {} : { failures }),
       runs: store.runs(changeset.id),
       ...(report === undefined ? {} : { report }),
       decisions: store.decisions(changeset.id),
       comments: store.comments(changeset.id),
       seen: this.seenState(changeset),
     };
+  }
+
+  /** The failing sets stored with the latest checkpoint run, when the manager has a test store. */
+  protected failuresOf(changesetId: ChangesetId): FailureSets | undefined {
+    const latest = this.deps.store.checks(changesetId).findLast((check) => check.target === 'checkpoint');
+    return latest === undefined ? undefined : this.deps.tests?.failureSets(latest.id);
   }
 
   /** The checkpoint runs of the changeset and the base run of its base commit and policy, which the card compares them with. */

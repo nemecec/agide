@@ -216,7 +216,7 @@ describe('review module in the real module graph', () => {
     await client.connect(new StreamableHTTPClientTransport(new URL(grant.url), { requestInit: { headers: { Authorization: `Bearer ${grant.token}` } } }));
     try {
       const names = (await client.listTools()).tools.map((tool) => tool.name).filter((name) => name.startsWith('review_') || name.startsWith('report_'));
-      expect(names.sort(), 'review tools a default session receives').toEqual(['review_get', 'review_list', 'review_request_escalation']);
+      expect(names.sort(), 'review tools a default session receives').toEqual(['review_base_status', 'review_get', 'review_list', 'review_request_escalation']);
       const call = await client.callTool({ name: 'report_review', arguments: {} });
       expect(call, 'report_review is unknown outside the reviewer tool set').toMatchObject({ isError: true, content: [{ type: 'text', text: expect.stringContaining('not_found') }] });
     } finally {
