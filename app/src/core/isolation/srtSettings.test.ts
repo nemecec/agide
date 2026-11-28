@@ -43,6 +43,17 @@ describe('buildSrtSettings', () => {
     expect(buildSrtSettings(base).filesystem.denyRead, 'no deny-read by default').toEqual([]);
   });
 
+  it('denies reading the profile database and its journal files, in both spellings of their directory, and nothing else of the data directory', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'srt-database-'));
+    try {
+      const { denyRead } = buildSrtSettings({ ...base, profileDatabase: join(dir, 'app.db') }).filesystem;
+      const names = ['app.db', 'app.db-wal', 'app.db-shm', 'app.db-journal'];
+      expect(new Set(denyRead), 'the four files under the spelling given and under the real directory').toEqual(new Set([...names.map((name) => join(dir, name)), ...names.map((name) => join(realpathSync(dir), name))]));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('allows the resolved form of a workspace that is a link, because Seatbelt matches resolved paths', () => {
     const { allowWrite } = buildSrtSettings({ ...base, writeDirs: ['/tmp'] }).filesystem;
     expect(allowWrite, 'tmp and its target').toEqual(expect.arrayContaining(['/tmp', '/private/tmp']));

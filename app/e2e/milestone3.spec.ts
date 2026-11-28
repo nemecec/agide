@@ -8,6 +8,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import type { CommandResult } from '../src/core/commands/types';
 import type { InboxItem } from '../src/core/inbox/types';
+import { INSIDE_NAMES_ARGUMENT, INSIDE_PREFIX, isHostSideVariable } from '../src/core/isolation/hostLaunch';
 import type { McpConfigJson } from '../src/core/mcp/types';
 import { defaultPermissionSettings } from '../src/core/permissions/defaults';
 import { installFakeGh, samplePullRequest } from '../src/core/tasks/fixtures/fakeGh';
@@ -22,6 +23,8 @@ import type { RendererApi } from '../src/shared/ipc';
 const MAIN = join(import.meta.dirname, '..', 'out', 'main', 'index.js');
 const FAKE_CLAUDE = join(import.meta.dirname, 'fixtures', 'fake-claude-m3.mjs');
 const FAKE_SRT = join(import.meta.dirname, 'fixtures', 'fake-srt.mjs');
+/** Variables that the system adds to a process when it starts, whatever the parent passed. */
+const SET_BY_THE_SYSTEM = ['PWD', '__CF_USER_TEXT_ENCODING'];
 
 const PAGE = `<!doctype html><html><head><title>Integration page</title></head><body>
 <h1>Integration heading</h1>
@@ -246,15 +249,17 @@ test('the isolation provider chosen for the profile changes how the next session
   expect((await invoke(page, 'isolation_set_provider', { provider: 'srt' })).ok, 'srt passes its check and is chosen').toBe(true);
 
   await startSession(page, folderId);
-  const srtRuns = jsonLines<{ args: string[]; loader: string[]; cwd: string; path: string; settings: { network: { allowedDomains: string[] }; allowPty?: boolean } }>(file('srt.jsonl'));
+  const srtRuns = jsonLines<{ args: string[]; loader: string[]; names: string[]; cwd: string; path: string; settings: { network: { allowedDomains: string[] }; allowPty?: boolean } }>(file('srt.jsonl'));
   expect(srtRuns, 'the launch went through srt').toHaveLength(1);
   const [run] = srtRuns as [(typeof srtRuns)[number]];
   const program = run.args.indexOf(FAKE_CLAUDE);
-  expect(run.args.slice(0, 1).concat(run.args.slice(2, 4)), 'srt -s <settings> -- env').toEqual(['-s', '--', '/usr/bin/env']);
-  expect(program, 'claude follows the assignments of env').toBeGreaterThan(4);
-  expect(run.args[4], 'the PATH of the profile is put back for claude inside the sandbox').toMatch(/^PATH=./);
-  expect(run.args.slice(5, program).every((assignment) => /^(NODE_OPTIONS|NODE_PATH|DYLD_|LD_)\w*=/.test(assignment)), 'what stands between PATH and claude are loader variables of the profile').toBe(true);
-  expect(run.loader, 'the process of srt has no loader variable: they belong to claude inside the sandbox').toEqual([]);
+  expect(run.args.slice(0, 1).concat(run.args.slice(2, 5)), 'srt -s <settings> -- the shell that sets the variables of the profile').toEqual(['-s', '--', '/bin/sh', '-c']);
+  const names = run.args.find((word) => word.startsWith(INSIDE_NAMES_ARGUMENT))?.slice(INSIDE_NAMES_ARGUMENT.length).split(',') ?? [];
+  expect(program, 'claude follows the list of names').toBe(run.args.indexOf(`${INSIDE_NAMES_ARGUMENT}${names.join(',')}`) + 1);
+  expect(names, 'the PATH of the profile is put back for claude inside the sandbox').toContain('PATH');
+  expect(run.args.some((word) => word.includes(file('srt.jsonl'))), 'no value of the profile is an argument: the record path of this test reached srt in a carrier').toBe(false);
+  expect(run.names.filter((name) => name !== 'PATH' && !name.startsWith(INSIDE_PREFIX) && !SET_BY_THE_SYSTEM.includes(name) && !isHostSideVariable(name)), 'the process of srt has the allowed variables, the PATH and the inert carriers only: the rest belongs to claude inside the sandbox').toEqual([]);
+  expect(run.loader, 'the process of srt has no loader variable').toEqual([]);
   expect(run.path.split(':').every((entry) => entry.startsWith('/')), 'the PATH of the process of srt holds absolute entries only').toBe(true);
   expect(run.settings.network.allowedDomains, 'the profile allowlist reaches the sandbox').toContain('packages.internal.example');
   expect(run.settings.allowPty, 'the TUI needs a PTY inside srt').toBe(true);

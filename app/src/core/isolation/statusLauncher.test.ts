@@ -2,8 +2,9 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { launcherArgv, LAUNCHER_HANDLED_SIGNALS } from './statusLauncher';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { INSIDE_PREFIX } from './hostLaunch';
+import { INSIDE_SCRIPT, insideArgv, launcherArgv, LAUNCHER_HANDLED_SIGNALS } from './statusLauncher';
 import { systemSignals, type SystemSignal } from './signalTable';
 
 const onMac = process.platform === 'darwin';
@@ -184,6 +185,27 @@ describe('the launcher shell of a check, on any system', () => {
     }
   });
 
+  it('ends 126 for a bare word that names a directory and that env finds through a relative or an empty PATH entry: failed, never passed and never a missing program', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'launcher-bare-dir-'));
+    try {
+      mkdirSync(join(directory, 'src'));
+      for (const path of ['.:/usr/bin:/bin', ':/usr/bin:/bin', './.:/usr/bin:/bin']) {
+        const ended = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
+          const [file = '', ...args] = launcherArgv(['src']);
+          const child = spawn(file, args, { cwd: directory, env: { PATH: path }, stdio: ['ignore', 'ignore', 'pipe'] });
+          const chunks: Buffer[] = [];
+          child.stderr.on('data', (chunk: Buffer) => chunks.push(chunk));
+          child.once('close', (code) => resolve({ code, stderr: Buffer.concat(chunks).toString('utf8') }));
+        });
+        expect([ended.code, ended.stderr.includes('Permission denied')], `PATH ${path}`).toEqual([126, true]);
+      }
+      const absolute = await run(launcherArgv(['src']), 10_000, directory);
+      expect(absolute.code, 'with an absolute PATH the word is not found at all: 127').toBe(127);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('changes into the directory it is given before it runs the program, and fails when it cannot', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'launcher-cd-'));
     try {
@@ -204,5 +226,79 @@ describe('the launcher shell of a check, on any system', () => {
   it('passes the arguments on as they are, without a second parse by the shell', async () => {
     const ended = await run(launcherArgv(['sh', '-c', 'test "$1" = "a b; exit 9"', 'name', 'a b; exit 9']));
     expect(ended.code, 'an argument with a space and a semicolon arrives whole').toBe(0);
+  });
+});
+
+describe('the variables that the launcher inside the sandbox sets from their carriers', () => {
+  /** Values with the characters a shell would read: quotes, a dollar, backticks, a command substitution, a line break, a backslash and a leading dash. */
+  const tricky = { A: `-a"b'c $HOME \`id\` $(id)\nline\\`, B: '-n', IFS: ':', PATH: '/usr/bin:/bin', name: 'loop' };
+  const carriers = Object.fromEntries(Object.entries(tricky).map(([name, value]) => [`${INSIDE_PREFIX}${name}`, value]));
+  /** A Node program that prints its environment and its pid as JSON. */
+  const printer = `#!${process.execPath}\nprocess.stdout.write(JSON.stringify({ pid: process.pid, env: process.env }));\n`;
+
+  const started = (argv: readonly string[], env: Record<string, string>, cwd?: string): Promise<{ code: number | null; pid: number | undefined; printed: { pid: number; env: Record<string, string> } | undefined }> =>
+    new Promise((resolve) => {
+      const [file = '', ...args] = argv;
+      const child = spawn(file, args, { env, stdio: ['ignore', 'pipe', 'ignore'], ...(cwd === undefined ? {} : { cwd }) });
+      const chunks: Buffer[] = [];
+      child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
+      child.once('close', (code) => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        resolve({ code, pid: child.pid, printed: text === '' ? undefined : (JSON.parse(text) as { pid: number; env: Record<string, string> }) });
+      });
+    });
+
+  let directory: string;
+  let program: string;
+  beforeEach(() => {
+    directory = realpathSync(mkdtempSync(join(tmpdir(), 'launcher-inside-')));
+    program = join(directory, 'print.cjs');
+    writeFileSync(program, printer, { mode: 0o755 });
+  });
+  afterEach(() => rmSync(directory, { recursive: true, force: true }));
+
+  for (const [title, argv] of [
+    ['a session', (names: readonly string[]) => insideArgv(names, [program])],
+    ['a check', (names: readonly string[]) => launcherArgv([program], { directory, inside: names })],
+  ] as const) {
+    it(`gives the program of ${title} each listed variable with its exact value and removes the carriers`, async () => {
+      const { code, printed } = await started(argv(Object.keys(tricky)), { ...carriers, HOME: '/h' });
+      expect(code, 'the program ran').toBe(0);
+      expect(Object.fromEntries(Object.keys(tricky).map((name) => [name, printed?.env[name]])), 'each value arrives as it was, never parsed by the shell').toEqual(tricky);
+      expect(Object.keys(printed?.env ?? {}).filter((name) => name.startsWith('AGIDE_INSIDE')), 'no carrier and no variable of the route is left').toEqual([]);
+      expect(printed?.env['HOME'], 'a host-side variable stays').toBe('/h');
+    });
+
+    it(`leaves the program of ${title} without PATH when the list has none, and sets only what the list names`, async () => {
+      const { printed } = await started(argv(['A']), { ...carriers, PATH: '/usr/bin:/bin' });
+      expect(printed?.env['PATH'], 'the PATH of the host side does not reach the program').toBeUndefined();
+      expect(printed?.env['B'], 'a carrier that the list does not name is not set').toBeUndefined();
+    });
+
+    it(`refuses a list of ${title} with a name that a shell cannot set: the program does not run and the status is 2`, async () => {
+      const { code, printed } = await started(argv(['A', 'X-Y']), { ...carriers, 'AGIDE_INSIDE_X-Y': 'v' });
+      expect([code, printed], 'status 2 and nothing printed').toEqual([2, undefined]);
+    });
+  }
+
+  it.each(['C', 'et_EE.UTF-8', 'en_US.UTF-8'])('sets names with any letter under the locale %s, whose collation decides what a range such as A-Z holds', async (locale) => {
+    const names = ['TMPDIR', 'XYZ', 'UVW_2', 'abc'];
+    const env = { LC_ALL: locale, ...Object.fromEntries(names.map((name) => [`${INSIDE_PREFIX}${name}`, `v-${name}`])) };
+    for (const argv of [insideArgv(names, [program]), launcherArgv([program], { directory, inside: names })]) {
+      const { code, printed } = await started(argv, env);
+      expect([code, names.map((name) => printed?.env[name])], `every name is set (${argv[2] === INSIDE_SCRIPT ? 'session' : 'check'})`).toEqual([0, names.map((name) => `v-${name}`)]);
+    }
+  });
+
+  it('replaces the shell with the program of a session, so a signal to srt reaches the program itself', async () => {
+    const { pid, printed } = await started(insideArgv([], [program]), {});
+    expect(printed?.pid, 'the program has the pid of the started shell').toBe(pid);
+  });
+
+  it('keeps the status of the program of a check, and its death by a signal, through the subshell', async () => {
+    expect((await run(launcherArgv(['sh', '-c', 'exit 3'], { directory, inside: [] }))).code, 'exit 3').toBe(3);
+    expect((await run(launcherArgv(['sh', '-c', 'kill -TERM $$; exit 0'], { directory, inside: [] }))).code, 'a SIGTERM the program sent itself is 143').toBe(143);
+    const toParent = `[ "$PPID" = ${process.pid} ] || kill -7 $PPID; sleep 0.2; exit 4`;
+    expect((await run(launcherArgv(['sh', '-c', toParent], { directory, inside: [] }))).code, 'a signal to its parent, the launcher, leaves the status of the program').toBe(4);
   });
 });

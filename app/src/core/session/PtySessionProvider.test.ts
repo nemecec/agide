@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeProvider } from '../isolation/FakeProvider';
 import { PtySessionService, type PtySessionServiceOptions } from './PtySessionService';
 
@@ -127,6 +127,24 @@ describe('launch through a provider', () => {
     expect(provider.calls.find((call) => call.step === 'prepare')?.detail, 'profile key').toEqual({ profileId: 'work' });
     await service.close(session.id);
     expect(provider.calls.map((call) => call.step), 'terminate and release on close').toEqual(expect.arrayContaining(['terminate', 'releaseSession']));
+  });
+
+  it('writes the names of the variables that do not reach the program to the log of the app, without their values', async () => {
+    const provider = new FakeProvider({
+      sessionFilesDir: join(dir, 'sessions'),
+      command: (launch, spec) => ({ file: FAKE_CLAUDE, args: [...launch.args], cwd: launch.cwd, env: { ...spec.profile.env }, dropped: ['NOT_CARRIED', 'BASH_FUNC_x%%'] }),
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      start({ provider, profileLaunch: () => ({ claudeConfigDir: undefined, env: { PATH: process.env['PATH'] ?? '', FAKE_CLAUDE_RECORD: record, NOT_CARRIED: 'value-that-stays-out' }, toolFiles: [] }) });
+      const session = await service.create({ folderId: FOLDER, cwd: workdir });
+      await until('launch record', () => launches().length > 0);
+      const lines = warn.mock.calls.map((call) => String(call[0]));
+      expect(lines, 'one line with the session and the names').toContain(`session ${session.id}: variables of the launch that do not reach the program: NOT_CARRIED, BASH_FUNC_x%%`);
+      expect(lines.some((line) => line.includes('value-that-stays-out')), 'no value').toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('reports a provider failure as launch_failed and leaves no session or file behind', async () => {

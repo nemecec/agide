@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -76,18 +76,18 @@ describe('hostDirectory', () => {
 
 describe('HostTools lookup', () => {
   it('searches the trusted entries of the app PATH first, then the system directories, Homebrew and Docker Desktop', () => {
-    const tools = new HostTools({ appPath: ['', 'bin', '.', join(dir, 'a'), '/usr/bin'].join(':') });
+    const tools = new HostTools({ excluded: () => [], appPath: ['', 'bin', '.', join(dir, 'a'), '/usr/bin'].join(':') });
     expect(tools.directories(), 'the explicit list, in order, without relative and empty entries').toEqual([join(dir, 'a'), ...SYSTEM_DIRECTORIES, ...INSTALL_DIRECTORIES]);
   });
 
   it('finds a program on a trusted entry before one in a later directory', () => {
     const first = program(join(dir, 'first'), 'tool');
     program(join(dir, 'second'), 'tool');
-    expect(new HostTools({ appPath: `${join(dir, 'first')}:${join(dir, 'second')}` }).find('tool'), 'the first entry').toBe(first);
+    expect(new HostTools({ excluded: () => [], appPath: `${join(dir, 'first')}:${join(dir, 'second')}` }).find('tool'), 'the first entry').toBe(first);
   });
 
   it('finds a system program with no PATH at all', () => {
-    expect(['/bin/sh', '/usr/bin/sh'], 'the system directory holds sh').toContain(new HostTools({ appPath: '' }).find('sh'));
+    expect(['/bin/sh', '/usr/bin/sh'], 'the system directory holds sh').toContain(new HostTools({ excluded: () => [], appPath: '' }).find('sh'));
   });
 
   it('drops relative and empty entries and the directories of the excluded set, and a link into one', () => {
@@ -95,12 +95,12 @@ describe('HostTools lookup', () => {
     const found = program(join(dir, 'safe'), 'tool');
     const path = [relative(process.cwd(), join(dir, 'agent', 'bin')), '', join(dir, 'agent', 'bin'), join(dir, 'safe')].join(':');
     expect(new HostTools({ appPath: path, excluded: () => [join(dir, 'agent')] }).find('tool'), 'only the safe entry').toBe(found);
-    expect(new HostTools({ appPath: path }).find('tool'), 'without the excluded set the agent entry is used').toBe(join(dir, 'agent', 'bin', 'tool'));
+    expect(new HostTools({ appPath: path, excluded: () => [] }).find('tool'), 'without the excluded set the agent entry is used').toBe(join(dir, 'agent', 'bin', 'tool'));
   });
 
   it('adds the directories of one launch to the excluded set', () => {
     program(join(dir, 'checkout', 'bin'), 'tool');
-    const tools = new HostTools({ appPath: join(dir, 'checkout', 'bin') });
+    const tools = new HostTools({ excluded: () => [], appPath: join(dir, 'checkout', 'bin') });
     expect([tools.find('tool', [join(dir, 'checkout')]), tools.path([join(dir, 'checkout')]).split(':')[0]], 'the checkout entry is not used for this launch').toEqual([undefined, SYSTEM_DIRECTORIES[0]]);
   });
 
@@ -127,20 +127,187 @@ describe('HostTools lookup', () => {
   it('reads the PATH of the app at each lookup when none is given', () => {
     const file = program(join(dir, 'bin'), 'host-tools-probe');
     const saved = process.env['PATH'];
-    const tools = new HostTools();
+    const tools = new HostTools({ excluded: () => [] });
     try {
       process.env['PATH'] = join(dir, 'bin');
       expect(tools.find('host-tools-probe'), 'the PATH of the process now').toBe(file);
     } finally {
       process.env['PATH'] = saved;
     }
-    expect(new HostTools().find('host-tools-probe'), 'a new instance does not see the directory once the PATH is back').toBeUndefined();
+    expect(new HostTools({ excluded: () => [] }).find('host-tools-probe'), 'a new instance does not see the directory once the PATH is back').toBeUndefined();
+  });
+});
+
+describe('HostTools: where the code of a program lives', () => {
+  const excludedTools = (appPath: string, excluded: string[]): HostTools => new HostTools({ appPath, excluded: () => excluded, fixedDirectories: [] });
+
+  it('refuses a link in a trusted directory that leads into an excluded directory, on the first call and on every later one', () => {
+    const target = program(join(dir, 'agent', 'bin'), 'tool');
+    mkdirSync(join(dir, 'safe'));
+    symlinkSync(target, join(dir, 'safe', 'tool'));
+    const tools = excludedTools(join(dir, 'safe'), [join(dir, 'agent')]);
+    expect([tools.find('tool'), tools.find('tool'), tools.find('tool', [join(dir, 'unrelated')])], 'the link counts by its real path each time').toEqual([undefined, undefined, undefined]);
+    expect(tools.shadowed('tool'), 'the link is the shadowed program').toBe(join(dir, 'safe', 'tool'));
+    expect(tools.find(join(dir, 'safe', 'tool')), 'also when it is named by its path').toBeUndefined();
+  });
+
+  it('skips that link for a trusted program of the same name further on the list, and uses a link that leads to a trusted file', () => {
+    const target = program(join(dir, 'agent', 'bin'), 'tool');
+    mkdirSync(join(dir, 'safe'));
+    symlinkSync(target, join(dir, 'safe', 'tool'));
+    const real = program(join(dir, 'later'), 'tool');
+    expect(excludedTools(`${join(dir, 'safe')}:${join(dir, 'later')}`, [join(dir, 'agent')]).find('tool'), 'the later directory').toBe(real);
+    mkdirSync(join(dir, 'safe2'));
+    symlinkSync(real, join(dir, 'safe2', 'tool'));
+    expect(excludedTools(join(dir, 'safe2'), [join(dir, 'agent')]).find('tool'), 'a link to a file outside the excluded directories is used as it is').toBe(join(dir, 'safe2', 'tool'));
+  });
+
+  it('refuses an npm-style global link whose package lies in an excluded directory and takes one whose package does not', () => {
+    program(join(dir, 'npm', 'lib', 'node_modules', 'pkg', 'dist'), 'cli.js', '#!/usr/bin/env node\n');
+    mkdirSync(join(dir, 'npm', 'bin'), { recursive: true });
+    symlinkSync('../lib/node_modules/pkg/dist/cli.js', join(dir, 'npm', 'bin', 'srt'));
+    expect(excludedTools(join(dir, 'npm', 'bin'), [join(dir, 'npm', 'lib')]).find('srt'), 'the package is writable by an agent').toBeUndefined();
+    expect(excludedTools(join(dir, 'npm', 'bin'), [join(dir, 'other')]).find('srt'), 'the package is not').toBe(join(dir, 'npm', 'bin', 'srt'));
+  });
+
+  /** A global directory like the one pnpm writes: the shim in `bin`, the package a link into the store. */
+  const pnpmTree = (target: (cli: string) => string): { readonly bin: string; readonly store: string; readonly shim: string } => {
+    const store = join(dir, 'pnpm', 'store', 'links', 'pkg-1');
+    const cli = program(join(store, 'node_modules', 'pkg', 'dist'), 'cli.js', '#!/usr/bin/env node\n');
+    mkdirSync(join(dir, 'pnpm', 'global', 'node_modules'), { recursive: true });
+    symlinkSync(join(store, 'node_modules', 'pkg'), join(dir, 'pnpm', 'global', 'node_modules', 'pkg'));
+    const shim = program(join(dir, 'pnpm', 'bin'), 'srt', `#!/bin/sh\nexec node "$basedir/../global/node_modules/pkg/dist/cli.js" "$@"\n# cmd-shim-target=${target(cli)}\n`);
+    return { bin: join(dir, 'pnpm', 'bin'), store: join(dir, 'pnpm', 'store'), shim };
+  };
+
+  it('refuses a pnpm-style shim whose target lies in an excluded store, reached through the link of the global directory', () => {
+    const { bin, store, shim } = pnpmTree(() => join(dir, 'pnpm', 'global', 'node_modules', 'pkg', 'dist', 'cli.js'));
+    expect(excludedTools(bin, [store]).find('srt'), 'the code of srt lies in the store').toBeUndefined();
+    expect(excludedTools(bin, [store]).shadowed('srt'), 'the shim is the shadowed program').toBe(shim);
+    expect(excludedTools(bin, [join(dir, 'pnpm', 'elsewhere')]).find('srt'), 'a store that no agent writes is fine').toBe(shim);
+  });
+
+  it('reads a relative shim target against the directory of the link that was started as well, as a shim that does not resolve its links does', () => {
+    const store = join(dir, 'store');
+    program(join(store, 'pkg'), 'cli.js', '#!/usr/bin/env node\n');
+    const shim = program(join(dir, 'real'), 'tool', '#!/bin/sh\n# cmd-shim-target=../pkg/cli.js\n');
+    mkdirSync(join(dir, 'pkg'));
+    mkdirSync(join(store, 'links'));
+    symlinkSync(shim, join(store, 'links', 'tool'));
+    expect(excludedTools(join(store, 'links'), [join(store, 'pkg')]).find('tool'), 'the target beside the link lies in the excluded store').toBeUndefined();
+    expect(excludedTools(join(dir, 'real'), [join(store, 'pkg')]).find('tool'), 'started from its real directory the target is the trusted one').toBe(shim);
+  });
+
+  it('reads the target of a shim that names it relative to the real directory of the shim', () => {
+    const { bin, store, shim } = pnpmTree(() => '../global/node_modules/pkg/dist/cli.js');
+    expect(excludedTools(bin, [store]).find('srt'), 'the relative target resolves to the store').toBeUndefined();
+    expect(excludedTools(bin, [join(dir, 'pnpm', 'elsewhere')]).find('srt'), 'and is fine when the store is not excluded').toBe(shim);
+  });
+
+  it('refuses the shim when the shim itself lies in an excluded directory, whatever its target is', () => {
+    const { bin, shim } = pnpmTree((cli) => cli);
+    expect(excludedTools(bin, [bin]).find('srt'), 'the shim in the writable directory').toBeUndefined();
+    expect(shim.startsWith(bin), 'the shim is in that directory').toBe(true);
+  });
+
+  it('does not read a large file for a shim line and does not fail on a file it cannot read', () => {
+    const store = join(dir, 'store');
+    mkdirSync(store);
+    const large = program(join(dir, 'large'), 'tool', `#!/bin/sh\n${'# padding\n'.repeat(3000)}# cmd-shim-target=${join(store, 'cli.js')}\n`);
+    expect(excludedTools(join(dir, 'large'), [store]).find('tool'), 'a file larger than a shim is taken for a program, not a shim').toBe(large);
+    const unreadable = program(join(dir, 'unreadable'), 'tool');
+    chmodSync(unreadable, 0o111);
+    expect(excludedTools(join(dir, 'unreadable'), [store]).find('tool'), 'it counts by its place').toBe(unreadable);
+  });
+
+  it('refuseHidden throws when the first file of that name on the PATH of the host-side process is a link into an excluded directory', () => {
+    const planted = program(join(dir, 'agent', 'bin'), 'node');
+    mkdirSync(join(dir, 'safe'));
+    symlinkSync(planted, join(dir, 'safe', 'node'));
+    program(join(dir, 'later'), 'node');
+    const tools = excludedTools(`${join(dir, 'safe')}:${join(dir, 'later')}`, [join(dir, 'agent')]);
+    expect(tools.find('node'), 'find would take the later node').toBe(join(dir, 'later', 'node'));
+    expect(() => tools.refuseHidden('node', [], 'the program that runs the sandbox runtime'), 'the shell of the shim would take the link first').toThrow('runs code that lies in one');
+    const refusal = (() => { try { tools.refuseHidden('node'); } catch (error) { return error as IsolationError; } return undefined; })();
+    expect(refusal?.detail, 'the detail is the link').toBe(join(dir, 'safe', 'node'));
+  });
+});
+
+describe('HostTools and the firmlinks of the data volume', () => {
+  const dataVolume = process.platform === 'darwin' && existsSync('/System/Volumes/Data/private');
+  const viaData = (path: string): string => `/System/Volumes/Data${path.startsWith('/private/') ? path : `/private${path}`}`;
+
+  it.skipIf(!dataVolume)('drops an app PATH entry and refuses a configured program that reach an excluded directory through /System/Volumes/Data', () => {
+    const planted = program(join(dir, 'agent', 'bin'), 'srt');
+    const trusted = program(join(dir, 'trusted'), 'srt');
+    const tools = new HostTools({ appPath: `${viaData(join(dir, 'agent', 'bin'))}:${join(dir, 'trusted')}`, excluded: () => [join(dir, 'agent')], fixedDirectories: [] });
+    expect(tools.find('srt'), 'the entry through the data volume is skipped').toBe(trusted);
+    expect(tools.find(viaData(planted)), 'a configured path through the data volume is refused').toBeUndefined();
+    expect(tools.shadowed(viaData(planted)), 'and named as shadowed').toBe(viaData(planted));
+  });
+
+  it.skipIf(!dataVolume)('drops an app PATH entry that is a link whose target is spelled through /System/Volumes/Data', () => {
+    program(join(dir, 'agent', 'bin'), 'srt');
+    const trusted = program(join(dir, 'trusted'), 'srt');
+    symlinkSync(viaData(join(dir, 'agent', 'bin')), join(dir, 'entry'));
+    const tools = new HostTools({ appPath: `${join(dir, 'entry')}:${join(dir, 'trusted')}`, excluded: () => [join(dir, 'agent')], fixedDirectories: [] });
+    expect(tools.find('srt'), 'the entry resolves to the excluded directory through the data volume and is skipped').toBe(trusted);
+  });
+});
+
+describe('HostTools and a directory of the set that changes', () => {
+  it('compares a directory of the set by what it is at the next lookup, once it was replaced by a link', async () => {
+    mkdirSync(join(dir, 'row'));
+    const tool = program(join(dir, 'target', 'bin'), 'tool');
+    const tools = new HostTools({ appPath: join(dir, 'target', 'bin'), excluded: () => [join(dir, 'row')], fixedDirectories: [] });
+    expect(tools.find('tool'), 'the directory of the set is empty: the program is found').toBe(tool);
+    await Promise.resolve();
+    rmSync(join(dir, 'row'), { recursive: true });
+    symlinkSync(join(dir, 'target'), join(dir, 'row'));
+    await Promise.resolve();
+    expect(tools.find('tool'), 'the directory of the set now leads to the program: it is refused').toBeUndefined();
+  });
+});
+
+describe('HostTools.refuseBeside', () => {
+  const tools = (excluded: string[]): HostTools => new HostTools({ appPath: '/usr/bin', excluded: () => excluded, fixedDirectories: [] });
+
+  it('refuses a node beside the real file of a shim when it leads into an excluded directory, also when the shim is reached through a link', () => {
+    const planted = program(join(dir, 'agent'), 'node');
+    const shim = program(join(dir, 'shims'), 'srt');
+    symlinkSync(planted, join(dir, 'shims', 'node'));
+    mkdirSync(join(dir, 'linked'));
+    symlinkSync(shim, join(dir, 'linked', 'srt'));
+    for (const file of [shim, join(dir, 'linked', 'srt')]) {
+      const refusal = (() => { try { tools([join(dir, 'agent')]).refuseBeside(file, 'node', [], 'the program that runs the sandbox runtime'); } catch (error) { return error as IsolationError; } return undefined; })();
+      expect(refusal?.message, `${file}: the fixed reason`).toBe('the program that runs the sandbox runtime (node) exists only in a directory that an agent may write, or runs code that lies in one, so it was not started');
+      expect(refusal?.detail, `${file}: the detail is the node in the real directory of the shim`).toBe(join(dir, 'shims', 'node'));
+    }
+  });
+
+  it('refuses a node beside the link that was started, which a shim that does not resolve its links runs, while the link directory is not on the PATH', () => {
+    const planted = program(join(dir, 'agent'), 'node');
+    const shim = program(join(dir, 'shims'), 'srt');
+    mkdirSync(join(dir, 'linked'));
+    symlinkSync(shim, join(dir, 'linked', 'srt'));
+    symlinkSync(planted, join(dir, 'linked', 'node'));
+    const refusal = (() => { try { tools([join(dir, 'agent')]).refuseBeside(join(dir, 'linked', 'srt'), 'node', [], 'the program that runs the sandbox runtime'); } catch (error) { return error as IsolationError; } return undefined; })();
+    expect(refusal?.detail, 'the node beside the link as it is spelled').toBe(join(dir, 'linked', 'node'));
+    expect(() => tools([join(dir, 'agent')]).refuseBeside(shim, 'node'), 'started by its real path the shim does not see that node').not.toThrow();
+  });
+
+  it('accepts a node beside the shim that lies outside the excluded directories, no node there, and a file that does not exist', () => {
+    const shim = program(join(dir, 'shims'), 'srt');
+    expect(() => tools([join(dir, 'agent')]).refuseBeside(shim, 'node'), 'no node beside the shim').not.toThrow();
+    program(join(dir, 'shims'), 'node');
+    expect(() => tools([join(dir, 'agent')]).refuseBeside(shim, 'node'), 'a trusted node beside it').not.toThrow();
+    expect(() => tools([join(dir, 'shims')]).refuseBeside(join(dir, 'missing', 'srt'), 'node'), 'a missing file').not.toThrow();
   });
 });
 
 describe('HostTools.require', () => {
   it('names a missing program with a fixed text', () => {
-    const tools = new HostTools({ appPath: join(dir, 'none') });
+    const tools = new HostTools({ excluded: () => [], appPath: join(dir, 'none') });
     expect(() => tools.require('host-tools-missing', [], 'the sandbox runtime'), 'the reason').toThrow('the sandbox runtime (host-tools-missing) was not found as an executable on the trusted PATH of the app');
   });
 
@@ -154,9 +321,19 @@ describe('HostTools.require', () => {
       error = thrown;
     }
     expect(error, 'an isolation error').toBeInstanceOf(IsolationError);
-    expect((error as IsolationError).message, 'the reason states the rule').toBe('the sandbox runtime (srt) exists only in a directory that an agent may write, so it was not started');
+    expect((error as IsolationError).message, 'the reason states the rule').toBe('the sandbox runtime (srt) exists only in a directory that an agent may write, or runs code that lies in one, so it was not started');
     expect((error as IsolationError).message.includes(dir), 'the reason holds no path').toBe(false);
     expect((error as IsolationError).detail, 'the detail names the file').toBe(planted);
+  });
+
+  it('names an absolute program by its role and base name, with the configured path in the detail only, for a program in an excluded directory and for a missing one', () => {
+    const planted = program(join(dir, 'agent', 'bin'), 'srt');
+    const tools = new HostTools({ excluded: () => [join(dir, 'agent')], fixedDirectories: [] });
+    const refused = (() => { try { tools.require(planted, [], 'the sandbox runtime'); } catch (error) { return error as IsolationError; } return undefined; })();
+    expect([refused?.message, refused?.message.includes('/'), refused?.detail], 'role and base name, no slash, the path in the detail').toEqual(['the sandbox runtime (srt) exists only in a directory that an agent may write, or runs code that lies in one, so it was not started', false, planted]);
+    const missing = join(dir, 'nowhere', 'srt');
+    const absent = (() => { try { tools.require(missing, [], 'the sandbox runtime'); } catch (error) { return error as IsolationError; } return undefined; })();
+    expect([absent?.message, absent?.detail], 'a fixed text for the configured path, which is never looked up on a PATH').toEqual(['the sandbox runtime (srt) is not an executable file at the configured path', missing]);
   });
 
   it('refuseHidden throws for a hidden program and is silent for a missing one and for one that a trusted directory holds', () => {
@@ -170,7 +347,7 @@ describe('HostTools.require', () => {
 
   it('launch gives the file and a PATH of the trusted entries and the system directories', () => {
     const file = program(join(dir, 'bin'), 'tool');
-    const launch = new HostTools({ appPath: ['', join(dir, 'bin'), '.'].join(':') }).launch('tool');
+    const launch = new HostTools({ excluded: () => [], appPath: ['', join(dir, 'bin'), '.'].join(':') }).launch('tool');
     expect(launch, 'file and PATH').toEqual({ file, path: [join(dir, 'bin'), ...SYSTEM_DIRECTORIES].join(':') });
   });
 });
@@ -178,7 +355,7 @@ describe('HostTools.require', () => {
 describe('HostTools.execFile', () => {
   it('starts the program that the module found with the trusted PATH and a working directory that holds nothing, whatever the environment says', async () => {
     program(join(dir, 'bin'), 'show', '#!/bin/sh\nprintf "%s|%s|%s" "$PATH" "$PWD" "$KEPT"\n');
-    const tools = new HostTools({ appPath: ['', '.', join(dir, 'bin')].join(':') });
+    const tools = new HostTools({ excluded: () => [], appPath: ['', '.', join(dir, 'bin')].join(':') });
     const { error, stdout } = await exec(tools, 'show', [], { env: { PATH: '.:bin:', KEPT: 'yes' } });
     expect(error, 'no error').toBeNull();
     expect(stdout.split('|')[0], 'the PATH of the process is the trusted one').toBe([join(dir, 'bin'), ...SYSTEM_DIRECTORIES].join(':'));
@@ -189,7 +366,7 @@ describe('HostTools.execFile', () => {
   it('does not run a program of the working directory or of a relative PATH entry', async () => {
     const marker = join(dir, 'marker');
     program(join(dir, 'work'), 'tool', `#!/bin/sh\ntouch '${marker}'\n`);
-    const tools = new HostTools({ appPath: ['', '.', 'bin'].join(':') });
+    const tools = new HostTools({ excluded: () => [], appPath: ['', '.', 'bin'].join(':') });
     const { error } = await exec(tools, 'tool', [], { cwd: join(dir, 'work'), env: { PATH: '.:bin' } });
     expect(error, 'the program is not found').toBeInstanceOf(IsolationError);
     expect(existsSync(marker), 'nothing ran').toBe(false);
@@ -197,7 +374,7 @@ describe('HostTools.execFile', () => {
 
   it('reports a program that is not found through the callback, after the call returns', async () => {
     const order: string[] = [];
-    const tools = new HostTools({ appPath: join(dir, 'none') });
+    const tools = new HostTools({ excluded: () => [], appPath: join(dir, 'none') });
     const done = new Promise<void>((resolve) => tools.execFile('host-tools-missing', [], {}, () => { order.push('callback'); resolve(); }));
     order.push('returned');
     await done;
@@ -205,43 +382,55 @@ describe('HostTools.execFile', () => {
   });
 
   it('hands an empty buffer to the callback of a failed start of a buffer call', async () => {
-    const tools = new HostTools({ appPath: join(dir, 'none') });
+    const tools = new HostTools({ excluded: () => [], appPath: join(dir, 'none') });
     const result = await new Promise<{ stdout: Buffer; stderr: Buffer }>((resolve) => tools.execFileBuffer('host-tools-missing', [], {}, (_error, stdout, stderr) => resolve({ stdout, stderr })));
     expect([result.stdout.length, result.stderr.length], 'two empty buffers').toEqual([0, 0]);
   });
 
   it('returns the bytes of a buffer call unchanged', async () => {
     program(join(dir, 'bin'), 'bytes', '#!/bin/sh\nprintf "\\377\\376a"\n');
-    const bytes = await new Promise<Buffer>((resolve) => new HostTools({ appPath: join(dir, 'bin') }).execFileBuffer('bytes', [], {}, (_error, stdout) => resolve(stdout)));
+    const bytes = await new Promise<Buffer>((resolve) => new HostTools({ excluded: () => [], appPath: join(dir, 'bin') }).execFileBuffer('bytes', [], {}, (_error, stdout) => resolve(stdout)));
     expect([...bytes], 'the bytes, not decoded text').toEqual([0xff, 0xfe, 0x61]);
   });
 
   it('run resolves with the text and rejects with the error and the error output of a failing program', async () => {
     program(join(dir, 'bin'), 'ok', '#!/bin/sh\necho out\n');
     program(join(dir, 'bin'), 'bad', '#!/bin/sh\necho oops >&2\nexit 3\n');
-    const tools = new HostTools({ appPath: join(dir, 'bin') });
+    const tools = new HostTools({ excluded: () => [], appPath: join(dir, 'bin') });
     expect((await tools.run('ok', [])).stdout, 'the output').toBe('out\n');
     await expect(tools.run('bad', []), 'a failing program').rejects.toMatchObject({ code: 3, stderr: 'oops\n' });
   });
 
   it('starts a program that is given as a path with the same environment', async () => {
     const file = program(join(dir, 'tools'), 'show', '#!/bin/sh\nprintf "%s" "$PATH"\n');
-    const { stdout } = await exec(new HostTools({ appPath: '/usr/bin' }), file, []);
+    const { stdout } = await exec(new HostTools({ excluded: () => [], appPath: '/usr/bin' }), file, []);
     expect(stdout, 'the trusted PATH').toBe(['/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(':'));
   });
 
   it('adds the directories of the call to the excluded set', async () => {
     const marker = join(dir, 'marker');
     program(join(dir, 'checkout'), 'tool', `#!/bin/sh\ntouch '${marker}'\n`);
-    const { error } = await exec(new HostTools({ appPath: join(dir, 'checkout') }), 'tool', [], { excluded: [join(dir, 'checkout')] });
+    const { error } = await exec(new HostTools({ appPath: join(dir, 'checkout'), excluded: () => [] }), 'tool', [], { excluded: [join(dir, 'checkout')] });
     expect([error instanceof IsolationError, existsSync(marker)], 'refused and not run').toEqual([true, false]);
   });
 });
 
 describe('the shared instance', () => {
+  it('excludes the directories that hold no program for any profile before the profile process sets it: the defaults of srt', () => {
+    const saved = process.env['PATH'];
+    process.env['PATH'] = ['/tmp/claude/bin', '/private/tmp/claude/bin', '/usr/bin'].join(':');
+    try {
+      expect(hostTools().directories(), 'the directories that srt makes writable whatever its settings say are not searched').not.toEqual(expect.arrayContaining(['/tmp/claude/bin']));
+      expect(hostTools().directories(), 'nor the same one spelled through the link of macOS').not.toEqual(expect.arrayContaining(['/private/tmp/claude/bin']));
+      expect(hostTools().directories(), 'a system directory is').toContain('/usr/bin');
+    } finally {
+      process.env['PATH'] = saved;
+    }
+  });
+
   it('is replaced for the process and put back', () => {
     const before = hostTools();
-    const mine = new HostTools();
+    const mine = new HostTools({ excluded: () => [] });
     const restore = setHostTools(mine);
     expect(hostTools(), 'the instance that was set').toBe(mine);
     restore();
@@ -250,8 +439,8 @@ describe('the shared instance', () => {
 
   it('is not replaced back by a restore that comes after another set', () => {
     const before = hostTools();
-    const restoreFirst = setHostTools(new HostTools());
-    const second = new HostTools();
+    const restoreFirst = setHostTools(new HostTools({ excluded: () => [] }));
+    const second = new HostTools({ excluded: () => [] });
     const restoreSecond = setHostTools(second);
     restoreFirst();
     expect(hostTools(), 'the second instance stays while it is set').toBe(second);

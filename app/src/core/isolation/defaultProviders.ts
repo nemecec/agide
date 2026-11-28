@@ -4,7 +4,7 @@ import { CommandError, type CommandRegistry } from '../commands/index';
 import type { ProfileService } from '../profile/types';
 import { describeProvider } from './capabilityStatement';
 import { ContainerProvider, ownerIdOf } from './ContainerProvider';
-import type { HostTools } from './hostTools';
+import type { ProfileHostTools } from './profileHostTools';
 import { readIsolationOptions, type IsolationOptions } from './providerOptions';
 import type { IsolationStatus, ProviderRow } from './statusTypes';
 import { IsolationProviders } from './providerRegistry';
@@ -18,16 +18,17 @@ export interface ProviderSetup {
   readonly dataDir: string;
   /** The profile's `isolation.options`, read before each provider is built. */
   readonly options: () => unknown;
-  /** Finds the host-side programs of the providers; the profile process builds it from `agentWritableDirectories`. Without it each provider excludes what it lets an agent write itself. */
-  readonly hostTools?: HostTools;
-  /** Directories below which agents get their workspaces (the task base). */
-  readonly agentRoots?: readonly string[];
+  /** The profile database, which an srt session may not read. */
+  readonly profileDatabase?: string;
+  /**
+   * The host tools of the profile process and the registry they read (`createProfileHostTools`), as one value: every
+   * provider gets both or neither, so no provider adds its launches to a registry that the tools do not read. Without
+   * it each provider builds its own tools over a registry of its own.
+   */
+  readonly host?: ProfileHostTools;
 }
 
-const hostToolOptions = (setup: ProviderSetup) => ({
-  ...(setup.hostTools === undefined ? {} : { hostTools: setup.hostTools }),
-  ...(setup.agentRoots === undefined ? {} : { agentRoots: setup.agentRoots }),
-});
+const hostToolOptions = (setup: ProviderSetup) => (setup.host === undefined ? {} : { hostTools: setup.host.tools, writable: setup.host.writable });
 
 /** The providers a profile can choose. `fake`, `openshell` and `ssh` are not offered. */
 export const CHOOSABLE_PROVIDERS: readonly ProviderId[] = ['local', 'srt', 'container'];
@@ -42,6 +43,7 @@ export function buildIsolatingProvider(id: ProviderId, setup: ProviderSetup, opt
       ...hostToolOptions(setup),
       ...(options.extraWritePaths === undefined ? {} : { extraWritePaths: options.extraWritePaths }),
       ...(options.extraDenyRead === undefined ? {} : { extraDenyRead: options.extraDenyRead }),
+      ...(setup.profileDatabase === undefined ? {} : { profileDatabase: setup.profileDatabase }),
     });
   }
   if (id !== 'container') throw new IsolationError('unsupported', `the isolation provider ${id} is not built from options`);

@@ -66,7 +66,7 @@ function safeJson(text: string): unknown {
 
 function ghMessage(error: unknown): string {
   if (error instanceof ExecError) {
-    if ((error as { code?: unknown }).code === 'ENOENT' || error.message.includes('ENOENT') || error.message.includes('was not found as an executable')) return 'gh is not installed or not on the PATH of this app';
+    if ((error as { code?: unknown }).code === 'ENOENT' || error.message.includes('ENOENT') || error.message.includes('was not found as an executable') || error.message.includes('is not an executable file at the configured path')) return 'gh is not installed or not on the PATH of this app';
     const line = error.firstLine;
     return /not logged in|gh auth login|authentication/i.test(error.stderr) ? `gh is not signed in: ${line}` : `gh failed: ${line}`;
   }

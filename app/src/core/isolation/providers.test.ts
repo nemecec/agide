@@ -120,7 +120,7 @@ describe('LocalProvider launch', () => {
       for (const path of [join(planted, 'claude'), join(dir, 'work', 'claude')]) writeFileSync(path, `#!/bin/sh\ntouch '${join(dir, 'planted')}'\n`, { mode: 0o755 });
       writeFileSync(join(dir, 'trusted', 'claude'), '#!/bin/sh\n', { mode: 0o755 });
       chmodSync(join(dir, 'trusted', 'claude'), 0o755);
-      const tools = (appPath: string) => new HostTools({ appPath, fixedDirectories: [] });
+      const tools = (appPath: string) => new HostTools({ excluded: () => [], appPath, fixedDirectories: [] });
       const launch = { sessionId: 's1', cwd: join(dir, 'work'), args: [] };
       const found = await new LocalProvider({ sessionFilesDir: join(dir, 'sessions'), claudeBinary: 'claude', hostTools: tools(['bin', '', '.', planted, join(dir, 'trusted')].join(':')) }).prepare({ ...spec(dir, undefined), workspace: { mode: 'bind', hostPath: join(dir, 'work') } });
       expect((await found.processCommand?.(launch))?.file, 'the claude of the trusted entry').toBe(join(dir, 'trusted', 'claude'));
@@ -129,6 +129,21 @@ describe('LocalProvider launch', () => {
       const relativeOnly = await new LocalProvider({ sessionFilesDir: join(dir, 'sessions'), claudeBinary: 'claude', hostTools: tools(['bin', '.'].join(':')) }).prepare({ ...spec(dir, undefined), workspace: { mode: 'bind', hostPath: join(dir, 'work') } });
       await expect(relativeOnly.processCommand?.({ ...launch, cwd: join(dir, 'work') }), 'a relative entry finds nothing').rejects.toThrow('was not found as an executable');
       expect(existsSync(join(dir, 'planted')), 'no planted claude ran').toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('names a configured absolute claude by its role and base name only when the workspace holds it, with the path in the detail', async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'local-provider-')));
+    try {
+      mkdirSync(join(dir, 'work'), { recursive: true });
+      writeFileSync(join(dir, 'work', 'claude'), '#!/bin/sh\n', { mode: 0o755 });
+      const environment = await new LocalProvider({ sessionFilesDir: join(dir, 'sessions'), claudeBinary: join(dir, 'work', 'claude'), hostTools: new HostTools({ excluded: () => [], fixedDirectories: [] }) }).prepare({ ...spec(dir, undefined), workspace: { mode: 'bind', hostPath: join(dir, 'work') } });
+      const failure = await environment.processCommand?.({ sessionId: 's1', cwd: join(dir, 'work'), args: [] }).catch((error: unknown) => error);
+      expect([(failure as Error).message, (failure as Error).message.includes('/'), (failure as { detail?: string }).detail], 'the role and the base name, no slash, the configured path in the detail').toEqual(['the Claude CLI (claude) exists only in a directory that an agent may write, or runs code that lies in one, so it was not started', false, join(dir, 'work', 'claude')]);
+      const check = await new LocalProvider({ sessionFilesDir: dir, claudeBinary: join(dir, 'missing', 'claude') }).check();
+      expect(check, 'the check names no path either').toMatchObject({ ok: false, reason: 'The Claude CLI is not executable at the configured path' });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

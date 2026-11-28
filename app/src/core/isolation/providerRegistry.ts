@@ -1,4 +1,4 @@
-import { LocalProvider } from './LocalProvider';
+import { LocalProvider, type LocalProviderOptions } from './LocalProvider';
 import { IsolationError, type IsolationProvider, type ProviderId } from './types';
 
 /** Builds a provider the first time a profile or session asks for it. */
@@ -12,7 +12,7 @@ export class IsolationProviders {
   private readonly factories = new Map<ProviderId, ProviderFactory>();
   private readonly created = new Map<ProviderId, IsolationProvider>();
 
-  constructor(local: { readonly sessionFilesDir: string; readonly claudeBinary?: string } | ProviderFactory) {
+  constructor(local: LocalProviderOptions | ProviderFactory) {
     this.factories.set('local', typeof local === 'function' ? local : () => new LocalProvider(local));
   }
 

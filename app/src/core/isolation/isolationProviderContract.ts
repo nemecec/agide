@@ -3,9 +3,27 @@ import { chmodSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { EnvironmentSpec, IsolationProvider } from './types';
+import { INSIDE_NAMES_ARGUMENT, INSIDE_PREFIX } from './hostLaunch';
+import type { EnvironmentSpec, IsolationProvider, PtyCommand } from './types';
 
 const SECRET = 'token-that-must-stay-in-files';
+
+/**
+ * The variables the program starts with: the environment of the command, with the carriers of `insideRoute` set under
+ * their own names when the arguments name them (the srt provider gives the program every variable that its host-side
+ * process must not have that way, and the program has no PATH unless one is carried).
+ */
+export function startedEnvironment(command: PtyCommand): Record<string, string> {
+  const list = command.args.find((word) => word.startsWith(INSIDE_NAMES_ARGUMENT));
+  if (list === undefined) return { ...command.env };
+  const started: Record<string, string> = {};
+  for (const [name, value] of Object.entries(command.env)) if (!name.startsWith(INSIDE_PREFIX) && name !== 'PATH') started[name] = value;
+  for (const name of list.slice(INSIDE_NAMES_ARGUMENT.length).split(',').filter(Boolean)) {
+    const value = command.env[`${INSIDE_PREFIX}${name}`];
+    if (value !== undefined) started[name] = value;
+  }
+  return started;
+}
 
 export interface ContractRunOptions {
   /**
@@ -124,8 +142,9 @@ export function describeIsolationProviderContract(name: string, create: (dir: st
         rows: 24,
         env: { AGIDE_LAUNCH: 'yes', CLAUDE_CONFIG_DIR: '/elsewhere' },
       });
-      expect(command.env['AGIDE_LAUNCH'], 'launch variable').toBe('yes');
-      expect(command.env['CLAUDE_CONFIG_DIR'], 'a launch variable cannot move the login').toBe(environment.paths.toEnv(join(dir, 'claude')));
+      const started = startedEnvironment(command);
+      expect(started['AGIDE_LAUNCH'], 'launch variable').toBe('yes');
+      expect(started['CLAUDE_CONFIG_DIR'], 'a launch variable cannot move the login').toBe(environment.paths.toEnv(join(dir, 'claude')));
     });
 
     it('writes and removes the gate and digest files like the other session files', async () => {

@@ -1,9 +1,11 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AgentWritableRegistry } from './agentWritable';
 import { ContainerProvider, ownerIdOf, type ContainerProviderOptions } from './ContainerProvider';
 import { CONTAINER_RUN_FLAGS, containerName } from './dockerArgs';
 import { fakeDockerClient } from './fakeDocker';
@@ -215,6 +217,19 @@ describe('ContainerProvider command', () => {
     expect(command.env['PROFILE_VAR'], 'values travel in the client environment').toBe('p');
   });
 
+  it('passes credential-like variables of the profile, the launch and a check by name only: no value is an argument of docker', async () => {
+    const value = (name: string): string => `-"$${createHash('sha256').update(`container:${name}`).digest('hex').slice(0, 24)}\n`;
+    const values = { GH_TOKEN: value('gh'), NPM_TOKEN: value('npm'), SOME_SERVICE_TOKEN: value('service') };
+    const environment = await fakeProvider().prepare({ ...spec, profile: { ...spec.profile, extraEnv: { GH_TOKEN: values.GH_TOKEN } } });
+    const session = await environment.processCommand?.({ sessionId: 's1', cwd: join(dir, 'work'), args: [], env: { NPM_TOKEN: values.NPM_TOKEN, SOME_SERVICE_TOKEN: values.SOME_SERVICE_TOKEN } });
+    const check = await environment.toolCommand({ key: 'c1', cwd: join(dir, 'checkout'), argv: ['true'], env: values, network: 'none', writeDirs: [] });
+    for (const [name, command] of [['session', session!], ['check', check]] as const) {
+      expect(Object.values(values).filter((secret) => command.args.some((word) => word.includes(secret.slice(3, 27)))), `${name}: no argument holds a value`).toEqual([]);
+      expect(command.args, `${name}: each enters by name`).toEqual(expect.arrayContaining(['-e', 'GH_TOKEN', '-e', 'NPM_TOKEN', '-e', 'SOME_SERVICE_TOKEN']));
+      expect(Object.keys(values).map((key) => command.env[key]), `${name}: the values are in the environment of the client`).toEqual(Object.values(values));
+    }
+  });
+
   it('runs a process without a terminal as docker run -i, with the mounts and variables of the PTY launch', async () => {
     const environment = await fakeProvider({ ownerId: 'o1' }).prepare(spec);
     const launch = { sessionId: 's1', cwd: join(dir, 'work'), args: ['-p', '--session-id', 's1'], env: { LAUNCH_VAR: 'l' } };
@@ -265,8 +280,11 @@ describe('ContainerProvider host-side lookups against what the agent can write',
     writeFileSync(path, `#!/bin/sh\ntouch '${join(dir, 'planted')}'\nexit 0\n`, { mode: 0o755 });
     return path;
   };
-  /** Looks only on the app PATH it is given, so a docker of the machine in a system directory cannot answer. */
-  const tools = (appPath: string): HostTools => new HostTools({ appPath, fixedDirectories: [] });
+  /** Looks only on the app PATH it is given, so a docker of the machine in a system directory cannot answer, and reads the registry that the provider adds to, as the profile process wires them. */
+  const confined = (appPath: string, agentRoots?: string[]): Pick<ContainerProviderOptions, 'hostTools' | 'writable'> => {
+    const writable = new AgentWritableRegistry(() => ({ claudeConfigDir: undefined, ...(agentRoots === undefined ? {} : { agentRoots }) }));
+    return { writable, hostTools: new HostTools({ appPath, fixedDirectories: [], excluded: () => writable.directories() }) };
+  };
   const planted = (): boolean => existsSync(join(dir, 'planted'));
   const unsafePath = (...entries: string[]): string => [relative(process.cwd(), join(dir, 'work', 'bin')), '', '.', 'bin', ...entries].join(':');
 
@@ -274,7 +292,7 @@ describe('ContainerProvider host-side lookups against what the agent can write',
     plant(join(dir, 'work', 'bin'));
     plant(join(dir, 'work'));
     const trusted = fakeDockerClient(join(dir, 'client'));
-    const environment = await provider({ dockerBinary: 'docker', hostTools: tools(unsafePath(join(dir, 'work', 'bin'), join(dir, 'client'))) }).prepare({ ...spec, profile: { ...spec.profile, env: { PATH: unsafePath(), HOME: '/Users/host' } } });
+    const environment = await provider({ dockerBinary: 'docker', ...confined(unsafePath(join(dir, 'work', 'bin'), join(dir, 'client'))) }).prepare({ ...spec, profile: { ...spec.profile, env: { PATH: unsafePath(), HOME: '/Users/host' } } });
     const command = await environment.ptyCommand({ sessionId: 's1', cwd: join(dir, 'work'), args: [], cols: 80, rows: 24 });
     expect(command.file, 'the docker client outside the workspace').toBe(trusted);
     expect(command.env['PATH'], 'the PATH of the client holds the trusted entry and the system directories').toBe([join(dir, 'client'), ...SYSTEM_DIRECTORIES].join(':'));
@@ -286,7 +304,7 @@ describe('ContainerProvider host-side lookups against what the agent can write',
   it('does the same for a process without a terminal and for a check', async () => {
     plant(join(dir, 'work', 'bin'));
     const trusted = fakeDockerClient(join(dir, 'client'));
-    const environment = await provider({ dockerBinary: 'docker', hostTools: tools(unsafePath(join(dir, 'work', 'bin'), join(dir, 'client'))) }).prepare(spec);
+    const environment = await provider({ dockerBinary: 'docker', ...confined(unsafePath(join(dir, 'work', 'bin'), join(dir, 'client'))) }).prepare(spec);
     const process = await environment.processCommand?.({ sessionId: 's1', cwd: join(dir, 'work'), args: [] });
     const tool = await environment.toolCommand({ key: 'c1', cwd: join(dir, 'work'), argv: ['true'], env: { CI: '1' }, network: 'none', writeDirs: [] });
     expect([process?.file, tool.file, process?.cwd, tool.cwd], 'the trusted client and the empty directory').toEqual([trusted, trusted, hostDirectory(), hostDirectory()]);
@@ -296,7 +314,7 @@ describe('ContainerProvider host-side lookups against what the agent can write',
   it('refuses to start when the only docker client is in the workspace, found through an absolute, a relative or an empty entry', async () => {
     plant(join(dir, 'work'));
     for (const appPath of [join(dir, 'work'), relative(process.cwd(), join(dir, 'work')), ':', '.']) {
-      const environment = await provider({ dockerBinary: 'docker', hostTools: tools(appPath) }).prepare(spec);
+      const environment = await provider({ dockerBinary: 'docker', ...confined(appPath) }).prepare(spec);
       const failure = await environment.processCommand?.({ sessionId: 's1', cwd: join(dir, 'work'), args: [] }).catch((error: unknown) => error);
       expect(failure, `PATH ${appPath}`).toBeInstanceOf(IsolationError);
     }
@@ -305,7 +323,7 @@ describe('ContainerProvider host-side lookups against what the agent can write',
 
   it('says that Docker is not installed when the only client is one the agent can write, and runs none of the committed clients for the check or the cleanup', async () => {
     plant(join(dir, 'work'));
-    const writable = provider({ dockerBinary: 'docker', hostTools: tools(join(dir, 'work')), ownerId: 'o1' });
+    const writable = provider({ dockerBinary: 'docker', ...confined(join(dir, 'work')), ownerId: 'o1' });
     await writable.prepare(spec);
     expect(await writable.check(), 'check result').toMatchObject({ ok: false, reason: 'Docker is not installed' });
     await writable.removeOrphans();
@@ -318,7 +336,7 @@ describe('ContainerProvider host-side lookups against what the agent can write',
     const docker = fakeDocker({ containers: ['c1'] });
     mkdirSync(join(dir, 'trusted'));
     writeFileSync(join(dir, 'trusted', 'docker'), readFileSync(docker.binary), { mode: 0o755 });
-    return { docker, scoped: provider({ dockerBinary: 'docker', hostTools: tools(`${join(dir, 'work', 'bin')}:${join(dir, 'trusted')}`), ownerId: 'o1', image: 'agide-fake-image:0', ...options }) };
+    return { docker, scoped: provider({ dockerBinary: 'docker', ...confined(`${join(dir, 'work', 'bin')}:${join(dir, 'trusted')}`), ownerId: 'o1', image: 'agide-fake-image:0', ...options }) };
   };
 
   it('asks the client of the trusted entry, not the committed one, in the check of the provider', async () => {
@@ -345,10 +363,18 @@ describe('ContainerProvider host-side lookups against what the agent can write',
     expect(planted(), 'the committed client did not run').toBe(false);
   });
 
+  it('names a configured absolute docker client by its role and base name only when the workspace holds it, with the path in the detail', async () => {
+    const client = plant(join(dir, 'work', 'bin'));
+    const environment = await provider({ dockerBinary: client, ...confined(join(dir, 'work', 'bin')) }).prepare(spec);
+    const failure = await environment.processCommand?.({ sessionId: 's1', cwd: join(dir, 'work'), args: [] }).catch((error: unknown) => error);
+    expect([(failure as IsolationError).message, (failure as IsolationError).message.includes('/'), (failure as IsolationError).detail], 'role and base name, no slash, the path in the detail').toEqual(['the docker client (docker) exists only in a directory that an agent may write, or runs code that lies in one, so it was not started', false, client]);
+    expect(planted(), 'the committed client did not run').toBe(false);
+  });
+
   it('does not take a docker client from a directory below a root of the agents workspaces or below the Claude directory of the provider', async () => {
     for (const root of [join(dir, 'agents', 'swarm', 'tree'), join(dir, 'claude', 'local')]) {
       plant(join(root, 'bin'));
-      const scoped = provider({ dockerBinary: 'docker', hostTools: tools(join(root, 'bin')), agentRoots: [join(dir, 'agents')] });
+      const scoped = provider({ dockerBinary: 'docker', ...confined(join(root, 'bin'), [join(dir, 'agents')]) });
       const environment = await scoped.prepare(spec);
       const failure = await environment.processCommand?.({ sessionId: 's1', cwd: join(dir, 'work'), args: [] }).catch((error: unknown) => error);
       expect(failure, `the only docker client is below ${relative(dir, root)}`).toBeInstanceOf(IsolationError);

@@ -181,6 +181,8 @@ export interface PtyCommand {
   readonly args: readonly string[];
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
+  /** Names of variables of the launch that the program does not receive, because the route into the sandbox cannot carry them (`insideRoute`). */
+  readonly dropped?: readonly string[];
 }
 
 export type IsolationErrorCode = 'unsupported' | 'invalid' | 'failed';

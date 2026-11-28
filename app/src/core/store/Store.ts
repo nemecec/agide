@@ -19,6 +19,12 @@ export function openStore(path: string): Database {
   return db;
 }
 
+/** The file of the main database of `db`, or undefined for a database in memory. */
+export function databaseFile(db: Database): string | undefined {
+  const main = (db.prepare('PRAGMA database_list').all() as { name: string; file: string }[]).find((row) => row.name === 'main');
+  return main === undefined || main.file === '' ? undefined : main.file;
+}
+
 /**
  * Applies the module's migrations above its recorded version, each in its own transaction.
  * Each module owns its tables and its migration list, so modules migrate independently.

@@ -7,6 +7,8 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Caller } from '../../core/commands/types';
 import { hostTools } from '../../core/isolation/hostTools';
+import { SqliteSessionStore } from '../../core/session/index';
+import { openStore } from '../../core/store/index';
 import { catalogueReason, FakeCheckExecutor, FakeRiskRules } from '../../core/review/fakes/fakes';
 import { captureFixture, policySnapshot } from '../../core/review/fakes/fixtures';
 import { REVIEW_COMMANDS, ReviewError, reviewPolicySchema, type CaptureResult, type CaptureService, type Reason } from '../../core/review/index';
@@ -83,11 +85,80 @@ describe('review module in the real module graph', () => {
     expect(hostTools().find('wiring-root'), 'a program below the task base is not used: another agent can write it').toBe(join(trusted, 'wiring-root'));
     expect(hostTools().find('wiring-extra'), 'before the options list the directory, a program there is found').toBe(join(extra, 'bin', 'wiring-extra'));
     app.services.profile.store.updateSettings(app.services.profile.id, { isolation: { provider: 'srt', options: { extraWritePaths: [extra] } } } as never);
+    // The registry reads the profile once per turn of the event loop.
+    await Promise.resolve();
     expect(hostTools().find('wiring-extra'), 'once the options list it as writable, the directory is out of the lookup').toBe(join(trusted, 'wiring-extra'));
     const tools = hostTools();
     await app.close();
     app = undefined;
     expect(hostTools(), 'the instance of the process is put back when the modules end').not.toBe(tools);
+  });
+
+  it('puts the working directory of a session that the store holds out of the lookup before any launch when the profile uses a confining provider, so what its agent planted before a restart is not used', async () => {
+    const outside = join(dir, 'elsewhere');
+    const trusted = join(dir, 'trusted');
+    for (const directory of [join(outside, 'bin'), trusted]) {
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, 'wiring-loaded'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    }
+    const dbPath = join(dir, 'app.db');
+    const seed = openStore(dbPath);
+    new SqliteSessionStore(seed).save({ id: 'stored-1', folderId: 'folder-1', title: 'stored', cwd: outside, launchPath: 'pty', permissionMode: 'default', createdAt: '2026-11-26T00:00:00.000Z' });
+    seed.close();
+    process.env['PATH'] = [join(outside, 'bin'), trusted, process.env['PATH'] ?? ''].join(':');
+    const profile = { root: join(dir, 'root'), id: DEFAULT_PROFILE_ID };
+    new FileProfileStore({ root: profile.root, ownerId: profile.id }).create({ id: profile.id, name: 'Default', colour: '#5b7fa6', settings: { isolation: { provider: 'srt', options: {} } } });
+    app = await startAppModules({ dataDir: dir, dbPath, profile });
+    expect(hostTools().find('wiring-loaded'), 'the directory of the stored session is not in the lookup, the trusted one is').toBe(join(trusted, 'wiring-loaded'));
+  });
+
+  it('keeps a directory that an earlier start excluded out of the lookup after the option that named it is removed and the app starts again', async () => {
+    const extra = join(dir, 'cargo');
+    const trusted = join(dir, 'trusted');
+    for (const directory of [join(extra, 'bin'), trusted]) {
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, 'wiring-kept'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    }
+    process.env['PATH'] = [join(extra, 'bin'), trusted, process.env['PATH'] ?? ''].join(':');
+    const dbPath = join(dir, 'app.db');
+    app = await startAppModules({ dataDir: dir, dbPath });
+    app.services.profile.store.updateSettings(app.services.profile.id, { isolation: { provider: 'srt', options: { extraWritePaths: [extra] } } } as never);
+    expect(hostTools().find('wiring-kept'), 'excluded while the option names it').toBe(join(trusted, 'wiring-kept'));
+    app.services.profile.store.updateSettings(app.services.profile.id, { isolation: { provider: 'local', options: {} } } as never);
+    await app.close();
+    app = await startAppModules({ dataDir: dir, dbPath });
+    expect(hostTools().find('wiring-kept'), 'still excluded after the removal and the restart: the profile database keeps it').toBe(join(trusted, 'wiring-kept'));
+  });
+
+  it('looks srt up through the host tools of the profile process for a check, so a srt in the task base on the PATH of the app and of the profile is not used', async () => {
+    const planted = join(taskBase, 'worktrees', 'tree', 'bin');
+    const trusted = join(dir, 'trusted');
+    const copy = join(taskBase, 'srt-settings-copy.json');
+    mkdirSync(planted, { recursive: true });
+    mkdirSync(trusted);
+    writeFileSync(join(planted, 'srt'), `#!/bin/sh\ntouch '${join(dir, 'planted-ran')}'\nexit 0\n`, { mode: 0o755 });
+    writeFileSync(join(trusted, 'srt'), `#!/bin/sh\ncp "$2" '${copy}'\nexit 0\n`, { mode: 0o755 });
+    process.env['AGIDE_SRT_BIN'] = 'srt';
+    process.env['PATH'] = [planted, trusted, process.env['PATH'] ?? ''].join(':');
+    const repo = join(taskBase, 'repo');
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, env: { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't.invalid', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't.invalid' }, encoding: 'utf8' }).trim();
+    mkdirSync(join(repo, '.agide'), { recursive: true });
+    git('init', '-q', '-b', 'main');
+    writeFileSync(join(repo, 'a.txt'), 'one\n');
+    writeFileSync(join(repo, '.agide', 'review-policy.json'), JSON.stringify({ version: 1, check: { command: ['true'] } }));
+    git('add', '-A');
+    git('commit', '-q', '-m', 'base');
+    app = await startAppModules({ dataDir: dir });
+    app.services.profile.store.updateSettings(app.services.profile.id, { permissions: { defaultMode: 'auto', network: { bashSandbox: true, allow: [], deny: [] }, trustAppCreatedFolders: false } } as never);
+    const started = (await invoke('swarm_start', { definition: { version: 1, goal: 'trusted srt', repository: { path: repo, base: 'main' }, budget: { usdTotal: 2 }, agents: [{ name: 'worker', workspace: 'worktree', prompt: '/sleep 600\n/text done' }] } })) as { ok: boolean; value: { swarmId: string } };
+    const swarmId = started.value.swarmId;
+    const cwd = await until(() => app!.services.swarm.manager.status(swarmId, { kind: 'ui' }).agents[0]?.cwd, 'the worktree');
+    writeFileSync(join(cwd, 'b.ts'), 'export const work = 1;\n');
+    const { store } = app.services.review;
+    const unit = await until(() => store.list({ swarmId })[0], 'the capture');
+    await until(() => (store.checks(unit.id).length > 0 && store.checks(unit.id)[0]?.outcome !== 'running' ? true : undefined), 'the check record');
+    expect(existsSync(copy), 'the srt of the trusted directory ran for the check').toBe(true);
+    expect(existsSync(join(dir, 'planted-ran')), 'the srt that lies below the task base did not run').toBe(false);
   });
 
   it('registers every review command with a handler and answers swarm_merge for an unknown swarm', async () => {

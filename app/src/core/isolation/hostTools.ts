@@ -1,8 +1,9 @@
 import { execFile, execFileSync, type ExecFileException } from 'node:child_process';
-import { accessSync, constants, existsSync } from 'node:fs';
+import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, isAbsolute, join } from 'node:path';
-import { isWithinAny, locateHostBinary, trustedPath } from './hostLaunch';
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
+import { agentWritableDirectories } from './agentWritable';
+import { isWithinAny, trustedPath } from './hostLaunch';
 import { IsolationError } from './types';
 
 /**
@@ -10,7 +11,9 @@ import { IsolationError } from './types';
  * `hostToolsGuard.test.ts` fails when another file starts one). A program name is never looked up through anything
  * that code an agent writes can influence: not a relative or empty entry of PATH, not the working directory, not a
  * directory the agent may write (`agentWritable.ts`). The system tools have fixed absolute paths; `git`, `docker`,
- * `srt`, `node` and the like are searched on an explicit list of directories.
+ * `srt`, `node` and the like are searched on an explicit list of directories. A candidate counts by where its code
+ * lives as well as by where the file sits: a link that leads into an agent-writable directory, and a shim that names a
+ * script there, are refused like a file in it.
  */
 
 export type SystemToolName = 'df' | 'chmod' | 'ps' | 'lsof' | 'cp' | 'env' | 'open';
@@ -93,22 +96,68 @@ export function requireAbsoluteFile(command: { readonly file: string }): void {
 export interface HostToolsOptions {
   /** The PATH the programs are looked up on: the app's own, never the profile's or a checkout's. Default `process.env.PATH`, read at each lookup. */
   readonly appPath?: string | undefined;
-  /** The directories an agent may write (`agentWritableDirectories`), read at each lookup so a changed profile applies at once. */
-  readonly excluded?: () => readonly string[];
+  /**
+   * The directories an agent may write (`AgentWritableRegistry.directories`), read at each lookup so a changed profile
+   * and a new workspace apply at once. Required: an instance that excludes nothing is a test fixture (`() => []`).
+   */
+  readonly excluded: () => readonly string[];
   /** The directories searched after the app's PATH. Default: the system directories, Homebrew and Docker Desktop. */
   readonly fixedDirectories?: readonly string[];
+  /** For a refused program: the directories recorded at a launch that hold it and how to forget them (`AgentWritableRegistry.recordedHolding`). */
+  readonly recorded?: (paths: readonly string[]) => string | undefined;
+}
+
+/** The cause in the reason of a program that a directory recorded at a launch holds. */
+export const RECORDED_CAUSE = 'lies in a directory that an earlier agent launch made writable (such as the home directory)';
+
+/** A shim larger than this is not read for the script it names. */
+const SHIM_MAX_BYTES = 16 * 1024;
+
+/**
+ * The directories in which a shim started as `file` looks for its script and for `node`: the directory of `file` as it
+ * is spelled, which a shim that takes `dirname "$0"` without resolving links uses (older pnpm, cmd-shim), and the real
+ * directory of `file`, which the current pnpm shim resolves to.
+ */
+function shimDirectories(file: string): string[] {
+  try {
+    return [...new Set([dirname(resolve(file)), dirname(realpathSync.native(file))])];
+  } catch {
+    return [dirname(resolve(file))];
+  }
+}
+
+/**
+ * The scripts that a cmd-shim names on its `# cmd-shim-target=` line (pnpm and npm write one for a global program): the
+ * shim is a small file in a trusted directory, the code it runs lies where the line says, made absolute against each
+ * directory of `shimDirectories`. A file that is not such a shim has none.
+ */
+function shimTargets(file: string): string[] {
+  try {
+    if (statSync(file).size > SHIM_MAX_BYTES) return [];
+    const targets = [...readFileSync(file, 'utf8').matchAll(/^# cmd-shim-target=(.+)$/gm)].map((match) => (match[1] ?? '').trim());
+    return [...new Set(shimDirectories(file).flatMap((base) => targets.map((target) => resolve(base, target))))];
+  } catch {
+    return [];
+  }
+}
+
+/** True when the file, the place its link leads to, or a script its shim names lies in `excluded`: an agent may write the code that starts. */
+function runsExcludedCode(file: string, excluded: readonly string[]): boolean {
+  return isWithinAny(file, excluded) || shimTargets(file).some((target) => isWithinAny(target, excluded));
 }
 
 /**
  * Finds the programs the app starts on the host, and starts them. The lookup list is explicit: the entries of the
  * app's PATH that are absolute and outside the agent-writable directories, then the system directories, Homebrew and
- * Docker Desktop. A found file is kept for the next call and checked again before it is used. A program that exists
- * only in an excluded directory is refused with a fixed reason; the path goes to `IsolationError.detail`.
+ * Docker Desktop. A candidate is used only when its real path (links resolved) and the script of its shim lie outside
+ * those directories too. A found file is kept for the next call and checked again before it is used. A program that
+ * exists only where an agent may write, or that runs code there, is refused with a fixed reason; the path goes to
+ * `IsolationError.detail`.
  */
 export class HostTools {
   private readonly found = new Map<string, string>();
 
-  constructor(private readonly options: HostToolsOptions = {}) {}
+  constructor(private readonly options: HostToolsOptions) {}
 
   private appPath(): string | undefined {
     return this.options.appPath ?? process.env['PATH'];
@@ -119,7 +168,7 @@ export class HostTools {
   }
 
   private excludedWith(extra: readonly string[]): readonly string[] {
-    return [...(this.options.excluded?.() ?? []), ...extra];
+    return [...this.options.excluded(), ...extra];
   }
 
   /** The lookup list, in order, without the directories of `excluded`. */
@@ -136,27 +185,55 @@ export class HostTools {
     return [...new Set([...trustedPath(this.appPath(), excluded).split(delimiter).filter(Boolean), ...system])].join(delimiter);
   }
 
-  /** The absolute file of `binary`, or undefined when no trusted directory holds it. A path with a directory part is made absolute and checked against the excluded set. */
+  private usable(file: string, excluded: readonly string[]): boolean {
+    return executable(file) && !runsExcludedCode(file, excluded);
+  }
+
+  /** The absolute file of `binary`, or undefined when no trusted directory holds a usable one. A path with a directory part is made absolute and checked the same way. */
   find(binary: string, extra: readonly string[] = []): string | undefined {
     const excluded = this.excludedWith(extra);
-    if (binary.includes('/')) return locateHostBinary(binary, undefined, excluded);
+    if (binary.includes('/')) {
+      const resolved = resolve(binary);
+      return this.usable(resolved, excluded) ? resolved : undefined;
+    }
     const kept = this.found.get(binary);
-    if (kept !== undefined && executable(kept) && !isWithinAny(kept, excluded)) return kept;
-    const file = this.directories(extra).map((directory) => join(directory, binary)).find(executable);
+    if (kept !== undefined && this.usable(kept, excluded)) return kept;
+    const file = this.directories(extra).map((directory) => join(directory, binary)).find((candidate) => this.usable(candidate, excluded));
     if (file === undefined) this.found.delete(binary);
     else this.found.set(binary, file);
     return file;
   }
 
-  /** The first executable of `binary` that lies in an excluded directory, as a path; undefined when there is none. */
+  /** The first executable of `binary` that lies in an excluded directory or runs code there, as a path; undefined when there is none. */
   shadowed(binary: string, extra: readonly string[] = []): string | undefined {
     const excluded = this.excludedWith(extra);
-    if (binary.includes('/')) {
-      const resolved = isAbsolute(binary) ? binary : join(process.cwd(), binary);
-      return executable(resolved) && isWithinAny(resolved, excluded) ? resolved : undefined;
-    }
-    const entries = (this.appPath() ?? '').split(delimiter).filter((entry) => isAbsolute(entry));
-    return [...entries, ...this.fixed()].map((directory) => join(directory, binary)).find((file) => executable(file) && isWithinAny(file, excluded));
+    const candidates = binary.includes('/') ? [resolve(binary)] : [...(this.appPath() ?? '').split(delimiter).filter((entry) => isAbsolute(entry)), ...this.fixed()].map((directory) => join(directory, binary));
+    return candidates.find((file) => executable(file) && runsExcludedCode(file, excluded));
+  }
+
+  /** The directories recorded at a launch that hold the code of `file` (the file, its real path, the script of its shim) and the command that forgets them; undefined when none does. */
+  recordedFor(file: string): string | undefined {
+    return this.options.recorded?.([file, ...shimTargets(file)]);
+  }
+
+  /**
+   * The refusal for a program that lies where an agent may write, named by its role and base name, never by its path
+   * (the path goes to the detail). When a directory that was recorded at a launch holds it (a session in the home
+   * directory), the reason says so and the detail names the directory and the command that forgets it.
+   */
+  private hidden(named: string, file: string): IsolationError {
+    const recorded = this.recordedFor(file);
+    if (recorded !== undefined) return new IsolationError('failed', `${named} ${RECORDED_CAUSE}, so it was not started`, `${file}; ${recorded}`);
+    return new IsolationError('failed', `${named} exists only in a directory that an agent may write, or runs code that lies in one, so it was not started`, file);
+  }
+
+  /** The refusal for a program that `find` does not return: named by its role and base name, never by its path (the path goes to the detail). */
+  private refusal(binary: string, extra: readonly string[], purpose: string): IsolationError {
+    const named = `${purpose} (${basename(binary)})`;
+    const hidden = this.shadowed(binary, extra);
+    if (hidden !== undefined) return this.hidden(named, hidden);
+    if (binary.includes('/')) return new IsolationError('failed', `${named} is not an executable file at the configured path`, resolve(binary));
+    return new IsolationError('failed', `${named} was not found as an executable on the trusted PATH of the app (the absolute entries outside the directories that an agent may write)`);
   }
 
   /**
@@ -166,16 +243,33 @@ export class HostTools {
   require(binary: string, extra: readonly string[] = [], purpose = 'the host program'): string {
     const file = this.find(binary, extra);
     if (file !== undefined) return file;
-    const hidden = this.shadowed(binary, extra);
-    if (hidden !== undefined) throw new IsolationError('failed', `${purpose} (${binary}) exists only in a directory that an agent may write, so it was not started`, hidden);
-    throw new IsolationError('failed', `${purpose} (${binary}) was not found as an executable on the trusted PATH of the app (the absolute entries outside the directories that an agent may write)`);
+    throw this.refusal(binary, extra, purpose);
   }
 
-  /** Throws for a program that a launch needs and that exists only in an excluded directory; a missing one is not an error here. */
+  /**
+   * Throws for a program that a host-side process looks up itself, on the PATH that `path` gives it, when the first
+   * file there runs code of an excluded directory, or when the program exists only in one. A missing one is not an
+   * error here.
+   */
   refuseHidden(binary: string, extra: readonly string[] = [], purpose = 'a program the launch needs'): void {
-    if (this.find(binary, extra) !== undefined) return;
-    const hidden = this.shadowed(binary, extra);
-    if (hidden !== undefined) throw new IsolationError('failed', `${purpose} (${binary}) exists only in a directory that an agent may write, so it was not started`, hidden);
+    const excluded = this.excludedWith(extra);
+    const first = this.path(extra).split(delimiter).map((directory) => join(directory, binary)).find(executable);
+    if (first !== undefined && runsExcludedCode(first, excluded)) throw this.hidden(`${purpose} (${basename(binary)})`, first);
+    if (this.find(binary, extra) === undefined && this.shadowed(binary, extra) !== undefined) throw this.refusal(binary, extra, purpose);
+  }
+
+  /**
+   * Throws when the program `binary` beside `file`, in the directory of `file` as it is spelled or in its real directory
+   * (`shimDirectories`), runs code of an excluded directory, or lies in one. A shim runs `$basedir/node` before any
+   * `node` of the PATH, so a `node` there is started whether or not the directory is on the PATH. A missing one is not
+   * an error here.
+   */
+  refuseBeside(file: string, binary: string, extra: readonly string[] = [], purpose = 'a program the launch needs'): void {
+    const excluded = this.excludedWith(extra);
+    for (const directory of shimDirectories(file)) {
+      const beside = join(directory, binary);
+      if (executable(beside) && runsExcludedCode(beside, excluded)) throw this.hidden(`${purpose} (${basename(binary)})`, beside);
+    }
   }
 
   /** The absolute file and the PATH for a host-side start of `binary`. */
@@ -219,9 +313,9 @@ export class HostTools {
   }
 }
 
-let shared = new HostTools();
+let shared = new HostTools({ excluded: () => agentWritableDirectories({ writeDirs: [], claudeConfigDir: undefined }) });
 
-/** The instance the app's modules use. The profile process sets it at start (`setHostTools`); until then it excludes nothing. */
+/** The instance the app's modules use. The profile process sets it at start (`setHostTools`); until then it excludes the directories that hold no program for any profile (the defaults of `srt` and the default Claude directory). */
 export function hostTools(): HostTools {
   return shared;
 }

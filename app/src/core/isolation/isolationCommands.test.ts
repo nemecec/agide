@@ -1,11 +1,11 @@
-import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CommandRegistry } from '../commands/CommandRegistry';
 import type { ProfileService, ProfileSettings } from '../profile/types';
 import { buildIsolatingProvider, createIsolationProviders, registerIsolationCommands } from './defaultProviders';
-import { HostTools } from './hostTools';
+import { createProfileHostTools } from './profileHostTools';
 import type { ContainerProvider } from './ContainerProvider';
 import type { SrtProvider } from './SrtProvider';
 import type { IsolationStatus } from './statusTypes';
@@ -94,17 +94,41 @@ describe('isolation_set_provider', () => {
 });
 
 describe('buildIsolatingProvider', () => {
-  it('hands the host tools and the agent roots of the profile process to the srt and the container provider', () => {
-    const hostTools = new HostTools({ appPath: '/usr/bin' });
-    const setup = { sessionFilesDir: join(dir, 'sessions'), dataDir: dir, options: () => undefined, hostTools, agentRoots: [join(dir, 'agents')] };
+  it('hands the host tools and the registry that they read, as one value, to the srt and the container provider', () => {
+    const planted = join(dir, 'launched', 'bin');
+    const host = createProfileHostTools({ options: () => ({}), claudeConfigDir: () => undefined, agentRoots: [], appPath: `${planted}:/usr/bin` });
+    expect(host.tools.directories().includes(planted), 'the directory is on the lookup list before a launch makes it writable').toBe(true);
+    const setup = { sessionFilesDir: join(dir, 'sessions'), dataDir: dir, options: () => undefined, host };
     for (const id of ['srt', 'container'] as const) {
       const provider = buildIsolatingProvider(id, setup, {}) as SrtProvider | ContainerProvider;
-      expect([provider.options.hostTools, provider.options.agentRoots], `${id} gets the tools and the roots`).toEqual([hostTools, [join(dir, 'agents')]]);
+      expect([provider.options.hostTools, provider.options.writable], `${id} gets the tools and the registry`).toEqual([host.tools, host.writable]);
     }
+    (buildIsolatingProvider('srt', setup, {}) as SrtProvider).options.writable?.add([join(dir, 'launched')]);
+    expect(host.tools.directories().includes(planted), 'a directory the provider adds is one that the tools exclude').toBe(false);
   });
 
-  it('leaves them out when the setup has none, so each provider excludes what it lets an agent write itself', () => {
+  it('gives the tools of the profile the cause of a refusal by a directory that a launch recorded', () => {
+    const planted = join(dir, 'launched', 'bin');
+    mkdirSync(planted, { recursive: true });
+    writeFileSync(join(planted, 'wiring-recorded'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const host = createProfileHostTools({ options: () => ({}), claudeConfigDir: () => undefined, agentRoots: [], appPath: planted });
+    host.writable.add([join(dir, 'launched')]);
+    expect(() => host.tools.require('wiring-recorded', [], 'the program'), 'the cause').toThrow('the program (wiring-recorded) lies in a directory that an earlier agent launch made writable (such as the home directory), so it was not started');
+  });
+
+  it('leaves them out when the setup has none, so each provider builds tools over a registry of its own', () => {
     const provider = buildIsolatingProvider('srt', { sessionFilesDir: join(dir, 'sessions'), dataDir: dir, options: () => undefined }, {}) as SrtProvider;
-    expect([provider.options.hostTools, provider.options.agentRoots], 'no tools and no roots').toEqual([undefined, undefined]);
+    expect([provider.options.hostTools, provider.options.writable], 'no tools and no registry').toEqual([undefined, undefined]);
+  });
+
+  it('denies an srt session the read of the profile database when the setup names it', () => {
+    const provider = buildIsolatingProvider('srt', { sessionFilesDir: join(dir, 'sessions'), dataDir: dir, options: () => undefined, profileDatabase: join(dir, 'app.db') }, {}) as SrtProvider;
+    expect(provider.options.profileDatabase, 'the database of the setup').toBe(join(dir, 'app.db'));
+  });
+
+  it('puts the Claude directory that the container provider mounts writable into the registry when the provider is built', () => {
+    const host = createProfileHostTools({ options: () => ({}), claudeConfigDir: () => undefined, agentRoots: [] });
+    buildIsolatingProvider('container', { sessionFilesDir: join(dir, 'sessions'), dataDir: dir, options: () => undefined, host }, {});
+    expect(host.writable.directories(), 'the directory below the data directory that the containers write').toContain(join(dir, 'isolation', 'container', 'claude'));
   });
 });

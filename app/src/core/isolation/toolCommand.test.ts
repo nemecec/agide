@@ -1,12 +1,13 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ContainerProvider } from './ContainerProvider';
 import { writeFakeSrt } from './fakeSrt';
-import { insideArgv, isWithinAny } from './hostLaunch';
-import { hostDirectory, SYSTEM_DIRECTORIES } from './hostTools';
+import { INSIDE_PREFIX, isWithinAny } from './hostLaunch';
+import { startedEnvironment } from './isolationProviderContract';
+import { HostTools, hostDirectory, SYSTEM_DIRECTORIES } from './hostTools';
 import { createProfileHostTools } from './profileHostTools';
 import { LocalProvider } from './LocalProvider';
 import { SrtProvider, srtToolEnvironment } from './SrtProvider';
@@ -69,9 +70,9 @@ describe('srt', () => {
     const environment = await provider().prepare(spec);
     const command = await environment.toolCommand(launch());
     const settingsPath = join(dir, 'srt', 'check-1', 'srt.json');
-    expect([command.file, command.args], 'srt as an absolute file, settings, separator, env with the profile PATH, the launcher shell that changes into the checkout with the program as its arguments').toEqual([
+    expect([command.file, command.args], 'srt as an absolute file, settings, separator, the launcher shell that changes into the checkout and sets the named variables, with the program as its arguments').toEqual([
       join(binDir(), 'srt'),
-      ['-s', settingsPath, '--', ...insideArgv('/usr/bin', launcherArgv(['pnpm', 'test', '--run'], { directory: join(dir, 'checkout') }))],
+      ['-s', settingsPath, '--', ...launcherArgv(['pnpm', 'test', '--run'], { directory: join(dir, 'checkout'), inside: ['PATH', 'CI'] })],
     ]);
     expect(command.args.slice(-3), 'the program and its arguments end the argv').toEqual(['pnpm', 'test', '--run']);
     expect(statSync(settingsPath).mode & 0o777, 'settings file mode').toBe(0o600);
@@ -79,7 +80,7 @@ describe('srt', () => {
     expect(settings.filesystem.allowWrite, 'the checkout and the temporary directory only').toEqual([join(dir, 'checkout'), join(dir, 'tmp')]);
     expect(settings.filesystem.allowWrite.includes(join(dir, 'claude')), 'the Claude configuration of the profile is not writable').toBe(false);
     expect(settings.network.allowedDomains, 'network none allows no host').toEqual([]);
-    expect(command.env, 'the launch environment, with the trusted PATH of the app for the host-side process').toEqual({ PATH: hostPath(binDir()), CI: '1' });
+    expect(command.env, 'the host-side process has the trusted PATH of the app and the launch variables under the inert prefix only').toEqual({ PATH: hostPath(binDir()), [`${INSIDE_PREFIX}PATH`]: '/usr/bin', [`${INSIDE_PREFIX}CI`]: '1' });
   });
 
   it('allows loopback binding only when the launch says the program needs it', async () => {
@@ -105,7 +106,8 @@ describe('srt', () => {
     expect(command.env['PATH'], 'the host-side PATH has that entry and the system directories only: nothing relative, empty or inside the checkout').toBe(hostPath(binDir()));
     expect(command.cwd, 'the working directory of srt is the neutral one').toBe(hostDirectory());
     expect(isWithinAny(command.cwd, [checkout]), 'the working directory of srt is not inside the checkout').toBe(false);
-    expect(command.args.slice(3, 5), 'the PATH of the profile reaches the program inside the sandbox unchanged').toEqual(['/usr/bin/env', `PATH=${profilePath}`]);
+    expect(startedEnvironment(command)['PATH'], 'the PATH of the profile reaches the program inside the sandbox unchanged').toBe(profilePath);
+    expect(command.args.join('\n'), 'and is no argument').not.toContain(profilePath);
   });
 
   it('gives a program without PATH none inside the sandbox, and refuses to start when srt is only on an entry the program controls', async () => {
@@ -113,7 +115,7 @@ describe('srt', () => {
     mkdirSync(join(checkout, 'bin'), { recursive: true });
     writeFileSync(join(checkout, 'bin', 'srt'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     const command = await (await provider().prepare(spec)).toolCommand(launch({ env: { CI: '1' } }));
-    expect(command.args.slice(3, 6), 'env removes PATH').toEqual(['/usr/bin/env', '-u', 'PATH']);
+    expect(startedEnvironment(command)['PATH'], 'the launcher removes PATH').toBeUndefined();
     const trapped = await provider(`bin::.:${join(checkout, 'bin')}`).prepare(spec);
     await expect(trapped.toolCommand(launch({ cwd: checkout })), 'srt is not found on a trusted entry').rejects.toThrow(IsolationError);
   });
@@ -136,6 +138,49 @@ describe('srt', () => {
   });
 });
 
+describe('srt: the node that the shim of srt runs first', () => {
+  it('refuses a configured srt whose shim directory holds a node that leads into an excluded directory, while that directory is not on the PATH', async () => {
+    const excluded = join(dir, 'agent');
+    const marker = join(dir, 'marker');
+    mkdirSync(excluded);
+    writeFileSync(join(excluded, 'node'), `#!/bin/sh\ntouch '${marker}'\nexit 0\n`, { mode: 0o755 });
+    mkdirSync(join(dir, 'pkg', 'dist'), { recursive: true });
+    writeFileSync(join(dir, 'pkg', 'dist', 'cli.js'), '#!/usr/bin/env node\n', { mode: 0o755 });
+    mkdirSync(join(dir, 'shim'));
+    const shim = join(dir, 'shim', 'srt');
+    writeFileSync(shim, `#!/bin/sh\nbasedir=$(dirname "$0")\nif [ -x "$basedir/node" ]; then\n  exec "$basedir/node" '${join(dir, 'pkg', 'dist', 'cli.js')}' "$@"\nfi\nexec node '${join(dir, 'pkg', 'dist', 'cli.js')}' "$@"\n# cmd-shim-target=${join(dir, 'pkg', 'dist', 'cli.js')}\n`, { mode: 0o755 });
+    symlinkSync(join(excluded, 'node'), join(dir, 'shim', 'node'));
+    const tools = new HostTools({ appPath: [dirname(process.execPath), '/usr/bin', '/bin'].join(':'), excluded: () => [excluded], fixedDirectories: [] });
+    const outcome = await srtToolEnvironment({ srtBinary: shim, settingsDir: join(dir, 'srt-checks'), hostTools: tools })
+      .toolCommand(launch({ argv: ['sh', '-c', 'exit 1'] }))
+      .then((command) => spawnSync(command.file, [...command.args], { cwd: command.cwd, env: { ...command.env }, timeout: 20_000 }).status, (error: unknown) => error);
+    expect(outcome, 'the launch is refused before anything starts').toBeInstanceOf(IsolationError);
+    expect((outcome as IsolationError).detail, 'the detail names the node beside the shim').toBe(join(dir, 'shim', 'node'));
+    expect(existsSync(marker), 'the node of the excluded directory did not run').toBe(false);
+  });
+
+  it('refuses a configured srt that is a link to an old-form shim when a node beside the link leads into an excluded directory, while the link directory is not on the PATH', async () => {
+    const excluded = join(dir, 'agent');
+    const marker = join(dir, 'marker');
+    mkdirSync(excluded);
+    writeFileSync(join(excluded, 'node'), `#!/bin/sh\ntouch '${marker}'\nexit 0\n`, { mode: 0o755 });
+    mkdirSync(join(dir, 'S'));
+    writeFileSync(join(dir, 'S', 'cli.js'), '#!/usr/bin/env node\n', { mode: 0o755 });
+    // The form of older pnpm and cmd-shim: the directory of $0 as it was started, links not resolved.
+    writeFileSync(join(dir, 'S', 'srt'), `#!/bin/sh\nbasedir=$(dirname "$0")\nif [ -x "$basedir/node" ]; then\n  exec "$basedir/node" "$basedir/cli.js" "$@"\nfi\nexec node "$basedir/cli.js" "$@"\n# cmd-shim-target=${join(dir, 'S', 'cli.js')}\n`, { mode: 0o755 });
+    mkdirSync(join(dir, 'L'));
+    symlinkSync(join(dir, 'S', 'srt'), join(dir, 'L', 'srt'));
+    symlinkSync(join(excluded, 'node'), join(dir, 'L', 'node'));
+    const tools = new HostTools({ appPath: [dirname(process.execPath), '/usr/bin', '/bin'].join(':'), excluded: () => [excluded], fixedDirectories: [] });
+    const outcome = await srtToolEnvironment({ srtBinary: join(dir, 'L', 'srt'), settingsDir: join(dir, 'srt-checks'), hostTools: tools })
+      .toolCommand(launch({ argv: ['sh', '-c', 'exit 1'] }))
+      .then((command) => spawnSync(command.file, [...command.args], { cwd: command.cwd, env: { ...command.env }, timeout: 20_000 }).status, (error: unknown) => error);
+    expect(outcome, 'the launch is refused before anything starts').toBeInstanceOf(IsolationError);
+    expect((outcome as IsolationError).detail, 'the detail names the node beside the link').toBe(join(dir, 'L', 'node'));
+    expect(existsSync(marker), 'the node of the excluded directory did not run').toBe(false);
+  });
+});
+
 describe('srt: programs the agents of the profile can write', () => {
   const PROGRAMS = ['srt', 'node', 'env', 'which', 'bash', 'sed', 'uname', 'dirname', 'git', 'docker'];
   const markers = (): string[] => (existsSync(join(dir, 'markers')) ? readdirSync(join(dir, 'markers')) : []);
@@ -151,7 +196,7 @@ describe('srt: programs the agents of the profile can write', () => {
     writeFileSync(join(dir, 'trusted', 'node'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     return join(dir, 'trusted');
   };
-  const profile = (appPath: string, extraWritePaths: string[] = []) => createProfileHostTools({ options: () => ({ extraWritePaths }), claudeConfigDir: () => join(dir, 'claude'), agentRoots: [join(dir, 'agents')], appPath });
+  const profile = (appPath: string, extraWritePaths: string[] = []) => createProfileHostTools({ options: () => ({ extraWritePaths }), claudeConfigDir: () => join(dir, 'claude'), agentRoots: [join(dir, 'agents')], appPath }).tools;
   const environment = (appPath: string, extraWritePaths: string[] = []) => srtToolEnvironment({ srtBinary: 'srt', settingsDir: join(dir, 'srt-checks'), hostTools: profile(appPath, extraWritePaths) });
   const spots: [string, () => string, () => string[]][] = [
     ['a directory of extraWritePaths', () => join(dir, 'cargo'), () => [join(dir, 'cargo')]],
@@ -174,7 +219,7 @@ describe('srt: programs the agents of the profile can write', () => {
     plant(join(spot(), 'bin'));
     const failure = await environment(join(spot(), 'bin'), extra()).toolCommand(launch()).catch((error: unknown) => error);
     expect(failure, 'an isolation error').toBeInstanceOf(IsolationError);
-    expect((failure as IsolationError).message, 'the fixed reason').toBe('the sandbox runtime (srt) exists only in a directory that an agent may write, so it was not started');
+    expect((failure as IsolationError).message, 'the fixed reason').toBe('the sandbox runtime (srt) exists only in a directory that an agent may write, or runs code that lies in one, so it was not started');
     expect((failure as IsolationError).detail, 'the detail names the stand-in').toBe(join(spot(), 'bin', 'srt'));
     expect(markers(), 'no stand-in ran').toEqual([]);
   });
@@ -185,10 +230,12 @@ describe('srt: programs the agents of the profile can write', () => {
     expect((failure as IsolationError).message, 'the clone directory is excluded for this launch').toContain('exists only in a directory that an agent may write');
   });
 
-  it('keeps the loader variables of the check environment out of the host-side process', async () => {
-    const command = await environment(trusted()).toolCommand(launch({ env: { PATH: '/usr/bin', CI: '1', NODE_OPTIONS: '--require ./x.cjs', DYLD_INSERT_LIBRARIES: './x.dylib' } }));
-    expect(Object.keys(command.env).sort(), 'the host-side environment has the PATH and CI only').toEqual(['CI', 'PATH']);
-    expect(command.args.slice(3, 7), 'env gives the variables to the launcher and the program').toEqual(['/usr/bin/env', 'PATH=/usr/bin', 'NODE_OPTIONS=--require ./x.cjs', 'DYLD_INSERT_LIBRARIES=./x.dylib']);
+  it('keeps every variable of the check environment that is not allowed out of the host-side process', async () => {
+    const command = await environment(trusted()).toolCommand(launch({ env: { PATH: '/usr/bin', HOME: '/h', CI: '1', NODE_OPTIONS: '--require ./x.cjs', DYLD_INSERT_LIBRARIES: './x.dylib', 'BASH_FUNC_uname%%': '() { ./x; }', SHELLOPTS: 'xtrace', PS4: '$(./x)' } }));
+    expect(Object.keys(command.env).filter((name) => !name.startsWith(INSIDE_PREFIX)).sort(), 'the host-side environment has HOME, the PATH and the carriers only').toEqual(['HOME', 'PATH']);
+    const dyld = process.platform === 'darwin' ? {} : { DYLD_INSERT_LIBRARIES: './x.dylib' };
+    expect(startedEnvironment(command), 'the program gets the other variables a shell can set; an exported function, a read-only name of bash and on macOS a DYLD_ name are dropped').toEqual({ HOME: '/h', PATH: '/usr/bin', CI: '1', NODE_OPTIONS: '--require ./x.cjs', ...dyld, PS4: '$(./x)' });
+    expect(command.dropped, 'the dropped names, for the log of the run').toEqual(['DYLD_INSERT_LIBRARIES', 'BASH_FUNC_uname%%', 'SHELLOPTS'].filter((name) => process.platform === 'darwin' || !name.startsWith('DYLD_')));
   });
 });
 

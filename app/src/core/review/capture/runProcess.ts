@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { requireAbsoluteFile } from '../../isolation/hostTools';
+import { IsolationError } from '../../isolation/types';
 import { OutputRing } from './outputRing';
 
 export const KILL_GRACE_MS = 5_000;
@@ -15,7 +16,30 @@ export type ProcessResult =
   | { readonly kind: 'exited'; readonly exitCode: number | null; readonly signal: string | null }
   | { readonly kind: 'timed_out'; readonly signal: string | null }
   | { readonly kind: 'cancelled' }
-  | { readonly kind: 'spawn_failed'; readonly error: string };
+  /** `error` is a fixed text that names no path; `detail` is the message of the system, for the log of the run. */
+  | { readonly kind: 'spawn_failed'; readonly error: string; readonly detail?: string | undefined };
+
+const SPAWN_FAILURES: Readonly<Record<string, string>> = {
+  EACCES: 'the program is not executable, or a directory of its path cannot be searched',
+  ENOENT: 'the program or its working directory does not exist',
+  ENOEXEC: 'the program has a format that the system cannot run',
+};
+
+/**
+ * A text for an error by its code only: the message of a system error names the file (`spawn /Users/<name>/... EACCES`),
+ * which can name the user. `texts` gives the text of a known code; another code is appended to `what`.
+ */
+export function codeText(error: unknown, what: string, texts: Readonly<Record<string, string>> = {}): string {
+  const code = (error as { code?: unknown } | null | undefined)?.code;
+  if (typeof code !== 'string' || !/^[A-Z][A-Z0-9_]*$/.test(code)) return what;
+  return texts[code] ?? `${what} (${code})`;
+}
+
+const spawnFailure = (error: unknown): ProcessResult => ({
+  kind: 'spawn_failed',
+  error: error instanceof IsolationError ? error.message : codeText(error, 'the program could not be started', SPAWN_FAILURES),
+  detail: (error as Error).message,
+});
 
 export interface RunningProcess {
   readonly result: Promise<ProcessResult>;
@@ -56,7 +80,7 @@ export function runProcess(command: ProcessCommand, ring: OutputRing, timeoutMs:
       child = spawn(command.file, [...command.args], { cwd: command.cwd, env: { ...command.env }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     } catch (error) {
       clearTimeout(deadline);
-      resolve({ kind: 'spawn_failed', error: (error as Error).message });
+      resolve(spawnFailure(error));
       return;
     }
     child.stdout?.on('data', (chunk: Buffer) => ring.push(chunk));
@@ -64,7 +88,7 @@ export function runProcess(command: ProcessCommand, ring: OutputRing, timeoutMs:
     child.once('error', (error) => {
       clearTimeout(deadline);
       if (killTimer !== undefined) clearTimeout(killTimer);
-      resolve({ kind: 'spawn_failed', error: error.message });
+      resolve(spawnFailure(error));
     });
     let finished = false;
     const finish = (exitCode: number | null, signal: string | null): void => {

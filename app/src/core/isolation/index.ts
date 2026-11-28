@@ -1,10 +1,11 @@
 export * from './types';
 export { LocalProvider, type LocalProviderOptions } from './LocalProvider';
 export { FakeProvider, type FakeCall, type FakeProviderOptions, type FakeStep } from './FakeProvider';
-export { locateHostBinary, trustedPath } from './hostLaunch';
-export { agentWritableDirectories, sessionWriteAllowances, srtDefaultWritePaths } from './agentWritable';
+export { trustedPath } from './hostLaunch';
+export { AgentWritableRegistry, agentWritableDirectories, sessionWriteAllowances, srtDefaultWritePaths, type AgentWritableMemory } from './agentWritable';
+export { AgentWritableStore } from './agentWritableStore';
 export { HostTools, hostDirectory, hostTools, setHostTools, systemExecFile, systemExecFileSync, systemTool, type HostExecOptions, type SystemToolName } from './hostTools';
-export { createProfileHostTools } from './profileHostTools';
+export { createProfileHostTools, type ProfileHostTools } from './profileHostTools';
 export { SrtProvider, findExecutable, srtToolEnvironment, type SrtProviderOptions } from './SrtProvider';
 export { buildSrtSettings, type SrtSettings } from './srtSettings';
 export { ContainerProvider, ownerIdOf, type ContainerProviderOptions } from './ContainerProvider';

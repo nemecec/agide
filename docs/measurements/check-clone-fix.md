@@ -684,3 +684,189 @@ Linux: the paths of `lsof` and the opener, the `cp --reflink` call and the launc
 ### Leftovers
 
 The scratch directory `/tmp/agide-check-clone-fix-7/` (logs of the runs, copies of the sources for the byte comparison, a clean copy of the checkpoint commit with a linked `node_modules`, the CI-like directory with a symlink named `node`) was removed at the end: the link was removed first, and the real `node_modules` is intact. Five `dbg-*` directories that my own debugging tests made in the system temporary directory were removed; three other `dbg-*` directories there (dated 14 and 21 November) are not from this pass and were left. No fixture of the new tests is left in the system temporary directory.
+
+## Eighth pass: check-clone-fix-8
+
+Start: 2026-11-26 12:55 UTC (`date -u`). End: 2026-11-26 14:27 UTC.
+
+### What was built
+
+The eighth and ninth passes are one commit. Where they differ (the route of the variables of the profile, `ProviderSetup`, a registry that keeps what it learns), the section of the ninth pass describes the code as committed.
+
+The independent review of the seventh pass found two majors and four minors, all gaps in what the set of agent-writable directories holds and in what the lookup compares. The structure stayed (one module, one set, one guard); this pass closes them inside it.
+
+- **One registry.** `AgentWritableRegistry` (`agentWritable.ts`: `add`, `directories`) holds the profile's set as it becomes known. `createProfileHostTools` returns `{ tools, writable }`; `HostTools` reads the registry through its `excluded` callback, which is now a required option. `SrtProvider`, `ContainerProvider` and `LocalProvider` lost their private `known` sets and `agentRoots` options: each `prepare` and each command adds the workspace, the working directory, the inbox, the mounts of a launch, the directories of a check launch and the Claude directory of the profile, and `ContainerProvider` adds its own Claude directory when it is built. The session module adds the working directories of the sessions in the store at start. `ProviderSetup` carries `hostTools` and `writable`. A directory is never removed.
+- **Real path.** `HostTools.find`, `shadowed` and `refuseHidden` refuse a candidate whose real path, or whose cmd-shim target (`# cmd-shim-target=` of a file of at most 16 KiB, a relative target made absolute against the real directory of the shim), lies in the set. `refuseHidden('node')` checks the first `node` of the host-side PATH, which is the one the shell of the `srt` shim finds. `locateHostBinary` is removed. The installed pnpm shim of this host names `…/global/<hash>/node_modules/@anthropic-ai/sandbox-runtime/dist/cli.js`, which is a link into `~/Library/pnpm/store/…`: with that store in `extraWritePaths` the shim is refused. No seam exists to refuse an `extraWritePaths` entry that holds the code of `srt`, `node`, `git` or `docker` when the options are saved (`isolation_set_provider` takes no such field and the settings store keeps `isolation.options` as unvalidated data); the provider check that the command runs before it saves a choice refuses it, and a launch fails closed with the fixed reason. Written in 0040 section 6, items 6 and 9.
+- **Allow-list environment of the host-side `srt`.** `splitHostVariables` and `isHostSideVariable` (`hostLaunch.ts`) replace `splitLoaderVariables`: the process of `srt` gets PATH, `HOME`, `USER`, `LOGNAME`, `TMPDIR`, `LANG`, `LANGUAGE`, `TERM`, `LC_*`, the names `srt` 0.0.83 reads (`SRT_*`, `CLAUDE_CODE_TMPDIR`, `CLAUDE_TMPDIR`) and the names it sets or extends for the program (proxy and trust-store variables, `JAVA_TOOL_OPTIONS`, `GIT_CONFIG_*`, `GIT_SSH_COMMAND`); everything else goes through `/usr/bin/env` inside the sandbox. The names were read from `dist/sandbox/sandbox-utils.js`, `macos-sandbox-utils.js`, `parent-proxy.js` and `mitm-ca.js` of the installed package.
+- **Spawn guard.** Flags an alias by assignment, `.call`, `.apply`, `.bind`, an optional call, a destructuring or an index of a namespace, the namespace handed on, `require` and `import()` of `child_process` and `node-pty` also in listed files (with a per-file exemption for the text of the stand-in `srt`), `require` or `import()` with a computed name, `getBuiltinModule`, `createRequire`, a spawn whose program is `command.file` of a `command` that is not declared in the form the entry allows, and a `HostTools` built outside the wiring. It scans `.mjs`, `.js` and `.cjs` (the stand-in programs of the tests are listed as fixtures). Strings are blanked for the value scan so a word in a message is not a use.
+- **Reasons.** A refusal names the role and the base name (`the sandbox runtime (srt) exists only in a directory that an agent may write, or runs code that lies in one, so it was not started`), and the configured path goes to `IsolationError.detail`; a configured absolute path that is missing has the text `… is not an executable file at the configured path`. The provider checks (`srt`, local `claude`) name no path either. `GhPullRequestReader` reads the new text as "gh is not installed".
+- **Launcher.** The 126 of a bare word that names a directory found through a relative or empty PATH entry is stated in 0040 and 0042, and a test checks it; the launcher is unchanged except for a comment. The sentence "ends 127" of 0042 now says which words end 127.
+
+### Probes
+
+- The review's two shell-variable probes were repeated: `env -i PATH=/usr/bin:/bin 'BASH_FUNC_uname%%=…' /bin/sh -c uname` and `SHELLOPTS=xtrace 'PS4=$(./x ps4)' /bin/sh -c true` both ran `./x` (a Node script that writes a marker). The real-`srt` test with both in the profile now finds no marker. A first version of that test made `./x` a shell script, which xtrace traced and which started itself through `PS4` without end: a fork bomb that stopped every `fork` of the machine for a few minutes until the background job was stopped (`TaskStop`); the test uses a Node script and a `spawnSync` timeout.
+- With the real `srt` and the installed pnpm shim, a failing check with stand-ins for `git`, `gh`, `docker`, `srt` and `node` in a directory outside the task base on an absolute PATH entry reads `failed`, with a fresh and with a warm `HostTools`, and no stand-in runs.
+
+### Surface checked
+
+Launch paths: a session under `srt` (`SrtEnvironment.processCommand`, the PTY and the stream path both go through it), under the container provider (`dockerCommand`, `toolCommand`), under `local` (`LocalEnvironment.processCommand`); swarm agents and reviewers (they launch through the session service and the same providers; their worktrees, workspaces and `review-runs` checkouts are below the task base, which is a root of the registry); the project check (`srtToolEnvironment` through the review module: checkout, temporary directory and clones are below the task base; `SrtEnvironment.toolCommand` adds them to the registry as well); the reviewer checkouts and `new Git(undefined, () => launch().env)` (through the shared tools). Places where a directory becomes writable: the settings of `srt` (`buildSrtSettings`, `buildToolSrtSettings`), the container mounts, `extraWritePaths`, the defaults of `srt`, the Claude directories. The registry can miss: a directory that no launch and no stored session has made known yet (a program planted by an earlier run of another app process of the same user, or by the user); a profile process other than this one; `AGIDE_TASK_BASE` changed after the modules started; the directories that `srt` makes writable by another version than 0.0.83; the programs that the `srt` shim looks up by directory (`uname`, `dirname`, `sed`, `readlink`); a shim larger than 16 KiB; a package directory whose `node_modules` links into an excluded place while `cli.js` does not; a `local` session without the Bash sandbox, which writes whatever the user can.
+
+### Changed files and functions
+
+Source: `core/isolation/agentWritable.ts` (`AgentWritableRegistry`, `AgentWritableSource`), `hostTools.ts` (`HostToolsOptions.excluded` required, `shimTargets`, `runsExcludedCode`, `HostTools.usable`, `find`, `shadowed`, `refusal`, `require`, `refuseHidden`, the shared default instance), `hostLaunch.ts` (`splitHostVariables`, `isHostSideVariable`, `insideArgv` text; `locateHostBinary`, `isLoaderVariable`, `splitLoaderVariables` removed), `profileHostTools.ts` (`createProfileHostTools` returns `{ tools, writable }`, `ProfileHostTools`), `SrtProvider.ts` (options `writable`, `check`, `prepare`, `hostStart`, `srtToolCommand`, `srtToolEnvironment`, `SrtEnvironment.processCommand`, `toolCommand`), `ContainerProvider.ts` (options `writable`, constructor, `check`, `removeOrphans`, `prepare`, `dockerLaunch`, `dockerCommand`, `toolCommand`, `terminate`), `LocalProvider.ts` (options `writable`, `check`, `processCommand`), `defaultProviders.ts` (`ProviderSetup`, `hostToolOptions`, `ConfiguredProviders`), `providerRegistry.ts` (constructor type), `index.ts`, `statusLauncher.ts` (comments only); `review/capture/checkEnvironment.ts` (`appPath` removed); `main/modules/session.ts` (`createProfileHostTools` result, `writable`, the stored sessions); shared file with the smallest change: `tasks/GhPullRequestReader.ts` (`ghMessage` reads the new not-found text).
+
+Tests, new: `isolation/agentWritableLaunch.test.ts`. Changed: `agentWritable.test.ts` (registry), `hostTools.test.ts` (real path, shim targets, reasons, shared default), `hostLaunch.test.ts` (allow-list), `hostToolsGuard.test.ts` (spellings, declarations, `.mjs` fixtures, `HostTools` builders), `SrtProvider.test.ts` (registry-sharing helper, allow-list environment, absolute `srt` reasons, the shell-function probe against the real `srt`), `ContainerProvider.test.ts`, `providers.test.ts`, `isolationCommands.test.ts`, `toolCommand.test.ts`, `statusLauncher.test.ts` (126), `isolationProviderContract.ts` (the started environment includes the `env` assignments), `review/capture/checkEnvironment.test.ts`, `ProcessCheckExecutor.srt.test.ts`, `main/modules/review.test.ts` (the sessions of the store, the check environment of the module), `e2e/milestone3.spec.ts` and `e2e/fixtures/fake-srt.mjs` (the fake `srt` reads its record path from the `env` assignments and records its variable names).
+
+Other: `scripts/mutation-checks.mjs` (the entries of the replaced code removed, an entry for each decision added, two corrected after a first run); records 0040 (section 6 items 2, 3, 4, 6, 7, 9, the launcher row, the risk row), 0041, 0042 (the seventh review row closed, the eighth pass row, three rows of the open list); `app/README.md` ("Host-side programs").
+
+### Checks run
+
+| Check | Result |
+|---|---|
+| `pnpm typecheck` | passes |
+| `pnpm coverage` with the real `srt` (`AGIDE_SRT_BIN`), `python3`, one Gradle test left out with `-t` | 283 files, 3907 tests pass, 2 expected failures, 17 skipped; `src/core` lines 97.33 (threshold 97), branches 86.90 (85), `src/core/isolation` lines 99.10, `src/core/review` lines 98.50, `src/main` lines 85.45 |
+| CI-like run (a directory under `/tmp` with only a symlink `node`, PATH limited to it and the system directories, no `srt`, no Docker) | 282 files pass and 1 is skipped, 3759 tests pass, 165 skipped, 2 expected failures; `src/core` lines 97.33 (margin 0.33 points), branches 86.88, `src/core/review` lines 98.50, `src/main` lines 85.51 |
+| `pnpm build` | passes |
+| `AGIDE_HIDDEN=1 pnpm e2e` | 86 pass. The first run failed `milestone3.spec.ts` (the isolation provider): the fake `srt` read its record path from its own environment, which no longer holds a variable of the profile; it now reads it from the `env` assignments of its command, and the test checks that the process of the fake `srt` has only allowed names |
+| `pnpm parity` | ok, `docs/parity.md` unchanged |
+| `pnpm check:colours` | no literal outside the allowlist |
+| Real-tool tests (real `srt` 0.0.83, `python3`) | in the coverage run above; `ProcessCheckExecutor.srt.test.ts` alone under a job-control terminal (`script -q /dev/null bash -i -c '…'`): 130 pass, 1 fails: `resolves a dependency offline from the cloned module cache` (Gradle fails in its initialisation on the JDK of this machine; the same on the unchanged tree) |
+| Launcher tests under a job-control terminal | `statusLauncher.test.ts` and `toolCommand.test.ts`: 138 pass |
+| Mutation entries of the areas changed (the script with a filter, not the full list): first subset (`registry:`, `real path:`, `reasons:`, `host env:`, `spawn guard:`, `host tools:`, `container:`, `local:`, `wiring:`, `writable:`, `launcher: a bare`) | 95 entries: 92 killed, 3 not: one broke the syntax of the source (a removal that left an empty `if`), one was run against a test list that lacked the file that kills it, one asserted a text that the mutation still satisfied; the entry or the test was corrected and the three were killed on a second run (3 of 3) |
+| Second subset (`host launch:`, `launcher:`, `check env:`, `check: the path of a refused`, `check: the srt tool`) | 31 killed, 0 survived |
+| Entries not rerun | the `signals:` group (the launcher changed by a comment only) and every entry of the other areas; the full `pnpm mutation` was not run. A dry run of the script against the final sources finds the text of all 624 entries exactly once, so every mutated file was restored |
+
+### What took long
+
+The mutation subsets (about 20 minutes and 12 minutes, alone) and the two coverage runs (about 6 minutes each). The fork bomb of the first real-`srt` probe test cost a few minutes of a machine that could not start a process.
+
+### What was not verified
+
+Docker: no engine or image here; the container tests that need one are skipped, and the container paths are tested against a `docker` that is a file of the test. Linux and the other versions of `srt`: the allow-list names are from 0.0.83 on macOS. A real `srt` check with `extraWritePaths` holding the pnpm store was not run (the unit tests plant a pnpm-style tree in a temporary directory). The review of this pass is open.
+
+### Leftovers
+
+`/tmp/agide-check-clone-fix-8/` (logs of the runs, a dry copy of the mutation script, the directory `nobin` with a symlink `node`, a probe directory `probe`; a few MB) was not removed: the permission system denied the removal of the probe directory and it was not repeated in another form. The coordinator removes the directory. A temporary directory of the fork-bomb test in the system temporary directory was removed. `review-module-base-*` directories in the system temporary directory date from earlier runs (some from 23 November) and were not made by this pass.
+
+## Ninth pass: check-clone-fix-9
+
+Start: 2026-11-26 19:24 UTC (`date -u`). End: 2026-11-26 21:40 UTC.
+
+The eighth and ninth passes are one commit. The independent review of the eighth pass found two majors and six minors; this pass closes them inside the structure of the eighth pass and does not revert it.
+
+### What was built
+
+- **A registry that never forgets.** `AgentWritableRegistry` takes an optional `AgentWritableMemory`; `AgentWritableStore` (`agentWritableStore.ts`, module `agent_writable`, migration 1: table `agent_writable_directories (path, recorded_at)`) keeps it in the profile database, which no sandboxed agent or check may read or write. The registry loads the table when it is built, records each directory it learns (each `add`, and at each lookup what the profile says then: `extraWritePaths`, the Claude directory, the task base) and never deletes a row; `directories()` is the union. `SrtProvider` adds the `extraWritePaths` it was built with when it is built, since its sessions may write them whatever the profile says later. The session module builds the store over `ctx.db`. A row stays for the life of the profile database; 0040 section 6 item 6 and `app/README.md` give the `sqlite3` command that removes one after the app is quit.
+- **No value of the profile is an argument.** `insideRoute` (`hostLaunch.ts`) puts every variable that the host-side `srt` must not have, the PATH of the profile included, into its environment as `AGIDE_INSIDE_<NAME>`, a prefix that no shell, Node, the loader or `srt` reads; the one argument `AGIDE_INSIDE_NAMES=A,B` lists the names. Inside the sandbox `insideArgv` (session: the shell exports and replaces itself with the program) and `launcherArgv(argv, { directory, inside })` (check: the exports run in a subshell that becomes the program, so the launcher keeps its traps) check each name again and export it with `eval "export NAME=\"\${AGIDE_INSIDE_NAME}\""`, which never parses the value, then remove the carrier. Names that are no shell identifier, names that bash 3.2 refuses as read-only or sets itself (measured on this host by exporting each and reading it back: `SHELLOPTS`, `EUID`, `PPID`, `UID`, `BASH_VERSINFO`, `BASH_ARGV`, `BASH_ARGC`, `BASH_LINENO`, `BASH_SOURCE`, `BASH_SUBSHELL`, `BASH_COMMAND`, `RANDOM`, `SECONDS`, `LINENO`, `HISTCMD`, `GROUPS`, `DIRSTACK`, `FUNCNAME`, `OPTIND`, `SHLVL`, `_`) and names of the route itself are dropped; `PtyCommand.dropped` lists them and the log of a check run names them. The container provider already passed `-e NAME` with the value in the environment of the client; a test now checks it with derived values.
+- **Locale of the launcher.** The first full end-to-end run failed the isolation test of `milestone3.spec.ts`: the launcher checked each name with `[!A-Za-z_]`, and a bracket range follows the collation of the locale; under `et_EE.UTF-8` (the locale of this host, which the app passes on) `A-Z` leaves out `T` to `Y`, so `TMPDIR` or `TERM_PROGRAM` ended the session with status 2. The check uses `[:alpha:]` and `[:alnum:]` now, and a launcher test runs under `C`, `et_EE.UTF-8` and `en_US.UTF-8`.
+- **The `node` beside the shim.** `HostTools.refuseBeside` refuses a `node` beside the real file of `srt` that lies in, or leads into, an excluded directory; `hostStart` calls it, since the pnpm shim runs `$basedir/node` first. The review's probe is a test.
+- **The guard.** Flags a re-export of `child_process` or `node-pty`, `module.require` and `process.mainModule`, a `require` method that names the module, a template with an interpolation as the module name, `eval` and `Function` below `src/core` and `src/main`, a changed member of the `command` that a spawn reads (`command.file =`, `Object.assign`, `Reflect.set`), `HostTools` as a value outside the builder files (`new (HostTools)`, an alias, an argument, `Reflect.construct`, a subclass), and scans `.mts` and `.cts`. 0040 item 7 says that the scan stops accidental spellings.
+- **Home Claude paths.** `agentWritableDirectories` always holds `~/.claude` and `~/.claude.json` (`defaultClaudePaths`).
+- **Reasons.** `codeText` (`runProcess.ts`) names a system error by its code; a spawn failure of `srt` or `docker`, a launch that cannot be prepared (the settings file) and a failed checkout give fixed texts, and the message goes to the log of the run (`launch detail:`, `checkout detail:`).
+- **Firmlinks.** `isWithinAny` also compares each spelling without a leading `/System/Volumes/Data`.
+- **Coupling.** `ProviderSetup.host` is one `ProfileHostTools`, so `buildIsolatingProvider` gives a provider the tools and the registry together or neither.
+- **Words.** The eighth account no longer uses a word of the banned list: the sentence about the launcher says that a test checks it.
+
+### Surface checked
+
+Where a value of the profile can leave the environment it started in: the arguments of `srt` (names only), of `sandbox-exec` that `srt` starts (it takes the argv after `--`: names only; checked with `ps` while a real program ran), of the launcher shell and of `/usr/bin/env` inside (names and the program's own argv), of `docker` (`-e NAME`, mounts, labels and `HOME=/tmp`), of `git`, `gh` and `claude auth status` (fixed arguments; the environment is passed as the environment), the srt settings file (no variables; under the data directory, which agents cannot read), the run log (names of dropped variables only), and the eval string of the launcher (names only). The value still is in the environment of the host-side `srt`, which only the user and root can read, and in the environment of the program inside, which is where it was meant to go; sandboxed code of the same user can read process environments (`KERN_PROCARGS2`), as before.
+
+Where the registry could lose a directory: a closed session (recorded at launch), a restart (loaded), an `extraWritePaths` entry removed while the app runs (kept in the instance and recorded at the first lookup or when the provider is built), a moved `AGIDE_TASK_BASE` (recorded at the first lookup of each start), a changed Claude directory (recorded at lookup and at `prepare`). Not covered: a session closed before a build with the table ran; host-side lookups of modules that start before the session module sets the profile tools (`profile`, `tree`, `mcp`, `permissions`; none starts a program during its start); another profile process.
+
+### Changed files and functions
+
+Source: `core/isolation/agentWritable.ts` (`defaultClaudePaths`, `agentWritableDirectories`, `AgentWritableMemory`, `AgentWritableRegistry` constructor, `add`, `directories`), `agentWritableStore.ts` (new: `AgentWritableStore`, `agentWritableMigrations`, `AGENT_WRITABLE_MODULE`), `profileHostTools.ts` (`memory` input), `hostLaunch.ts` (`spellings`, `splitHostVariables`, `INSIDE_PREFIX`, `INSIDE_NAMES_ARGUMENT`, `insideRoute`; `insideArgv` moved), `statusLauncher.ts` (`STATUS`, `ENTER`, `TAKE_NAMES`, `IMPORT`, `LAUNCHER_INSIDE_SCRIPT`, `INSIDE_SCRIPT`, `insideArgv`, `launcherArgv`), `hostTools.ts` (`refuseBeside`), `SrtProvider.ts` (constructor, `hostStart`, `srtToolCommand`, `processCommand`), `defaultProviders.ts` (`ProviderSetup.host`, `hostToolOptions`, `ConfiguredProviders`), `types.ts` (`PtyCommand.dropped`), `index.ts`; `review/capture/runProcess.ts` (`codeText`, `spawnFailure`, `ProcessResult`), `ProcessCheckExecutor.ts` (`execute`: checkout failure, launch failure, the note of dropped names; `logName`); `main/modules/session.ts` (the store, `host`).
+
+Tests: `agentWritable.test.ts`, `agentWritableLaunch.test.ts`, `hostLaunch.test.ts`, `hostTools.test.ts`, `hostToolsGuard.test.ts`, `statusLauncher.test.ts`, `SrtProvider.test.ts`, `toolCommand.test.ts`, `ContainerProvider.test.ts`, `isolationCommands.test.ts`, `isolationProviderContract.ts` (`startedEnvironment` reads the carriers), `review/capture/ProcessCheckExecutor.test.ts`, `checkEnvironment.test.ts`, `main/modules/review.test.ts`, `e2e/milestone3.spec.ts`, `e2e/fixtures/fake-srt.mjs`.
+
+Other: `scripts/mutation-checks.mjs` (entries of replaced code rewritten, entries for each decision of this pass added), records 0040 (section 6 items 2, 3, 4, 6, 7, 8, 9, the isolation and exit-status bullets, the risk row), 0041, 0042 (the eighth review row, the row of the two passes, the open rows), `app/README.md`.
+
+### Checks run
+
+| Check | Result |
+|---|---|
+| `pnpm typecheck` | passes |
+| `pnpm coverage` with the real `srt` (`AGIDE_SRT_BIN`), `python3`, the Gradle test `resolves a dependency offline` left out with `-t` (it fails on the JDK of this host on the unchanged tree) | 283 files, 3960 tests pass, 2 expected failures, 17 skipped; `src/core` lines 97.35 (threshold 97), branches 86.91 (85), `src/core/isolation` lines 99.17, `src/core/review` lines 98.54, `src/main` lines 85.46 |
+| CI-like run (`/tmp/agide-check-clone-fix-9/nobin` with only a link `node`, PATH limited to it and the system directories, no `srt`, no Docker) | 282 files pass and 1 is skipped, 3809 tests pass, 168 skipped, 2 expected failures; `src/core` lines 97.35 (margin 0.35 points), branches 86.91, `src/core/review` lines 98.58, `src/main` lines 85.46 |
+| `pnpm build` | passes |
+| `AGIDE_HIDDEN=1 pnpm e2e` | first run: 83 pass, 3 fail (the isolation test of `milestone3.spec.ts`, from the locale defect above; `swarm.spec.ts` "answers a deny from the inbox card", `swarm_send: ... takes no more input`; `tree.spec.ts` "renames a node inline", a `fill` timeout). After the fix the three files pass (10 tests) and the whole run passes: 86 pass |
+| `pnpm parity` | ok, `docs/parity.md` unchanged |
+| `pnpm check:colours` | no literal outside the allowlist |
+| Real-tool tests under a job-control terminal (`script -q /dev/null bash -i -c '…'`, real `srt` 0.0.83): `statusLauncher.test.ts`, `toolCommand.test.ts`, `SrtProvider.test.ts`, `agentWritableLaunch.test.ts`, `ProcessCheckExecutor.srt.test.ts` | 333 pass, 1 fails: the Gradle test above |
+| Mutation entries of the changed areas (`scripts/mutation-checks.mjs` with a filter: `inside:`, `durable:`, `shim node:`, `home claude:`, `firmlink:`, `reasons:`, `coupling:`, `spawn guard:`, `registry:`, `wiring:`, `host env:`, `host launch:`, `writable:`, `launcher:`, the `signals:` entries of the launcher, `check: the path`) | 139 entries: 129 killed, 10 survived. One had a test list without the file that kills it; one (`exec` left out of the session script) was equivalent, since bash 3.2 executes the last command of `-c` in place; one compared with `isWithinAny`, which resolves links too, and was equivalent; seven guard entries survived because the samples tripped other rules (an unlisted file, a missing declaration), so the guard test now checks that each new spelling fires its own rule. The entries and the test were corrected and the eleven were killed on a second run; six entries that plant the new spellings in real sources were added and killed |
+| After the locale fix: `inside:`, `launcher:` and the launcher `signals:` entries again | 25 killed, 0 survived |
+| Entries not rerun | every entry of other areas; the full `pnpm mutation` was not run. A dry check of the script finds the text of all 672 entries exactly once, and each mutated file was compared with a copy (`cmp`) after the reruns |
+
+### What took long
+
+The first mutation subset (about 50 minutes: the entries of the launcher and the check executor each run test files that take a minute) and the two pairs of coverage runs (about 6 minutes each). Finding the locale defect took one end-to-end rerun and a probe of `case` under `et_EE.UTF-8`.
+
+### What was not verified
+
+Docker (no engine here; the container commands are tested as built commands). Other versions of bash than 3.2 for the list of names the launcher cannot set (bash 4 adds `BASHOPTS` and `BASHPID`, which the list holds). The independent review of this pass is open.
+
+### Leftovers
+
+`/tmp/agide-check-clone-fix-9/` (logs, the patch of the eighth pass, a dry-check script, copies of mutated files, the directory `nobin` with a link `node`) is removed at the end of the pass; see the report for what could not be removed. The tests remove their fixtures in the system temporary directory; the read-only fixtures of the new tests get their mode back before removal.
+
+## Tenth pass: check-clone-fix-10
+
+Start: 2026-11-27 21:37 UTC (`date -u`). End: 2026-11-27 23:12 UTC.
+
+The eighth, ninth and tenth passes are one commit. The independent review of the ninth pass found one major and six minors; this pass closes them inside the structure of the earlier passes and is the last pass of the hardening.
+
+### What was built
+
+- **A small registry with cheap lookups.** `AgentWritableRegistry` keeps in memory only the directories that no other one contains: a directory whose real path lies within a directory of the set adds no row (a workspace below the task base, a swarm agent, a check checkout, an inbox, a link into the set), and a new directory that contains rows takes their place in memory while their rows stay in the table; the load leaves out the rows that another row contains. A directory is recorded as spelled and as its real path at that moment. The session module records the directory of the hook inboxes (`<data>/session-events`) once. `isWithinAny` compares normalized absolute paths as text and computes the spellings of the directories of the set once per turn of the event loop (`directorySpellings`); the registry reads the profile once per turn. One `find('git')` plus one `path()` over a PATH of six entries, each lookup in a turn of its own, with sibling rows that none contains:
+
+  | Rows | Existing, before | Existing, after | Missing, before | Missing, after |
+  |---|---|---|---|---|
+  | 10 | 2.6 ms | 0.5 ms | 5.0 ms | 0.7 ms |
+  | 200 | 28.3 ms | 3.9 ms | 88.3 ms | 9.0 ms |
+  | 1000 | 146.2 ms | 15.1 ms | 453.3 ms | 43.7 ms |
+
+- **The `local` provider records nothing.** Its agent writes with the rights of the user whatever the Bash sandbox says (the Bash sandbox confines the Bash tool only), so a record protected nothing and a session in the home directory locked out every tool below it. The session module adds the working directories of the stored sessions only under `srt` or `container`. A program that a recorded directory holds is refused with the cause `… lies in a directory that an earlier agent launch made writable (such as the home directory)`; the status of the `srt` provider (for `srt` and `node`) and of the `local` provider (for the Claude CLI) names the directories and the `sqlite3` command that forgets them (`AgentWritableStore.forgetCommand`, the file from `databaseFile(db)`), and a check writes them to its log. No command in the app forgets a directory: it has to happen while no profile process holds the set, after the user looked at the directory, and a command would need a confirmation dialog and a restart of the profile process.
+- **Persistence.** A write that fails keeps the directory in memory and in a set of unwritten directories, written again at a later lookup or launch at least 30 s later; a failed read at start is tried again the same way and its rows join the set; each kind of failure is reported once. The store creates its table with `CREATE TABLE IF NOT EXISTS` at every start and its constructor never throws.
+- **Both shim directories.** `shimDirectories` gives the directory of the file as it is started and its real directory; `refuseBeside` checks a `node` in both, and a relative cmd-shim target is read against both. The review's probe (a configured `L/srt` linking to an old-form shim `S/srt`, `L/node` leading into an excluded directory, `L` not on the PATH) is a test.
+- **The guard.** In a file whose entry allows a spawn of `command.file`: an untyped parameter that shadows the command (arrow, single parameter, method), a bracket assignment, the command under another name, `Object['assign']`. In any file: `Module._load`, `.binding(`, `._linkedBinding(`, `.execve(`, `process['binding']`, a `Worker` with `eval`, `node:vm`, `return HostTools`, `new` on a `.constructor`. 0040 keeps the claim that it stops accidental spellings.
+- **The database read.** `buildSrtSettings` denies an `srt` session the read of the profile database and its journal files (`profileDatabase`, set by the profile process); a real-`srt` test shows the session still runs and writes its inbox, while the database, the WAL and the SHM file are unreadable and another file of the data directory is readable. The ninth account above says that no agent may read the database; that held for checks only.
+- **`DYLD_` names.** `insideRoute(inside, platform)` drops them on macOS (the protected `/usr/bin/env` and `sandbox-exec` remove them), and the session service writes the dropped names of a session to the log of the app.
+
+### Surface checked
+
+The cost of a lookup as launches accumulate: rows below a recorded directory add nothing, so the set grows with the directories outside the task base only; each turn computes one real path per row and one settings read; `recordedHolding` reads the whole table, but only for a refused program. Where the registry could lose a directory or answer stale: a failed write (kept in memory, written again; lost only if the process ends before any write succeeds, stated in 0040 item 9), a failed read (retried), a dropped table (made again), a link changed after a record (the real path was recorded too), a row left out of memory (only when another row contains its text, which a later link cannot change), a change inside one turn (applies at the next turn, stated in 0040). Where a profile value could reach an argument again: the new texts (the forget command, the recorded directories, the dropped names) go to the provider status, the log of a check and the log of the app, never to an argument of a process; the database path goes into the settings file of `srt`.
+
+### Changed files and functions
+
+Source: `core/isolation/agentWritable.ts` (`AgentWritableMemory.forgetCommand`, `MEMORY_RETRY_MS`, `outermost`, `AgentWritableRegistry`: `add`, `directories`, `recordedHolding`, `readSource`, `insert`, `covers`, `sync`, `safeLoad`, `report`), `agentWritableStore.ts` (constructor, `forgetCommand`, the table made when missing), `hostLaunch.ts` (`spellings`, `realForms`, `contains`, `directorySpellings`, `isWithinAny`, `insideRoute`), `hostTools.ts` (`HostToolsOptions.recorded`, `RECORDED_CAUSE`, `shimDirectories`, `shimTargets`, `recordedFor`, `hidden`, `refusal`, `refuseHidden`, `refuseBeside`), `profileHostTools.ts`, `SrtProvider.ts` (`profileDatabase`, `NODE_INSTALL_FIX`, `check`, `refuseNode`, `hostStart`, the default tools), `srtSettings.ts` (`databaseFiles`, `buildSrtSettings`), `LocalProvider.ts` (no registry, `check`), `defaultProviders.ts` (`ProviderSetup.profileDatabase`), `core/session/PtySessionService.ts` (`launch`), `core/store/Store.ts` and `index.ts` (`databaseFile`), `main/modules/session.ts` (the inbox directory, the stored sessions under a confining provider, the database of the profile).
+
+Tests: `agentWritable.test.ts`, `agentWritableLaunch.test.ts`, `hostLaunch.test.ts`, `hostTools.test.ts`, `hostToolsGuard.test.ts`, `SrtProvider.test.ts`, `srtSettings.test.ts`, `toolCommand.test.ts`, `isolationCommands.test.ts`, `session/PtySessionProvider.test.ts`, `main/modules/review.test.ts` (two tests follow the once-per-turn read and the confining-provider rule), `main/modules/sessionWritable.test.ts` (new).
+
+Other: `scripts/mutation-checks.mjs` (entries of replaced code rewritten, entries for each decision added), 0040 section 6 items 2, 3, 4, 6, 7 and 9 and the risk row, 0041, 0042 (the ninth review row, the row of the passes as built, the open rows), `app/README.md`.
+
+### Checks run
+
+| Check | Result |
+|---|---|
+| `pnpm typecheck` | passes |
+| `vitest run --coverage` with the real `srt` (`AGIDE_SRT_BIN`), `python3`, the Gradle test `resolves a dependency offline` left out with `-t` (it fails on the JDK of this host on the unchanged tree) | 284 files, 4004 tests pass, 2 expected failures, 17 skipped; `src/core` lines 97.37 (threshold 97), branches 87.00, statements 94.79, functions 95.57; `src/core/review` lines 98.58 |
+| CI-like run (`/tmp/agide-check-clone-fix-10/nobin` with only a link `node`, PATH limited to it and the system directories, no `srt`, no Docker) | 283 files pass and 1 is skipped, 3852 tests pass, 169 skipped, 2 expected failures; `src/core` lines 97.38 (margin 0.38 points), branches 87.00, statements 94.78, functions 95.57; `src/core/review` lines 98.61 |
+| `pnpm build` | passes |
+| `AGIDE_HIDDEN=1 pnpm e2e` | 86 pass |
+| `pnpm parity` | ok, `docs/parity.md` unchanged |
+| `pnpm check:colours` | no literal outside the allowlist |
+| Real-tool tests under a job-control terminal (`script -q /dev/null bash -i -c '…'`, real `srt` 0.0.83): `statusLauncher.test.ts`, `toolCommand.test.ts`, `SrtProvider.test.ts`, `agentWritableLaunch.test.ts`, `ProcessCheckExecutor.srt.test.ts`, the Gradle test left out | 339 pass, 1 skipped |
+| Mutation entries of the changed areas (filter `registry:`, `durable:`, `minimal:`, `tick:`, `persist:`, `local:`, `shim`, `real path:`, `reasons:`, `firmlink:`, `inside:`, `dyld:`, `db read:`, `spawn guard:`, `host tools:`, `wiring:`, `host launch:`, `coupling:`, `home claude:`, `host env:`) | first run 188 killed, 8 not killed: two entries were wrong (one equivalent mutation, one that broke the syntax), five showed tests that did not look (a relative path, a retry before the wait, a second report, the rows of the table that memory leaves out, the wiring of the cause in the profile tools), one showed a guard rule that missed `.binding(` behind a cast; after the fixes the 23 entries of those groups and the 43 `spawn guard:` entries were killed |
+| Entries not rerun | every entry of other areas; the full `pnpm mutation` was not run. A dry check finds the text of all 721 entries exactly once; after the runs every mutated file equals a copy taken after the last rerun (`cmp`) |
+
+### What took long
+
+The first mutation subset (about 70 minutes for 196 entries). Two review-module tests read the settings or the stored sessions in the same turn, which the once-per-turn read and the `local` rule changed.
+
+### What was not verified
+
+Docker (no engine here). The independent review of the tenth pass is open.
+
+### Leftovers
+
+`/tmp/agide-check-clone-fix-10/` (the patch of the ninth pass, logs, the scratch measurement, a dry-check script, the snapshot of mutated files, the directory `nobin`) could not be removed by this pass: the permission system refused the removal, and it is left for the coordinator. The test suite leaves small `agents-tail-*` and `agide-cap-*` directories in the system temporary directory; the tests of this pass do not create them.

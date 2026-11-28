@@ -359,6 +359,7 @@ export class PtySessionService implements SessionService {
         return;
       }
       const command = await prepared.ptyCommand({ sessionId: info.id, cwd: info.cwd, args, cols: entry.cols, rows: entry.rows, env: merged.env });
+      if (command.dropped !== undefined && command.dropped.length > 0) console.warn(`session ${info.id}: variables of the launch that do not reach the program: ${command.dropped.join(', ')}`);
       const inbox = new HookInbox(inboxDir, (record) => this.onHook(entry, record));
       let proc: nodePty.IPty;
       try {

@@ -1,4 +1,4 @@
-import { HostTools, hostTools, launcherArgv, srtToolEnvironment } from '../../isolation/index';
+import { hostTools, launcherArgv, srtToolEnvironment, type HostTools } from '../../isolation/index';
 import type { PtyCommand } from '../../isolation/types';
 import type { CheckEnvironment } from './ProcessCheckExecutor';
 
@@ -12,8 +12,6 @@ export interface CheckEnvironmentInput {
     readonly binary: string;
     readonly settingsDir: string;
     readonly extraDenyRead?: readonly string[] | undefined;
-    /** The PATH `srt` is looked up on; ignored when `hostTools` is given. */
-    readonly appPath?: string | undefined;
     /** Finds `srt` and `node` outside the directories the profile's agents may write. Defaults to the shared instance of the app. */
     readonly hostTools?: HostTools | undefined;
   };
@@ -29,7 +27,7 @@ export function resolveCheckEnvironment(input: CheckEnvironmentInput): CheckEnvi
   const { provider, bashSandbox, profileEnv, srt } = input;
   if (provider === 'container') return { kind: 'unavailable', why: 'checks under the container provider are not connected in this build' };
   if (provider === 'srt' || bashSandbox) {
-    const tools = srt.hostTools ?? (srt.appPath === undefined ? hostTools() : new HostTools({ appPath: srt.appPath }));
+    const tools = srt.hostTools ?? hostTools();
     if (tools.find(srt.binary) === undefined) return { kind: 'unavailable', why: tools.shadowed(srt.binary) === undefined ? 'the sandbox runtime is not installed' : 'the sandbox runtime exists only in a directory that an agent may write' };
     return {
       kind: 'ready',

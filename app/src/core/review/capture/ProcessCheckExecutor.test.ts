@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_REVIEW_POLICY, type ReviewPolicy } from '../policy/schema';
 import type { CheckRecord } from '../schemas';
@@ -7,7 +7,7 @@ import type { CheckRequest } from '../types';
 import { ProcessCheckExecutor, type CheckEnvironment, type CheckExecutorDeps } from './ProcessCheckExecutor';
 import { checkEnvironment, isScrubbedName } from './checkEnv';
 import { CheckClones, CloneError, type CloneFunction, type CloneService } from './CheckClones';
-import { srtToolEnvironment } from '../../isolation/index';
+import { HostTools, srtToolEnvironment } from '../../isolation/index';
 import { writeFakeSrt } from '../../isolation/fakeSrt';
 import { makeRepo, removeTempDirs, sh, write, tempDir, type Repo } from './gitFixtures';
 import { OutputRing } from './outputRing';
@@ -104,7 +104,7 @@ const GREEN_ID = 'chk_green';
 
 const greenBase = (commitId: string): CheckRecord => ({ id: GREEN_ID, changesetId: null, target: 'base', commitId, policyHash: POLICY_HASH, command: ['x'], outcome: 'passed', notRunReason: null, exitCode: 0, signal: null, durationMs: 1, outputPath: null, outputTail: '', truncated: false, startedAt: '2026-11-21T10:00:00.000Z', endedAt: '2026-11-21T10:00:01.000Z' });
 
-function setup(options: { clones?: CloneService; files?: Record<string, string>; checkpointFiles?: Record<string, string>; environment?: CheckEnvironment; maxConcurrent?: number; baseCheck?: CheckRecord | null | (() => CheckRecord | undefined); clone?: CloneFunction; home?: string; processes?: CheckProcesses } = {}): Setup {
+function setup(options: { clones?: CloneService; files?: Record<string, string>; checkpointFiles?: Record<string, string>; environment?: CheckEnvironment; maxConcurrent?: number; baseCheck?: CheckRecord | null | (() => CheckRecord | undefined); clone?: CloneFunction; home?: string; processes?: CheckProcesses; checkoutRoot?: CheckExecutorDeps['checkoutRoot'] } = {}): Setup {
   repo = makeRepo({ '.gitignore': 'stub.txt\n', 'base.txt': 'base\n', ...options.files });
   for (const [path, content] of Object.entries(options.checkpointFiles ?? { 'agent.txt': 'agent\n' })) write(join(repo.main, path), content);
   sh(repo.main, ['add', '-A']);
@@ -130,7 +130,7 @@ function setup(options: { clones?: CloneService; files?: Record<string, string>;
   const clones = new CheckClones({ root: join(repo.root, 'clones'), clone: options.clone ?? copyClone, probe: async () => undefined });
   const deps: CheckExecutorDeps = {
     environment: async () => environment,
-    checkoutRoot: (swarmId, runId) => join(repo!.root, 'checks', swarmId, runId),
+    checkoutRoot: options.checkoutRoot ?? ((swarmId, runId) => join(repo!.root, 'checks', swarmId, runId)),
     dataDir: join(repo.root, 'data'),
     clones: options.clones ?? clones,
     processes,
@@ -845,13 +845,63 @@ describe('not run', () => {
 
   it('keeps where a refused host program was found out of the reason and writes it to the log of the run', async () => {
     const refused = (): never => {
-      throw new IsolationError('failed', 'the sandbox runtime (srt) exists only in a directory that an agent may write, so it was not started', '/agent/writable/bin/srt');
+      throw new IsolationError('failed', 'the sandbox runtime (srt) exists only in a directory that an agent may write, or runs code that lies in one, so it was not started', '/agent/writable/bin/srt');
     };
     const s = setup({ environment: { kind: 'ready', environment: { toolCommand: async () => refused() }, profileEnv: { PATH: process.env['PATH'] ?? '' }, enforcesNetwork: true } });
     const result = await s.executor.run(s.request(['true']));
-    expect([result.checkpoint.outcome, result.checkpoint.notRunReason], 'the fixed reason only').toEqual(['not_run', 'the command command did not start: the sandbox runtime (srt) exists only in a directory that an agent may write, so it was not started']);
+    expect([result.checkpoint.outcome, result.checkpoint.notRunReason], 'the fixed reason only').toEqual(['not_run', 'the command command did not start: the sandbox runtime (srt) exists only in a directory that an agent may write, or runs code that lies in one, so it was not started']);
     expect(result.checkpoint.outputTail?.includes('/agent/writable'), 'no path in the tail that a reviewer reads').toBe(false);
     expect(readFileSync(join(s.repo.root, 'data', result.checkpoint.outputPath!), 'utf8'), 'the log names the file').toContain('launch detail: /agent/writable/bin/srt');
+  });
+
+  const logOf = (s: Setup, record: CheckRecord): string => readFileSync(join(s.repo.root, 'data', record.outputPath!), 'utf8');
+
+  it('names a program that cannot be executed by the code of the error, with no path in the reason, and writes the message of the system to the log', async () => {
+    const file = join(tempDir('noexec'), 'srt');
+    writeFileSync(file, '#!/bin/sh\nexit 0\n', { mode: 0o644 });
+    const s = setup({ environment: { kind: 'ready', environment: { toolCommand: async (launch) => ({ file, args: [], cwd: launch.cwd, env: {} }) }, profileEnv: { PATH: process.env['PATH'] ?? '' }, enforcesNetwork: true } });
+    const result = await s.executor.run(s.request(['true']));
+    expect([result.checkpoint.outcome, result.checkpoint.notRunReason], 'the fixed text of EACCES').toEqual(['not_run', 'the command command did not start: the program is not executable, or a directory of its path cannot be searched']);
+    expect(logOf(s, result.checkpoint), 'the log has the message of the system').toContain(`launch detail: spawn ${file} EACCES`);
+  });
+
+  it('names a settings file that cannot be written by the code of the error, with no path in the reason', async () => {
+    const bin = tempDir('fake-srt-bin');
+    writeFakeSrt(bin);
+    const locked = tempDir('settings');
+    const settingsDir = join(locked, 'srt');
+    const environment = srtToolEnvironment({ srtBinary: 'srt', settingsDir, hostTools: new HostTools({ appPath: bin, excluded: () => [], fixedDirectories: [] }) });
+    const s = setup({ environment: { kind: 'ready', environment, profileEnv: { PATH: process.env['PATH'] ?? '' }, enforcesNetwork: true } });
+    chmodSync(locked, 0o500);
+    try {
+      const result = await s.executor.run(s.request(['true']));
+      expect(result.checkpoint.notRunReason, 'the code of the error, no path').toBe('the command command did not start: the launch could not be prepared (EACCES)');
+      expect(logOf(s, result.checkpoint), 'the log names the directory').toContain(`launch detail: EACCES: permission denied, mkdir '${settingsDir}'`);
+    } finally {
+      chmodSync(locked, 0o700);
+    }
+  });
+
+  it('ends not_run with a fixed reason when the checkout fails, and writes the message to the log of the run', async () => {
+    const locked = tempDir('checkout-root');
+    const s = setup({ checkoutRoot: (swarmId, runId) => join(locked, swarmId, runId) });
+    chmodSync(locked, 0o500);
+    try {
+      const result = await s.executor.run(s.request(['true']));
+      expect([result.checkpoint.outcome, result.checkpoint.notRunReason], 'the code of the error, no path').toEqual(['not_run', 'the checkout of the commit failed (EACCES)']);
+      expect(logOf(s, result.checkpoint), 'the log has the message, which names the path').toContain(`checkout detail: EACCES: permission denied, mkdir '${join(locked, 'sw1')}'`);
+    } finally {
+      chmodSync(locked, 0o700);
+    }
+  });
+
+  it('says in the log of the run which variables the sandbox launcher cannot set, by name and once', async () => {
+    const s = setup({ environment: { kind: 'ready', environment: { toolCommand: async (launch) => ({ ...direct(launch), dropped: ['BASH_FUNC_f%%', 'SHELLOPTS'] }) }, profileEnv: { PATH: process.env['PATH'] ?? '' }, enforcesNetwork: true } });
+    const result = await s.executor.run(s.request(['true'], { setup: ['true'] }));
+    const note = 'note: variables that the sandbox launcher cannot set were not given to the check: BASH_FUNC_f%%, SHELLOPTS\n';
+    expect(logOf(s, result.checkpoint).split(note).length - 1, 'the note is in the log once for the setup and the command').toBe(1);
+    const quiet = setup({ environment: { kind: 'ready', environment: { toolCommand: async (launch) => ({ ...direct(launch), dropped: [] }) }, profileEnv: { PATH: process.env['PATH'] ?? '' }, enforcesNetwork: true } });
+    expect(logOf(quiet, (await quiet.executor.run(quiet.request(['true']))).checkpoint), 'no note when nothing was dropped').not.toContain('cannot set');
   });
 
   it('says in the log that a provider does not enforce the network limit', async () => {

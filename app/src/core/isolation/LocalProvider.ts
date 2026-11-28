@@ -1,7 +1,7 @@
 import { accessSync, constants } from 'node:fs';
 import { resolveClaudeBinary } from '../session/env';
 import { HostEnvironment } from './HostEnvironment';
-import { hostTools, type HostTools } from './hostTools';
+import { hostTools, RECORDED_CAUSE, type HostTools } from './hostTools';
 import { launchEnv } from './launchEnv';
 import { SessionFiles } from './SessionFiles';
 import {
@@ -28,6 +28,10 @@ export interface LocalProviderOptions {
 /**
  * Runs `claude` on the host as the user, as milestone 1 does: the binary itself in the PTY, hooks through the
  * inbox directory, the app MCP server on 127.0.0.1. Adds the 0600 session files for config and tokens.
+ *
+ * It adds nothing to the registry of agent-writable directories: the CLI and its file tools run with the rights of the
+ * user, and the Bash sandbox confines the Bash tool only, so an agent here may write every directory the user can. A
+ * record of its workspace protects nothing, and a session in the home directory would exclude every program below it.
  */
 export class LocalProvider implements IsolationProvider {
   readonly id = 'local';
@@ -47,11 +51,21 @@ export class LocalProvider implements IsolationProvider {
   }
 
   check(): Promise<ProviderCheck> {
+    const tools = this.options.hostTools ?? hostTools();
+    const hidden = tools.find(this.claudeBinary) === undefined ? tools.shadowed(this.claudeBinary) : undefined;
+    if (hidden !== undefined) {
+      const recorded = tools.recordedFor(hidden);
+      return Promise.resolve({
+        ok: false,
+        reason: recorded === undefined ? 'The Claude CLI lies in a directory that an agent may write' : `The Claude CLI ${RECORDED_CAUSE}`,
+        fix: recorded ?? 'Install Claude Code in a directory that no agent may write, or set AGIDE_CLAUDE_BIN.',
+      });
+    }
     try {
       if (this.claudeBinary.includes('/')) accessSync(this.claudeBinary, constants.X_OK);
       return Promise.resolve({ ok: true });
     } catch {
-      return Promise.resolve({ ok: false, reason: `${this.claudeBinary} is not executable`, fix: 'Install Claude Code or set AGIDE_CLAUDE_BIN.' });
+      return Promise.resolve({ ok: false, reason: 'The Claude CLI is not executable at the configured path', fix: 'Install Claude Code or set AGIDE_CLAUDE_BIN.' });
     }
   }
 
@@ -86,8 +100,9 @@ class LocalEnvironment extends HostEnvironment {
 
   async processCommand(launch: ProcessLaunch): Promise<PtyCommand> {
     if (this.spec.workspace.mode !== 'bind') throw new IsolationError('unsupported', 'the local provider runs in a host directory only');
+    const inbox = this.inboxes.get(launch.sessionId);
     // A name or a relative path would resolve through the PATH of the profile in the workspace, which the agent writes.
-    const file = this.tools().require(this.claudeBinary, [this.spec.workspace.hostPath, launch.cwd], 'the Claude CLI');
+    const file = this.tools().require(this.claudeBinary, [this.spec.workspace.hostPath, launch.cwd, ...(inbox === undefined ? [] : [inbox])], 'the Claude CLI');
     return { file, args: [...launch.args], cwd: launch.cwd, env: launchEnv(this.spec.profile, this.paths.toEnv, launch.env) };
   }
 }

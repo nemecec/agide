@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { agentWritableDirectories } from './agentWritable';
+import { AgentWritableRegistry } from './agentWritable';
 import { buildDockerRunArgs, containerEnvNames, containerName, CONTAINER_RUN_FLAGS, type Mount } from './dockerArgs';
 import { HostEnvironment, signalProcess } from './HostEnvironment';
 import { hostDirectory, HostTools } from './hostTools';
@@ -41,10 +41,10 @@ export interface ContainerProviderOptions {
   readonly ownerId?: string;
   /** The PATH the docker client is looked up on, outside the container: the app's own, never the profile's. Defaults to `process.env.PATH`. Ignored when `hostTools` is given. */
   readonly appPath?: string;
-  /** Finds the docker client. Defaults to one over `appPath` that excludes what the containers of this provider may write. */
+  /** Finds the docker client. It must read `writable`. Defaults to one over `appPath` that excludes the directories of `writable`. */
   readonly hostTools?: HostTools;
-  /** Directories below which agents get their workspaces (the task base); no program is looked up there. */
-  readonly agentRoots?: readonly string[];
+  /** The directories the agents of the profile may write; this provider adds its Claude directory and every directory it mounts writable. Defaults to a registry of its own. */
+  readonly writable?: AgentWritableRegistry;
 }
 
 export const DEFAULT_HOST_ALIAS = 'host.docker.internal';
@@ -75,31 +75,27 @@ export class ContainerProvider implements IsolationProvider {
     inspectorHook: 'unavailable',
   };
   private readonly environments = new Map<string, ContainerEnvironment>();
-  /** The workspaces of the environments prepared so far: a container writes them, so no program is looked up there. */
-  private readonly known = new Set<string>();
+  private readonly writable: AgentWritableRegistry;
   private readonly tools: HostTools;
 
   constructor(readonly options: ContainerProviderOptions) {
-    this.tools = options.hostTools ?? new HostTools({ ...(options.appPath === undefined ? {} : { appPath: options.appPath }), excluded: () => this.writable() });
-  }
-
-  /** Everything the containers of this provider may write, for the lookup of host-side programs. */
-  private writable(): string[] {
-    return agentWritableDirectories({ writeDirs: [...this.known], claudeConfigDir: this.options.claudeConfigDir, agentRoots: this.options.agentRoots });
+    this.writable = options.writable ?? new AgentWritableRegistry(() => ({ claudeConfigDir: options.claudeConfigDir }));
+    this.writable.add([options.claudeConfigDir]);
+    this.tools = options.hostTools ?? new HostTools({ ...(options.appPath === undefined ? {} : { appPath: options.appPath }), excluded: () => this.writable.directories() });
   }
 
   async check(): Promise<ProviderCheck> {
     const { dockerBinary, image } = this.options;
-    if (this.tools.find(dockerBinary, this.writable()) === undefined) {
+    if (this.tools.find(dockerBinary) === undefined) {
       return { ok: false, reason: 'Docker is not installed', fix: 'Install Docker Desktop, or enter the docker path in the field of this provider.' };
     }
     try {
-      await this.tools.run(dockerBinary, ['version', '--format', '{{.Server.Version}}'], { env: process.env, timeout: DOCKER_TIMEOUT_MS, excluded: this.writable() });
+      await this.tools.run(dockerBinary, ['version', '--format', '{{.Server.Version}}'], { env: process.env, timeout: DOCKER_TIMEOUT_MS });
     } catch {
       return { ok: false, reason: 'Docker is installed but its engine is not running', fix: 'Start Docker Desktop and check again.' };
     }
     try {
-      await this.tools.run(dockerBinary, ['image', 'inspect', '--format', '{{.Id}}', image], { env: process.env, timeout: DOCKER_TIMEOUT_MS, excluded: this.writable() });
+      await this.tools.run(dockerBinary, ['image', 'inspect', '--format', '{{.Id}}', image], { env: process.env, timeout: DOCKER_TIMEOUT_MS });
     } catch {
       return { ok: false, reason: `The image ${image} is not present locally`, fix: 'Build or pull the image yourself. The app never pulls images.' };
     }
@@ -111,7 +107,7 @@ export class ContainerProvider implements IsolationProvider {
     const { dockerBinary, ownerId } = this.options;
     if (ownerId === undefined) return;
     try {
-      const call = { env: process.env, excluded: this.writable() };
+      const call = { env: process.env };
       const { stdout } = await this.tools.run(dockerBinary, ['ps', '-aq', '--filter', `label=${CONTAINER_RUN_FLAGS.ownerLabel}=${ownerId}`], { ...call, timeout: DOCKER_TIMEOUT_MS });
       const ids = stdout.split('\n').filter(Boolean);
       if (ids.length > 0) await this.tools.run(dockerBinary, ['rm', '-f', ...ids], { ...call, timeout: DOCKER_TIMEOUT_MS * 2 });
@@ -122,11 +118,11 @@ export class ContainerProvider implements IsolationProvider {
 
   prepare(spec: EnvironmentSpec): Promise<AgentEnvironment> {
     const id = ['container', spec.key.profileId, spec.key.sessionId].filter(Boolean).join(':');
-    if (spec.workspace.mode === 'bind') this.known.add(spec.workspace.hostPath);
+    if (spec.workspace.mode === 'bind') this.writable.add([spec.workspace.hostPath]);
     let environment = this.environments.get(id);
     if (environment) environment.spec = spec;
     else {
-      environment = new ContainerEnvironment(id, spec, new SessionFiles(this.options.sessionFilesDir), this.options, this.tools, () => this.writable());
+      environment = new ContainerEnvironment(id, spec, new SessionFiles(this.options.sessionFilesDir), this.options, this.tools, this.writable);
       this.environments.set(id, environment);
     }
     return Promise.resolve(environment);
@@ -142,14 +138,14 @@ class ContainerEnvironment extends HostEnvironment {
     files: SessionFiles,
     private readonly options: ContainerProviderOptions,
     private readonly tools: HostTools,
-    private readonly writable: () => readonly string[],
+    private readonly writable: AgentWritableRegistry,
   ) {
     super(id, spec, files);
   }
 
-  /** The docker client as an absolute file, with the trusted PATH and a working directory that holds nothing: `docker run -w` sets the directory inside the container. */
-  private dockerLaunch(directories: readonly string[], env: Readonly<Record<string, string>>): { readonly file: string; readonly cwd: string; readonly env: Record<string, string> } {
-    const { file, path } = this.tools.launch(this.options.dockerBinary, [...this.writable(), ...directories], 'the docker client');
+  /** The docker client as an absolute file, with the trusted PATH and a working directory that holds nothing: `docker run -w` sets the directory inside the container. The writable directories of the launch are in the registry. */
+  private dockerLaunch(env: Readonly<Record<string, string>>): { readonly file: string; readonly cwd: string; readonly env: Record<string, string> } {
+    const { file, path } = this.tools.launch(this.options.dockerBinary, [], 'the docker client');
     return { file, cwd: hostDirectory(), env: { ...env, PATH: path } };
   }
 
@@ -180,6 +176,7 @@ class ContainerEnvironment extends HostEnvironment {
       ...profile.toolFiles.map((file) => ({ hostPath: file.hostPath, readOnly: true })),
     ];
     for (const mount of mounts) if (!mount.readOnly || mount.hostPath === this.files.dirOf(launch.sessionId)) mkdirSync(mount.hostPath, { recursive: true, mode: 0o700 });
+    this.writable.add(mounts.filter((mount) => !mount.readOnly).map((mount) => mount.hostPath));
     this.sessions.add(launch.sessionId);
 
     const env = launchEnv({ ...profile, claudeConfigDir: claudeDir }, this.paths.toEnv, launch.env);
@@ -197,7 +194,7 @@ class ContainerEnvironment extends HostEnvironment {
       claudeArgs: launch.args,
       tty,
     });
-    const host = this.dockerLaunch(mounts.filter((mount) => !mount.readOnly).map((mount) => mount.hostPath), env);
+    const host = this.dockerLaunch(env);
     return { ...host, args };
   }
 
@@ -222,14 +219,15 @@ class ContainerEnvironment extends HostEnvironment {
       tty: false,
     });
     if (launch.network === 'none') args.splice(1, 0, '--network', 'none');
-    return { ...this.dockerLaunch(mounts.map((mount) => mount.hostPath), launch.env), args };
+    this.writable.add(mounts.map((mount) => mount.hostPath));
+    return { ...this.dockerLaunch(launch.env), args };
   }
 
   /** SIGTERM to the docker client is forwarded and ends the session cleanly; SIGKILL of the client leaves the container, so `docker kill` goes first. */
   override async terminate(sessionId: SessionId, signal: 'SIGTERM' | 'SIGKILL'): Promise<void> {
     const pid = this.pids.get(sessionId);
     if (signal === 'SIGKILL') {
-      await this.tools.run(this.options.dockerBinary, ['kill', containerName(sessionId)], { env: process.env, timeout: DOCKER_TIMEOUT_MS, excluded: this.writable() }).catch(() => undefined);
+      await this.tools.run(this.options.dockerBinary, ['kill', containerName(sessionId)], { env: process.env, timeout: DOCKER_TIMEOUT_MS }).catch(() => undefined);
     }
     if (pid !== undefined) signalProcess(pid, signal);
   }

@@ -1,6 +1,6 @@
 import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { claudeTempDir, sessionWriteAllowances } from './agentWritable';
 import type { NetworkPolicy } from './types';
 
@@ -48,6 +48,8 @@ export interface SrtSettingsInput {
   readonly claudeConfigDir: string | undefined;
   readonly extraWritePaths?: readonly string[];
   readonly extraDenyRead?: readonly string[];
+  /** The profile database: the session may not read it or its journal files. */
+  readonly profileDatabase?: string;
   readonly network: NetworkPolicy;
   readonly home?: string;
   readonly uid?: number;
@@ -71,6 +73,13 @@ function withResolved(path: string): string[] {
   }
 }
 
+/** The files of an SQLite database in WAL mode and its rollback journal, in both spellings of their directory. */
+function databaseFiles(database: string | undefined): string[] {
+  if (database === undefined) return [];
+  const name = basename(database);
+  return [...new Set(withResolved(dirname(database)).flatMap((directory) => ['', '-wal', '-shm', '-journal'].map((suffix) => join(directory, `${name}${suffix}`))))];
+}
+
 export function srtAllowedDomains(network: NetworkPolicy): string[] {
   const entries = network.mode === 'unrestricted' ? [...DEVELOPMENT_HOSTS] : network.allow.map((entry) => (entry.port === undefined ? entry.host : `${entry.host}:${entry.port}`));
   return [...new Set([...ANTHROPIC_HOSTS, ...LOOPBACK_HOSTS, ...entries])];
@@ -86,7 +95,7 @@ export function buildSrtSettings(input: SrtSettingsInput): SrtSettings {
     allowPty: true,
     network: { allowedDomains: srtAllowedDomains(input.network), deniedDomains: [], allowLocalBinding: true },
     filesystem: {
-      denyRead: [...(input.extraDenyRead ?? [])],
+      denyRead: [...(input.extraDenyRead ?? []), ...databaseFiles(input.profileDatabase)],
       allowRead: [],
       denyWrite: [...new Set(protectedPaths.flatMap(withResolved))],
       allowWrite: [...new Set(writes.flatMap(withResolved))],

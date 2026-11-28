@@ -1,9 +1,9 @@
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { caseInsensitiveVolume } from './caseProbe';
-import { findExecutable, insideArgv, isLoaderVariable, isWithinAny, locateHostBinary, splitLoaderVariables, trustedPath } from './hostLaunch';
+import { findExecutable, INSIDE_PREFIX, insideRoute, isHostSideVariable, isWithinAny, splitHostVariables, trustedPath } from './hostLaunch';
 
 let dir: string;
 beforeEach(() => {
@@ -47,6 +47,22 @@ describe('isWithinAny', () => {
   });
 });
 
+const dataVolume = process.platform === 'darwin' && existsSync('/System/Volumes/Data/private');
+
+describe('isWithinAny and the firmlinks of the data volume', () => {
+
+  it.skipIf(!dataVolume)('treats a path through /System/Volumes/Data and the same path without it as one place, in either role', () => {
+    const excluded = join(dir, 'agide');
+    mkdirSync(join(excluded, 'x', 'bin'), { recursive: true });
+    const viaData = (path: string): string => `/System/Volumes/Data${path.startsWith('/private/') ? path : `/private${path}`}`;
+    expect(existsSync(viaData(join(excluded, 'x', 'bin'))), 'the data volume spelling names an existing directory').toBe(true);
+    expect(isWithinAny(viaData(join(excluded, 'x', 'bin')), [excluded]), 'a candidate spelled through the data volume').toBe(true);
+    expect(isWithinAny(join(excluded, 'x', 'bin'), [viaData(excluded)]), 'an excluded directory spelled through the data volume').toBe(true);
+    expect(isWithinAny(viaData(join(dir, 'other')), [excluded]), 'a sibling stays outside').toBe(false);
+    expect(trustedPath(`${viaData(join(excluded, 'x', 'bin'))}:/usr/bin`, [excluded]), 'the PATH entry is dropped').toBe('/usr/bin');
+  });
+});
+
 describe('isWithinAny and the letter case of a volume', () => {
   it.skipIf(!caseInsensitiveVolume())('finds a path below an excluded directory that is spelled in another case, because the volume names one directory', () => {
     mkdirSync(join(dir, 'CaseDir', 'bin'), { recursive: true });
@@ -74,42 +90,36 @@ describe('findExecutable', () => {
   });
 });
 
-describe('locateHostBinary', () => {
-  it('looks a bare name up on the trusted entries only', () => {
-    const file = program(join(dir, 'bin'));
-    expect(locateHostBinary('srt', ['bin', '', join(dir, 'bin')].join(':')), 'the absolute entry').toBe(file);
-    expect(locateHostBinary('srt', relative(process.cwd(), join(dir, 'bin'))), 'the same directory as a relative entry').toBeUndefined();
-    expect(locateHostBinary('srt', `:${join(dir, 'bin')}`.replace(join(dir, 'bin'), '')), 'an empty entry only').toBeUndefined();
-    expect(locateHostBinary('srt', join(dir, 'bin'), [dir]), 'an entry inside an excluded directory').toBeUndefined();
+describe('the variables of the host-side process of srt', () => {
+  it('keeps the identity and locale of the user, the temporary directory and the names srt reads or sets', () => {
+    const kept = ['HOME', 'USER', 'LOGNAME', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM', 'SRT_DEBUG', 'CLAUDE_CODE_TMPDIR', 'CLAUDE_TMPDIR', 'HTTPS_proxy'.toLowerCase(), 'HTTP_PROXY', 'NO_PROXY', 'NODE_EXTRA_CA_CERTS', 'JAVA_TOOL_OPTIONS', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_3'];
+    expect(kept.map(isHostSideVariable), 'each of these stays on the host side').toEqual(kept.map(() => true));
   });
 
-  it('makes a path with a directory part absolute against the working directory of the app, and refuses one inside an excluded directory', () => {
-    const file = program(join(dir, 'tools'));
-    expect(locateHostBinary(file, undefined), 'an absolute path needs no PATH').toBe(file);
-    expect(locateHostBinary(relative(process.cwd(), file), undefined), 'a relative path is made absolute').toBe(file);
-    expect(locateHostBinary(file, undefined, [join(dir, 'tools')]), 'a path inside an excluded directory').toBeUndefined();
-    expect(locateHostBinary(join(dir, 'tools', 'missing'), undefined), 'a missing file').toBeUndefined();
-  });
-});
-
-describe('loader variables', () => {
-  it('names NODE_OPTIONS, NODE_PATH and every DYLD_ and LD_ variable and nothing else', () => {
-    const names = ['NODE_OPTIONS', 'NODE_PATH', 'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH', 'LD_PRELOAD', 'LD_LIBRARY_PATH'];
-    expect(names.map(isLoaderVariable), 'the loader variables').toEqual(names.map(() => true));
-    expect(['PATH', 'HOME', 'NODE_ENV', 'NODE_EXTRA_CA_CERTS', 'OLD_PRELOAD', 'LDFLAGS', 'XDYLD_X'].map(isLoaderVariable), 'names that only look like them').toEqual([false, false, false, false, false, false, false]);
+  it('does not keep a variable that makes a shell or Node run code before or while the program starts, or any name it does not know', () => {
+    const inside = ['BASH_FUNC_uname%%', 'BASH_FUNC_x%%', 'SHELLOPTS', 'BASHOPTS', 'PS4', 'ENV', 'BASH_ENV', 'CDPATH', 'IFS', 'PROMPT_COMMAND', 'NODE_OPTIONS', 'NODE_PATH', 'DYLD_INSERT_LIBRARIES', 'LD_PRELOAD', 'GIT_EXEC_PATH', 'ANYTHING_ELSE', 'LDFLAGS'];
+    expect(inside.map(isHostSideVariable), 'each of these goes inside the sandbox').toEqual(inside.map(() => false));
   });
 
-  it('splits an environment into the host-side part and the variables for inside the sandbox', () => {
-    const { host, inside } = splitLoaderVariables({ PATH: '/p', HOME: '/h', NODE_OPTIONS: '--require ./x.cjs', NODE_PATH: './lib', DYLD_INSERT_LIBRARIES: './x.dylib', LD_PRELOAD: './x.so' });
-    expect(host, 'no loader variable stays').toEqual({ PATH: '/p', HOME: '/h' });
-    expect(inside, 'the loader variables with their values').toEqual({ NODE_OPTIONS: '--require ./x.cjs', NODE_PATH: './lib', DYLD_INSERT_LIBRARIES: './x.dylib', LD_PRELOAD: './x.so' });
+  it('splits an environment into the host-side part and the variables for inside the sandbox, the PATH of the profile among them', () => {
+    const { host, inside } = splitHostVariables({ PATH: '/p', HOME: '/h', LC_ALL: 'C', 'BASH_FUNC_uname%%': '() { ./x; }', SHELLOPTS: 'xtrace', PS4: '$(./x)', NODE_OPTIONS: '--require ./x.cjs', MY_TOKEN_NAME: 'v' });
+    expect(host, 'the allowed names only, without PATH').toEqual({ HOME: '/h', LC_ALL: 'C' });
+    expect(inside, 'every other variable with its value').toEqual({ PATH: '/p', 'BASH_FUNC_uname%%': '() { ./x; }', SHELLOPTS: 'xtrace', PS4: '$(./x)', NODE_OPTIONS: '--require ./x.cjs', MY_TOKEN_NAME: 'v' });
   });
 });
 
-describe('insideArgv', () => {
-  it('sets the PATH of the profile for the program, verbatim, and removes it when the profile has none', () => {
-    expect(insideArgv('a::b:.', ['x', 'y']), 'a PATH with an empty and a relative entry is passed on unchanged').toEqual(['/usr/bin/env', 'PATH=a::b:.', 'x', 'y']);
-    expect(insideArgv(undefined, ['x']), 'no PATH').toEqual(['/usr/bin/env', '-u', 'PATH', 'x']);
-    expect(insideArgv('/p', ['x'], { NODE_OPTIONS: '--a b', LD_PRELOAD: 'l' }), 'the variables for the program come after the PATH and before the program').toEqual(['/usr/bin/env', 'PATH=/p', 'NODE_OPTIONS=--a b', 'LD_PRELOAD=l', 'x']);
+describe('insideRoute', () => {
+  it('carries each value under the prefix and names it, and drops what the launcher shell cannot set', () => {
+    const route = insideRoute({ PATH: 'a::b:.', NODE_OPTIONS: '--a b', 'BASH_FUNC_f%%': '() { :; }', SHELLOPTS: 'xtrace', _: '/x', 'A-B': '1', AGIDE_INSIDE_NAMES: 'X', AGIDE_INSIDE: 'y', lower_case: 'v' });
+    expect(route.carriers, 'the values under the prefix, nothing else').toEqual({ [`${INSIDE_PREFIX}PATH`]: 'a::b:.', [`${INSIDE_PREFIX}NODE_OPTIONS`]: '--a b', [`${INSIDE_PREFIX}lower_case`]: 'v' });
+    expect(route.names, 'the names the launcher sets').toEqual(['PATH', 'NODE_OPTIONS', 'lower_case']);
+    expect(route.dropped, 'an exported function, a read-only name of bash, a name bash sets, a name with a dash and the names of the route itself').toEqual(['BASH_FUNC_f%%', 'SHELLOPTS', '_', 'A-B', 'AGIDE_INSIDE_NAMES', 'AGIDE_INSIDE']);
+  });
+
+  it('drops the DYLD_ names on macOS, which the protected programs of the route remove, and carries them elsewhere', () => {
+    const env = { DYLD_INSERT_LIBRARIES: './x.dylib', DYLD_LIBRARY_PATH: '/l', LD_PRELOAD: './x.so' };
+    const mac = insideRoute(env, 'darwin');
+    expect([mac.dropped, mac.names, Object.keys(mac.carriers)], 'on macOS: both DYLD_ names dropped, no carrier for them').toEqual([['DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH'], ['LD_PRELOAD'], [`${INSIDE_PREFIX}LD_PRELOAD`]]);
+    expect(insideRoute(env, 'linux').names, 'on Linux every name is carried').toEqual(['DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH', 'LD_PRELOAD']);
   });
 });

@@ -12,7 +12,7 @@ import { environmentNotRunReason, findEnvironmentProblem, findUnconfirmedProblem
 import { GuardedGit, type GitExec } from './guardedGit';
 import { OutputRing } from './outputRing';
 import { CHECK_OWNER_VARIABLE, CHECK_RUN_VARIABLE, sweepNote, type CheckProcesses, type SweepOutcome } from './ProcessSweep';
-import { runProcess, type RunningProcess } from './runProcess';
+import { codeText, runProcess, type RunningProcess } from './runProcess';
 
 /**
  * `release` removes what `toolCommand` left for a key, such as a settings file; the executor calls it when the run ends.
@@ -74,6 +74,8 @@ interface Run {
 }
 
 const plain = (record: CheckRecord, output = ''): Run => ({ record, unconfirmed: undefined, output });
+
+const logName = (changesetId: ChangesetId | null, commitId: string): string => changesetId ?? `base-${commitId.slice(0, 12)}`;
 
 interface Active {
   running: RunningProcess | undefined;
@@ -241,7 +243,10 @@ export class ProcessCheckExecutor implements CheckExecutor {
       await git.text(['worktree', 'add', '--detach', '--force', '--', checkout, commitId]);
     } catch (error) {
       await this.removeCheckout(request, checkout);
-      return plain(this.notRun(request, target, commitId, changesetId, `the checkout failed: ${(error as Error).message}`));
+      // The message of git or of the file system names the checkout, below the task base: it goes to the log of the run, not into the reason.
+      const record = this.notRun(request, target, commitId, changesetId, codeText(error, 'the checkout of the commit failed'));
+      const outputPath = await this.writeLog(request.swarmId, logName(changesetId, commitId), runId, Buffer.from(`checkout detail: ${(error as Error).message}\n`));
+      return plain({ ...record, outputPath });
     }
 
     // A private temporary directory next to the checkout: the only writable place besides the checkout and the run's cache clones, removed with them.
@@ -257,7 +262,6 @@ export class ProcessCheckExecutor implements CheckExecutor {
     let phase: 'setup' | 'command' = 'command';
     let cloneFailure: string | undefined;
     let cloneDetail = '';
-    let launchDetail = '';
     let clones: RunClones | undefined;
     let swept: SweepOutcome | undefined;
     let sweepFailed = false;
@@ -288,6 +292,9 @@ export class ProcessCheckExecutor implements CheckExecutor {
         const key = `${runId}-${step.phase}`;
         keys.push(key);
         const command = await this.toolCommand(environment.environment, key, checkout, step.argv, env, check.network, [tempDirectory, ...(clones === undefined ? [] : [clones.directory])], clones?.loopback === true);
+        const lost = (command.dropped ?? []).join(', ');
+        const lostNote = `note: variables that the sandbox launcher cannot set were not given to the check: ${lost}\n`;
+        if (lost !== '' && !notes.includes(lostNote)) notes.push(lostNote);
         const running = runProcess(command, ring, Math.max(1, deadline - Date.now()));
         state.running = running;
         result = await running.result;
@@ -295,9 +302,9 @@ export class ProcessCheckExecutor implements CheckExecutor {
         if (result.kind !== 'exited' || result.exitCode !== 0) break;
       }
     } catch (error) {
-      result = { kind: 'spawn_failed', error: (error as Error).message };
-      // Where a refused host program was found goes to the log of the run, not into the reason that a reviewer reads.
-      if (error instanceof IsolationError && error.detail !== undefined) launchDetail = `launch detail: ${error.detail}\n`;
+      // An isolation error has a fixed text, and where a refused host program was found is its detail; any other error (a settings file that cannot be written) is named by its code. Paths go to the log of the run, not into the reason that a reviewer reads.
+      const isolation = error instanceof IsolationError;
+      result = { kind: 'spawn_failed', error: isolation ? error.message : codeText(error, 'the launch could not be prepared'), detail: isolation ? error.detail : (error as Error).message };
     } finally {
       for (const key of keys) environment.environment.release?.(key);
       // Before anything is removed: a process that is still running could write into the directories again.
@@ -310,6 +317,7 @@ export class ProcessCheckExecutor implements CheckExecutor {
       await rm(tempDirectory, { recursive: true, force: true });
       await clones?.remove();
     }
+    const launchDetail = result?.kind === 'spawn_failed' && result.detail !== undefined ? `launch detail: ${result.detail}\n` : '';
     if (swept !== undefined && swept.count > 0) notes.push(`note: ${sweepNote(swept)}\n`);
     if (sweepFailed) notes.push('note: the processes the check may have left behind could not be looked for\n');
     const leftovers = sweepFailed || (swept?.count ?? 0) > 0;
@@ -318,7 +326,7 @@ export class ProcessCheckExecutor implements CheckExecutor {
     const noteText = notes.join('');
     const tail = ring.tailText(TAIL_CHARACTERS);
     const log = Buffer.concat([Buffer.from(noteText + cloneDetail + launchDetail), ring.contents()]);
-    const outputPath = await this.writeLog(request.swarmId, changesetId ?? `base-${commitId.slice(0, 12)}`, runId, log);
+    const outputPath = await this.writeLog(request.swarmId, logName(changesetId, commitId), runId, log);
     const common = { durationMs, outputPath, outputTail: (noteText + ring.tailText(Math.max(0, TAIL_CHARACTERS - noteText.length))).slice(0, TAIL_CHARACTERS), truncated: ring.truncated };
     const made = (fields: Partial<CheckRecord> & Pick<CheckRecord, 'outcome'>): CheckRecord => this.record(request, target, commitId, changesetId, { ...fields, ...common }, startedAt);
     // A green base result is stored and reused for every later changeset on this commit: from a run that left processes behind, or whose processes could not be checked, it is no result.

@@ -7,7 +7,7 @@ import { createServer as createSocketServer } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createProfileHostTools, findExecutable, srtToolEnvironment, type HostTools } from '../../isolation/index';
+import { createProfileHostTools, findExecutable, HostTools, srtToolEnvironment } from '../../isolation/index';
 import { systemSignals } from '../../isolation/signalTable';
 import { findTestSrt, srtTestsUnavailable } from '../../isolation/testRuntimes';
 import { DEFAULT_REVIEW_POLICY, type ReviewPolicy } from '../policy/schema';
@@ -73,7 +73,7 @@ function rig(files: Record<string, string | Buffer>, options: { home?: string; e
   write(siblingFiles.registry, 'the registry of the app\n');
   const srtBinary = options.srtBinary ?? findTestSrt()!;
   const settingsDir = join(tempDir('srt-settings'), 'srt');
-  const srt = srtToolEnvironment({ srtBinary, settingsDir, ...(options.appPath === undefined ? {} : { appPath: options.appPath }), ...(options.hostTools === undefined ? {} : { hostTools: options.hostTools }), extraDenyRead: checkDenyRead({ agent: undefined, appRoot, appDirs: [], claude: claudeConfigPaths({ configured: undefined, home }), home }) });
+  const srt = srtToolEnvironment({ srtBinary, settingsDir, ...(options.appPath === undefined ? (options.hostTools === undefined ? {} : { hostTools: options.hostTools }) : { hostTools: new HostTools({ appPath: options.appPath, excluded: () => [] }) }), extraDenyRead: checkDenyRead({ agent: undefined, appRoot, appDirs: [], claude: claudeConfigPaths({ configured: undefined, home }), home }) });
   // The daemon tests bind loopback ports: they ask for the loopback that only a tool entry (Gradle) grants a check otherwise.
   const environment = options.loopback === true ? { ...srt, toolCommand: (launch: ToolLaunch) => srt.toolCommand({ ...launch, loopback: true }) } : srt;
   const clonesRoot = join(repo.root, 'clones');
@@ -318,7 +318,7 @@ suite(`the check under the real srt${unavailable === undefined ? '' : ` [unavail
         for (const name of HELPERS) write(join(directory, 'bin', name), stub(join(markers, `${name}-${directory.length}`)));
         for (const name of HELPERS) chmodSync(join(directory, 'bin', name), 0o755);
       }
-      const tools = createProfileHostTools({ options: () => ({ extraWritePaths: [writable[0]!] }), claudeConfigDir: () => dirname(writable[1]!), agentRoots: [], appPath: [...writable.map((directory) => join(directory, 'bin')), dirname(findTestSrt()!), realPath()].join(':') });
+      const { tools } = createProfileHostTools({ options: () => ({ extraWritePaths: [writable[0]!] }), claudeConfigDir: () => dirname(writable[1]!), agentRoots: [], appPath: [...writable.map((directory) => join(directory, 'bin')), dirname(findTestSrt()!), realPath()].join(':') });
       const r = rig({}, { srtBinary: 'srt', hostTools: tools });
       const result = await r.run(['sh', '-c', 'echo tests failed; exit 1']);
       expect([result.checkpoint.outcome, result.checkpoint.exitCode], `the failing check is failed: ${result.checkpoint.outputTail}`).toEqual(['failed', 1]);
@@ -330,7 +330,7 @@ suite(`the check under the real srt${unavailable === undefined ? '' : ` [unavail
       const writable = tempDir('srt-extra-write-only');
       for (const name of HELPERS) write(join(writable, 'bin', name), stub(join(markers, name)));
       for (const name of HELPERS) chmodSync(join(writable, 'bin', name), 0o755);
-      const tools = createProfileHostTools({ options: () => ({ extraWritePaths: [writable] }), claudeConfigDir: () => undefined, agentRoots: [], appPath: join(writable, 'bin') });
+      const { tools } = createProfileHostTools({ options: () => ({ extraWritePaths: [writable] }), claudeConfigDir: () => undefined, agentRoots: [], appPath: join(writable, 'bin') });
       const r = rig({}, { srtBinary: 'srt', hostTools: tools });
       const result = await r.run(['sh', '-c', 'echo tests failed; exit 1']);
       expect(result.checkpoint.outcome, 'the check does not start').toBe('not_run');
