@@ -1,6 +1,6 @@
 # 0044 Notes and mounts: architecture and contracts
 
-Status: accepted (2026-11-26, with the user's answers and the amendments of section 12)
+Status: accepted (2026-11-26, with the user's answers and the amendments of section 12; the editor amended on 2026-11-28 by the user's decision for Monaco, section 14 and record 0047)
 Date: 2026-11-26
 Proposed by: spike agents (design run `notes-design`), reviewed by an agent that did not write it (`docs/measurements/review-notes-design.md`); decided by the user on 2026-11-26; the amendments of section 12 written by run `decisions-amend`
 Inputs: 0002, 0003, 0005, 0006, 0013, 0015, 0016, 0020, 0021, 0022, 0026, 0029, 0033, 0034, 0035, 0036, 0041, 0042, 0043 (drafted in parallel, read at the end and aligned; its access requests of section 4.10 after the user's decisions); `notes/probes-m6-notes.md` (P50 to P53, design run; P57, run `decisions-amend`), `notes/greenfield-and-libraries.md`; the code in `app/src/core/tree`, `app/src/core/surfaces`, `app/src/core/commands` (`types.ts`, `scope.ts`, `treeCommands.ts`, `surfaceCommands.ts`, `parity.ts`), `app/src/core/inbox` (`inboxMigrations.ts`, `taskCommands.ts`, `SqliteTaskStore.ts`), `app/src/core/browser` (`surfaceType.ts`, `InMemoryObservationService.ts`), `app/src/core/store/Store.ts`, `app/src/main/context.ts`, `app/src/main/modules.ts`, `app/src/renderer/panes` (`SurfacePane.tsx`, `tree/*`, `treeModel.ts`, `tree/AgentRows.tsx`), `app/src/renderer/ui`
@@ -49,7 +49,7 @@ Paths are relative to `app/src`.
 | Part | First slice | Waits for |
 |---|---|---|
 | Inline notes: create from a folder's menu, the tree's add menu and `note_create`; title from the first heading or "Untitled note"; autosave | yes | |
-| The editor: CodeMirror 6 source view with Markdown highlighting, rendered view, split view, outline from the Markdown tree, plain text without rendering | yes | |
+| The editor: Monaco source view with Markdown highlighting (0047), rendered view, split view, outline from the Markdown tree, plain text without rendering | yes | |
 | The "Save to file" suggestion at the size setting, once per note, with "Not now" | yes | |
 | File-backed notes: "Save to file" (dialog in the profile's notes directory), "Make inline", watch of the file, conflict banner with reload, keep mine and compare | yes | |
 | Revisions kept across both storages | yes | |
@@ -88,7 +88,7 @@ Paths are relative to `app/src`.
 | "Links ... through the external reference index of 0033" | Notes keep their own `note_links` (task, note, node, inbox item, URL). URL links map through `external_refs` when apps build it | 0043 defers the index to apps |
 | "An agent edit appears as a diff the user accepts or rejects; append-only mode is a per-note setting" | Agents append (`note_append`) and edit existing text (`note_edit`) in the first slice. Every change is a proposal with a diff against a base revision. The per-note setting `agentWrites` decides: `apply` (changes apply at once as revisions by the agent), `review` (default: each change is an access request whose card shows the diff, 0043 section 4.10) or `none` (not allowed; refused without an item). The append-only mode becomes `apply` | The user's answer C2: editing existing text now, with the choice of applied at once, asked about, or not allowed |
 | "agents never delete notes" (0034's guard) | An agent's removal of a subtree with note leaves is an access request (`note.remove`, Allow once or Deny); nothing is removed without the user's decision | The user's answer C6: the guard stays in the sense that the user decides |
-| "The editor choice (CodeMirror or Lexical)" | CodeMirror 6 for source and the merge view, mdast for the outline, links, task lines and the rendered view (question 1) | Section 4.11 |
+| "The editor choice (CodeMirror or Lexical)" | Monaco for the source view and for the proposal and compare views (Monaco's diff editor); mdast for the outline, links, task lines and the rendered view (question 1, amended on 2026-11-28, section 14) | Section 4.11; the user's decision for one editor in the app (0047) |
 | "The app watches the mounted path (recursive for directories, debounced)" | One recursive `fs.watch` per mounted directory in the main process; the event type is ignored; each batch lists its parent directories again; a mounted file is watched through its parent directory. The timings adapt to the mount's entry count (section 4.8): up to `liveMaxEntries` (1,000) a short debounce and a full walk every 30 s; above it a longer debounce with batching and rarer reconciles. A reconcile also runs on focus and on wake | P50 and P51: event types are unreliable, bursts lose a few percent of the events, a watcher on a file stops after an atomic save. P57: a full walk of 1,000 entries costs about 3 ms. The user expects small mounts and asked for near real time below about 1,000 files |
 | "A removed or renamed mount root shows a missing state with a re-link action" | Kept; also a root whose device and inode differ from the stored ones is `moved` and needs the user's confirmation | P50: the watcher follows the path, so a directory recreated at the path would otherwise appear as the mount |
 | "Files open in an editor suited to their type ... other types in a viewer or the system's default application" | Markdown and text open in the notes editor; other types show a metadata view with "Reveal in Finder". The default application waits | `shell.openPath` on an `.app`, `.command` or `.terminal` file runs it |
@@ -132,8 +132,9 @@ src/main
   modules.ts   notes and mounts initialized last (section 4.14)
   modules/     notes.ts, mounts.ts (stubs that migrate and register)
 src/renderer
-  panes/notes/   NotePane.tsx, NoteEditor.tsx, MarkdownView.tsx, Outline.tsx, ProposalView.tsx, ConflictBanner.tsx,
-                 editorTheme.ts (stubs); SurfacePane renders NotePane for `note`
+  panes/notes/   NotePane.tsx, NoteEditor.tsx, MarkdownView.tsx, Outline.tsx, ProposalView.tsx, ConflictBanner.tsx
+                 (stubs; the editor, the diff view and the theme come from renderer/editor of 0047);
+                 SurfacePane renders NotePane for `note`
   panes/mounts/  MountRows.tsx, MountFileView.tsx, MountSettings.tsx (stubs); TreePane renders MountRows under a `mount` leaf as it renders AgentRows
   panes/inbox/   CaptureNoteAction.tsx (stub), rendered through ItemCardExtras, the slot that 0043's c-m6 adds
   ui/icons.ts    SURFACE_ICONS.mount and the glyphs of the mount rows
@@ -685,25 +686,25 @@ Adaptive watching (the user: "less files are more real-time and with more than 1
 
 #### 4.11 Editor component and tokens
 
-Dependencies (exact versions at least two weeks old, chosen by the contracts step with the lockfile): `@codemirror/state`, `@codemirror/view`, `@codemirror/commands`, `@codemirror/language`, `@codemirror/lang-markdown`, `@codemirror/merge`, `@codemirror/search`, `mdast-util-from-markdown`, `mdast-util-gfm`, `micromark-extension-gfm`. No HTML renderer, no `remark-html`, no `rehype`.
+Dependencies (exact versions at least two weeks old, chosen by the contracts step with the lockfile): `monaco-editor` 0.57.0 (0047 section 5.2: loaded on first use, the editor contributions without the language services, Monarch highlighting; shared with the file editor and the review), `mdast-util-from-markdown`, `mdast-util-gfm`, `micromark-extension-gfm`. No `@codemirror/*` package (amended 2026-11-28, section 14). No HTML renderer, no `remark-html`, no `rehype`.
 
 | Component | Where | Built from | Notes |
 |---|---|---|---|
 | `NotePane` | `renderer/panes/notes/` | `Toolbar` (title, `SegmentedControl` Source, Split, Preview; `IconButton` Outline; `IconButton` observation eye with `Tooltip`; `Menu` with Save to file, Make inline, Agent writes, Format, Revisions, Reveal in Finder for file notes), `Badge` for pending proposals | rendered by `SurfacePane` for `note`; props `{ node, mode: 'edit' \| 'read' \| 'peek' }`; `peek` takes no focus (the peek mode 0043 leaves to notes) |
-| `NoteEditor` | same | CodeMirror 6 with `lang-markdown` for Markdown and no language for text; line wrapping on; search panel | value, `onChange`, `readOnly`; autosave 1 s after the last keystroke through `note_save`; Cmd+S saves at once |
+| `NoteEditor` | same | `CodeEditor` of 0047 (Monaco) with the Monarch `markdown` language for Markdown and `plaintext` for text; word wrap on, line numbers off; Monaco's find widget; the options of 0047 section 5.2 (no link detection, control characters and Unicode highlighting shown, no context menu) | value, `onChange`, `readOnly`; autosave 1 s after the last keystroke through `note_save`; Cmd+S saves at once; an applied agent change enters the model with `pushEditOperations` and the agent mark (0047 section 5.6) |
 | `MarkdownView` | same | mdast to React elements | headings, paragraphs, emphasis, lists with checkboxes (read-only), quotes, code blocks in `surface.inset` without highlighting, tables, thematic breaks; raw HTML nodes render as text; images render as their alt text and URL, never fetched; links as in section 4.10; no `dangerouslySetInnerHTML` (the grep test of 0021 extends to `renderer/panes/notes` and `renderer/panes/mounts`) |
 | `Outline` | same | list of headings in `type.small`, the current one in `selection` | click scrolls the source and the preview |
 | `SuggestFileBanner` | same | `Banner` (info) with `Button` "Save to file" and quiet `Button` "Not now" | once per note when `chars` passes `suggestFileAtChars` |
-| `ConflictBanner` | same | `Banner` (warning) with "Reload", "Keep mine", "Compare" | "Compare" opens `ProposalView` in compare mode (disk against buffer) |
-| `ProposalView` | same | `@codemirror/merge` unified view of the current text against the text with the pending proposals applied (`preview`), `Button` "Accept", "Reject" per proposal, "Accept all", "Reject all"; a `Chip` "rebased" on a proposal that applies to a newer revision and a `Chip` "out of date" (`warning`) on a `stale` one | proposal text in the source font only; author line "Proposed by <session title>" in `text.secondary`; decisions here go through `note_decide_proposal`, and the open access request ends when none is pending (section 4.6) |
+| `ConflictBanner` | same | `Banner` (warning) with "Reload", "Keep mine", "Compare" | "Compare" opens `DiffView` of 0047 side by side (disk or the other writer on the left, the buffer on the right) |
+| `ProposalView` | same | `DiffView` of 0047 (Monaco's diff editor), inline, read-only, word wrap, of the current text against the text with the pending proposals applied (`preview`); a list of the proposals beside it, where selecting one shows its own diff and "All" shows them together; `Button` "Accept", "Reject" per proposal, "Accept all", "Reject all"; a `Chip` "rebased" on a proposal that applies to a newer revision and a `Chip` "out of date" (`warning`) on a `stale` one | proposal text in the source font only; author line "Proposed by <session title>" in `text.secondary`; decisions here go through `note_decide_proposal`, and the open access request ends when none is pending (section 4.6) |
 | `FileStateBanner` | same | `Banner` (danger for `refused`, warning for `missing`) with "Locate…", "Make inline from last text" | |
 | `MountRows` | `renderer/panes/mounts/` | tree rows in the density of 0035 section 3.5, `Icon` per entry type, a link-out glyph with `Tooltip` "Points outside the mount" | drawn under a `mount` leaf like `AgentRows`; expand loads `mount_list_dir`; a `Chip` "read-write" on the leaf when on; the missing and moved states as a row with `Button` "Re-link" |
 | `MountSettings` | same | `Popover` with `Switch` Read-write, `Switch` Agents can read, `Switch` Show hidden files, `Hint` "Agents' own file tools are governed by their sandbox, not by this switch", `Hint` "Agents can ask you to read or write here; you decide each time", a line with the entry count and the watch tier (section 4.8) | |
-| `MountFileView` | same | `NotePane` in `read` mode for read mounts and in `edit` mode for read-write mounts; a metadata `Table` with "Reveal in Finder" for other types | |
+| `MountFileView` | same | `NotePane` in `read` mode for read mounts and in `edit` mode for read-write mounts, for Markdown and text files; other text files (code) open in the file pane of 0047 section 5.5 with the language from the file name; a metadata `Table` with "Reveal in Finder" for other types | |
 | `CaptureNoteAction` | `renderer/panes/inbox/` | quiet `Button` "Capture as note" | rendered by `ItemCardExtras`, the slot of 0043's c-m6 |
 | Note and mount access cards | none of this record | the `AccessRequestActions` card of 0043 section 4.9 shows the diff, the path and the titles from the handlers' `detail` | "Open note" opens `ProposalView`; "Open file" opens `MountFileView` |
 
-Editor theme (`editorTheme.ts`) from the tokens of 0035 through their CSS variables; no colour literal (`pnpm check:colours`):
+Editor theme: the Monaco theme bridge of 0047 section 5.3 builds it from the resolved tokens of 0035 (Monaco refuses CSS variables, P73); the app's own marks use the CSS variables; no colour literal (`pnpm check:colours`). The note editor's parts take these tokens:
 
 | Editor part | Token |
 |---|---|
@@ -717,7 +718,7 @@ Editor theme (`editorTheme.ts`) from the tokens of 0035 through their CSS variab
 | links | `text.link` |
 | code spans and blocks | `surface.inset` |
 | search match | `warning.bg` |
-| inserted text in the merge view | `success.bg`, removed `danger.bg` |
+| inserted text in the proposal and compare views | `success.bg`, removed `danger.bg` |
 | agent-changed range (applied at once under `apply` or a session grant) | a left mark in `info.fg` |
 | focus | `focus.ring` at `focus.width` |
 
@@ -771,7 +772,7 @@ The modules of 0041 and 0043 keep their order. `notes` (tree, profile, inbox, ac
 | c-notes (contracts) | the types, schemas, migrations, settings, in-memory services and contract suites of section 4; `SURFACE_NOTE`, `SURFACE_MOUNT`; command registration with handlers that answer "not built yet"; `Services`, `Desktop` additions; module stubs; renderer stubs and the `SurfacePane` and tree-row hook points; the origin rule of `ObservationService.record` for app surfaces (section 4.13); the removal guard of `ui_remove_node` with its access request seam (section 4.4); the pure `edits.ts` and `watchTiers.ts` with their tests (the rebase rule and the tier choice are contracts); the dependencies of section 4.11 with the lockfile; `docs/parity.md` | `core/notes/{types,schemas,commands,notesMigrations,settings,markdown,query,edits}.ts`, `InMemoryNoteService.ts`, `noteServiceContract.ts`; `core/mounts/{types,schemas,commands,mountsMigrations,refusedRoots,watchTiers}.ts`, `InMemoryMountService.ts`, `mountServiceContract.ts`; `core/surfaces/types.ts`, `core/tree/surfaceCatalog.ts`, `core/commands/treeCommands.ts` (the guard, with its test), `core/events/index.ts`, `core/profile/types.ts`, `core/profile/schemas.ts`, `core/browser/origin.ts` (with its test); `main/context.ts`, `main/modules.ts`, `main/modules/{notes,mounts}.ts` stubs; `renderer/panes/SurfacePane.tsx`, `renderer/panes/TreePane.tsx` (the `MountRows` call beside `AgentRows`), `renderer/panes/tree/createLeaf.ts`, `renderer/panes/tree/leafDecorations.tsx`, the stubs under `renderer/panes/notes/` and `renderer/panes/mounts/`, `renderer/ui/icons.ts`; `package.json`, lockfile | other modules |
 | w-notes | `SqliteNoteService` (store, revisions, proposals of both kinds, the rebase at decision, links, the index), `NoteFiles` (save to file, make inline, reload, the parent-directory watcher), the mdast extraction of `markdown.ts` behind its contract, the command handlers with `note_edit`, the access handlers `note.read`, `note.change` and `note.remove` registered on the broker (against the in-memory broker of 0043's c-m6), the removal guard's notes check, the module | `core/notes/**` except the contract files; `main/modules/notes.ts` and its test | the contract files, `core/mounts/**`, `renderer/**` |
 | w-mounts | `NodePathGuard`, `MountWatcher` with the tiers, the entry count and the hysteresis, `SqliteMountService`, the listing and reconcile, the root checks, the command handlers with `mount_write`, the access handlers `mount.read` and `mount.write`, the module, the `Desktop` dialog and Finder implementations | `core/mounts/**` except the contract files; `main/modules/mounts.ts` and its test; `main/desktop.ts` (dialogs, Finder), after 0043's w-inbox-ui has finished its `onResume` change there | the contract files, `core/notes/**`, `renderer/**` |
-| w-editor | the note pane, editor, rendered view, outline, banners, proposal view for appends and edits (rebased and out-of-date marks) and the compare view, theme; mount rows, settings with the tier line, and file view; the capture action; the task note links; the e2e specs and the `notes` phase of `pnpm visual-check` | `renderer/panes/notes/**` (with the task note links component), `renderer/panes/mounts/**`, `renderer/panes/inbox/CaptureNoteAction.tsx`, `e2e/notes.spec.ts`, `e2e/mounts.spec.ts`, the `notes` phase of `scripts/visual-check.mjs` (0043's w-tasks-ui adds its `tasks` phase to the same file; the second to finish rebases) | `core/**`, `main/**`, the contract files |
+| w-editor | the note pane, the note editor and the proposal and compare views on the `CodeEditor` and `DiffView` of 0047's w-monaco (amended 2026-11-28; the editor host and the theme bridge are w-monaco's), rendered view, outline, banners, the rebased and out-of-date marks, the agent mark; mount rows, settings with the tier line, and file view; the capture action; the task note links; the e2e specs and the `notes` phase of `pnpm visual-check` | `renderer/panes/notes/**` (with the task note links component), `renderer/panes/mounts/**`, `renderer/panes/inbox/CaptureNoteAction.tsx`, `e2e/notes.spec.ts`, `e2e/mounts.spec.ts`, the `notes` phase of `scripts/visual-check.mjs` (0043's w-tasks-ui adds its `tasks` phase to the same file; the second to finish rebases) | `core/**`, `main/**`, `renderer/editor/**` (0047), the contract files |
 | i-notes (integration) | wiring with the real access broker, the 0043 slots, the note links on the session row, the parity table, the real module graph test, the real-Claude script | `main/modules.ts` (order only), `renderer/panes/inbox/ItemCardExtras.tsx` and `renderer/panes/tasks/TaskNoteLinks.tsx` (the stubs of 0043's c-m6), the note link count in `renderer/panes/tree/SessionDecorations.tsx`, `scripts/e2e-real-notes.mjs` | builder files except for a fix the review asks for |
 
 Order, aligned with 0043 section 5:
@@ -806,6 +807,7 @@ Each step's work is reviewed by an agent that did not write it (0003); a finding
 | An agent's access request lifts a hard limit of a mount | path, hidden, hard link, size, type and root refusals of section 4.9 are checked before a request and again in `perform`, and never raise one | contract suite; mutation "path refusal turned into a request" |
 | An agent writes a mounted file | only through a `mount.write` request whose card shows the path and the diff; the write is the app's checked write with the agent's `expectedSha256`; no standing write right (C4); in a read-only mount only single writes, and the mount's mode never changes | contract suite; e2e; mutations "write without a decision", "session grant in a read-only mount", "write changes the mode" |
 | Agent text in a note runs or loads something when rendered | mdast to React elements only; raw HTML as text; images not fetched; only `agide:`, `http` and `https` links act, and web links open in a browser surface of the folder; proposals render as source until accepted | e2e literal test; grep test for `dangerouslySetInnerHTML` |
+| Agent text in a note acts inside the source editor (amended 2026-11-28: Monaco) | Monaco models are plain text; link detection off and links routed through the app (`registerLinkOpener`); no hover or markdown providers of the app, no `command:` links; control characters and confusable or invisible Unicode shown; Monaco's context menu off; the CSP without `'unsafe-eval'` or `'wasm-unsafe-eval'`, workers from the app's own files only (0047 sections 5.2 and 8, P77) | e2e of 0047 (a note with a `command:` and a `javascript:` link and bidirectional controls: nothing acts, the characters are marked, no request leaves `file:`) |
 | Note or file text read by an agent carries instructions | tool results mark the text `untrusted`; the tool descriptions say it is data | MCP test of the field |
 | An agent reaches files outside its folder through a mount | mount tools only for mounts in the caller's folder, reads with access on (off by default) or after an allowed request; paths relative and guarded; a mount of another folder answers `out_of_scope` as `ui_*` commands do (`requireInScope`) and raises no request | MCP tests |
 | A link in a mount leads outside it | real-path containment; links outside are listed and refused | unit (P52 cases); mutation |
@@ -841,14 +843,16 @@ In 0005 units (working days for one engineer plus agents), low confidence:
 | What waits (section 2) | 4 to 6 (with `note_edit` and agent writes to mounts) | 2.5 to 4 (the reference index links, two-way task lines, the task description editor, notes under tasks and sessions, capture from selections, mount search, `.gitignore`, context attachment, deletes and renames of mounted files by agents) | `note_edit` and agent writes moved into the slice |
 | R27 in total | 12 to 17 | 12.5 to 17.25 | |
 
+Amended 2026-11-28 (section 14): with Monaco the editor host, its workers and the theme bridge are 0047's w-monaco (counted there), so w-editor here is 2.5 to 3.5 days in place of 3 to 4, and the first slice of this record 9.5 to 12.75 days in place of 10 to 13.25 (about 730 to 980 summed agent minutes at the milestone 5 rate and 300 to 410 at the milestone 4 rate).
+
 0034 guessed 8 to 12 days for all of R27; the editor (new dependencies, a rendered view without HTML, the merge view) and the mount safety rules are the larger parts. The access broker itself is counted in 0043 (w-access, 1.5 to 2 days). At the milestone 5 rate (about 77 build minutes per estimated day, 0042) the first slice is about 770 to 1,020 summed agent minutes (was 620 to 850); at the milestone 4 rate (about 32), about 320 to 420 (was 260 to 350).
 
 ### 9. Risks
 
 | Risk | Effect | Mitigation |
 |---|---|---|
-| CodeMirror is led by one maintainer and its GitHub repositories are archived mirrors (`notes/greenfield-and-libraries.md`) | slower fixes | the packages still release; the editor sits behind `NoteEditor`'s props, so a swap touches one folder |
-| R9 (code editing) later picks Monaco | two editors in the app | notes need a light editor with a merge view; R9 decides on its own, and the notes editor can move with it |
+| Monaco's size and its load on first use (amended 2026-11-28; was the CodeMirror maintainer risk and the risk of a second editor for R9, both gone with the user's decision for one editor) | a slower first open of the note pane | loaded on first use and shared with the file editor and the review; about 5.1 MB minified with its workers, about 0.25 s from the first open to a tokenized render (0047, P70 and P71); the editor sits behind `NoteEditor`'s props |
+| Monaco is a code editor, not a prose editor | a plainer writing feel for notes than a Markdown editor | word wrap, no line numbers, the rendered and split views of this record; a note-specific feel is a later request |
 | The rendered view differs from other Markdown tools (GFM details, HTML in notes) | user surprise | mdast with GFM; HTML shown as text by design; round-trip tests with the user's own notes before the slice ends |
 | FSEvents loses events in bursts (P51) | a stale listing | parent re-list per batch, reconcile on focus, wake and timer in both tiers; a full walk every 30 s in the `live` tier |
 | A mount near `liveMaxEntries` switches tiers often, or a burst of new files pushes a small mount into the `relaxed` tier | timings that change under the user | hysteresis (back to `live` below 90 %); the tier line in the settings popover; the thresholds are settings |
@@ -883,7 +887,7 @@ Not verified: network and cloud volumes, the main process at 20000 files (P51 an
 
 ### 11. Questions for the user
 
-1. Editor: CodeMirror 6 with its merge view, and mdast for the outline, links and the rendered view, as new dependencies at exact versions. Recommendation: yes; R9's code editor decides separately and may later bring Monaco.
+1. Editor: CodeMirror 6 with its merge view, and mdast for the outline, links and the rendered view, as new dependencies at exact versions. Recommendation: yes; R9's code editor decides separately and may later bring Monaco. (As asked on 2026-11-26; the answer was amended on 2026-11-28 to Monaco, section 14.)
 2. Agent writes: in the first slice agents only append (`note_append`), as a proposal you accept unless the note is in append-only mode; a `note_edit` tool for other changes waits. Recommendation: yes; add `note_edit` after the slice has been in use.
 3. Default observation for new notes: `on-demand` (agents in the note's folder can read it) or `off` (you switch each note on). Recommendation: `on-demand`, with a profile setting for the default and the switch on the note's toolbar.
 4. Agent access to mounts in the first slice: read only, per mount, off by default; agent writes to mounted files wait. Recommendation: yes.
@@ -902,6 +906,7 @@ The user answered these questions on 2026-11-26 (the decision page numbered them
 | C5: search over mounted files | later | no |
 | C6 (added on the page): keep the guard that agents cannot delete notes | yes, as a decision of the user: an agent's removal is an access request, never a flat refusal and never a removal without the user | no, with a change (amendment 4) |
 | C7 (added on the page): accept the write race of read-write mounts (section 4.9) | accepted | no |
+| C1 amended on 2026-11-28 by the user: "Monaco for everything" | Monaco in place of CodeMirror 6 for the note source view and the proposal and compare views; mdast stays for the outline, links, task lines and the rendered view (section 14, record 0047) | yes: the answer of 2026-11-26 was CodeMirror 6 |
 
 Amendments, each a decision of this record:
 
@@ -922,12 +927,37 @@ Other changes that follow: the slots of section 4.15 come from 0043's c-m6, so i
 2. "Allow for this session" on a note change applies the session's later changes to that note without a card (with the agent mark and a revision each). Recommendation: yes; it is what the scope means, and the revisions undo it. The alternative is to keep showing each change and only skip the click.
 3. A removal of notes by an agent removes their history with them (as a removal by you does). Should removed notes go to a trash for some days first? Recommendation: not in the first slice; the card says that the history goes with the note, and a trash fits better when the user's own removals get one too.
 
+### 14. Amendment of 2026-11-28: Monaco (record 0047)
+
+The user decided on 2026-11-28 that Monaco is the one editor of the app ("Monaco for everything"), which amends the answer to C1. Record 0047 designs the editor host, the file editor and the review GUI; this record changes where it named CodeMirror 6:
+
+| Place | Was | Now |
+|---|---|---|
+| Section 2, the editor row | CodeMirror 6 source view | Monaco source view |
+| Section 3, the editor choice | CodeMirror 6 for source and the merge view | Monaco for the source, proposal and compare views; mdast stays for the outline, links, task lines and the rendered Markdown view |
+| Section 4.1, `panes/notes` | `editorTheme.ts` in the notes folder | no theme file there; the editor, the diff view and the theme bridge come from `renderer/editor` of 0047 |
+| Section 4.11, dependencies | the `@codemirror/*` packages | `monaco-editor` 0.57.0, exact, loaded on first use (0047 section 5.2); the mdast packages unchanged |
+| Section 4.11, `NoteEditor` | CodeMirror 6 with `lang-markdown` and its search panel | 0047's `CodeEditor` with Monarch Markdown, word wrap, no line numbers, Monaco's find widget, applied agent changes through `pushEditOperations` with the agent mark |
+| Section 4.11, the merge view for agent proposals (`ProposalView`) | `@codemirror/merge` unified view | 0047's `DiffView` (Monaco's diff editor) inline, with a list of the proposals to accept or reject one by one or together; "merge view" elsewhere in this record means this view |
+| Section 4.11, compare from `ConflictBanner` | `ProposalView` in compare mode | `DiffView` side by side |
+| Section 4.11, `MountFileView` | the note pane for every text file | the note pane for Markdown and text; code files in 0047's file pane |
+| Section 4.11, editor theme | `editorTheme.ts` through CSS variables | 0047's theme bridge from resolved token values (Monaco refuses CSS variables); the token table here unchanged |
+| Section 5, w-editor | the editor and theme built in the row | built on 0047's w-monaco, after it; `renderer/editor/**` is not w-editor's |
+| Section 7, security | the rendered view's rules | plus a row for the source editor: plain-text models, links off and routed, no command links, control and confusable characters shown, the context menu off, the CSP unchanged in its script rules |
+| Section 8, estimates | w-editor 3 to 4 days; first slice 10 to 13.25 | w-editor 2.5 to 3.5; first slice 9.5 to 12.75; the editor host in 0047 |
+| Section 9, risks | the CodeMirror maintainer risk; a second editor if R9 picks Monaco | Monaco's size and load on first use; Monaco as a prose editor |
+| Section 11, question 1 | as asked | a note that the answer was amended |
+| Section 12 | | the row for C1 amended |
+| Consequences | a slice of 10 to 13.25 days | 9.5 to 12.75 days |
+
+Everything else stands: the tables, the commands and tools, proposals and the rebase rule, access requests, file notes, mounts and their safety rules, search and links. The pending changes of 0046 to this record (its items 6 to 10) are not touched by this amendment.
+
 ## Consequences
 
-- R27 becomes buildable in a slice of 10 to 13.25 days after the R21 work of 0043, with the contracts step after 0043's.
+- R27 becomes buildable in a slice of 9.5 to 12.75 days (with the Monaco amendment of section 14; 10 to 13.25 before it) after the R21 work of 0043, with the contracts step after 0043's.
 - Every agent action on notes and mounts that the user may permit goes through the access broker of 0043; the hard limits of section 4.9 never do.
 - The tree contract of 0013 does not change: mounts are leaves with drawn rows. `SurfacePane` and the tree row gain branches for `note` and `mount`.
 - New dependencies (section 4.11) enter `package.json` and the lockfile through the contracts step.
 - `docs/parity.md` gains the note and mount rows of section 4.4; `docs/blocks.md` is unchanged (both are surface types, not panes).
 - 0034 is amended as section 3 lists. 0021 section 9's plain-text rule holds for inbox and task text; note text has its own rendered view under the rules of section 4.11. 0026's observation log gains entries from notes and mounts, with fixed origins for app surfaces. `ui_remove_node` gains a removal guard for note leaves that raises an access request. 0043's c-m6 adds the slots of section 4.15.
-- Not verified: everything section 10 lists; the CodeMirror and mdast versions and their bundle size; the rendered view against real notes; the `Desktop` dialogs under `AGIDE_HIDDEN=1` (the e2e answers them through a test hook); the real-Claude script, which runs after the build; that Haiku uses `note_edit` replacements that are unique in the note, and reads the note again after a `stale` result.
+- Not verified: everything section 10 lists; the mdast versions and their bundle size (Monaco's size and load were measured in 0047, P70 and P71); the rendered view against real notes; the `Desktop` dialogs under `AGIDE_HIDDEN=1` (the e2e answers them through a test hook); the real-Claude script, which runs after the build; that Haiku uses `note_edit` replacements that are unique in the note, and reads the note again after a `stale` result.

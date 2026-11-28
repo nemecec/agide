@@ -322,3 +322,40 @@ macOS (APFS), Node 22.22.3 twice and Electron 45.3.3 as Node once. Details and t
 Not run: the Electron main process with a renderer, network and cloud volumes, bursts large enough to lose events at the 30 ms debounce.
 
 New scripts: none in `probes/` (the script is in the notes).
+
+## Chrome extension in the embedded browser, probes P58 to P60 (2026-11-28)
+
+Electron 45.3.3 (Chromium 156) on macOS, the Bitwarden extension 2026.1.0 (manifest 3) copied as unpacked code from the user's Chrome into a temporary directory. No model, no login and no credential; every request to a host other than loopback was cancelled and logged and the resolver mapped other names to nothing. Details, tables and the design reading in `notes/probes-m7-chrome-extensions.md`; evidence in `probes/out/p58_ext_load_*.json`, the `_popup_*.png` and `_page.png` screenshots, `p58_stderr_*.txt` and `p59_ext_static_apis.json`.
+
+| Probe | Result | Short finding |
+|---|---|---|
+| P58 load, worker, popup, content script, storage | partial | `session.extensions.loadExtension` loads it in a persistent partition in under 35 ms with warnings for the unknown permissions `contextMenus`, `webNavigation`, `notifications`, `privacy`. In stock Electron the background worker dies at start (`chrome.webNavigation` is undefined) and the popup spins. The content script is injected (isolated world) either way. Storage is separate per partition and survives a restart. |
+| P59 static API census | pass | The extension's scripts reference `webNavigation`, `windows`, `contextMenus`, `commands`, `notifications`, `privacy`, `tabs.create`, `remove`, `getCurrent`, `captureVisibleTab`, `runtime.connectNative` and `sendNativeMessage`, all undefined in Electron 45. |
+| P60 inert stubs through a service-worker preload | pass | With stubs installed in the worker's main world (`contextBridge.executeInMainWorld`) the worker starts, stays running for 65 s with no page (through its own activity: a minimal worker stops after 30 s idle), the popup renders the logged-out intro screen, `scripting.executeScript` and `tabs.sendMessage` reach the fixture page, and the content script returns the login form's fields (no values). The only host requested is the vendor API (server configuration), cancelled. |
+
+Differences from the Electron documentation: `action`, `alarms`, `idle`, `offscreen`, `permissions` and `storage.session` exist although the supported-API page does not list them. The page lists nothing for service workers, popups or offscreen documents; all three worked.
+
+Review rerun (same day, the app's Electron, throwaway user data): the base, stub and restart results repeat. A minimal manifest 3 worker stops 30 s after start, so Electron does stop idle extension workers. Version 2026.10.2 fails and starts the same way, but returns no form fields while logged out. Details in the note's "Review rerun" section.
+
+Not run: login, unlock, the inline menu and fill, passkeys, biometric unlock (no native messaging), the electron-chrome-extensions library (read only), HTTPS pages.
+
+New scripts: `p58_ext_load.mjs` (run with the app's Electron), `p59_ext_static_apis.mjs`, `p60_sw_shim_preload.cjs`.
+
+## Monaco editor probes P70 to P77 (2026-11-28)
+
+`monaco-editor` 0.57.0, `shiki` 4.6.0 and `@shikijs/monaco` 4.6.0 in a scratch project outside the repository; built with the app's electron-vite 6.0.0 and run in the app's Electron 45.3.3 with hidden windows, the main window's web preferences (context isolation, sandbox, no Node integration) and the app's CSP. No model. Details, tables and the design reading in `notes/probes-m8-editor.md`; the evidence files were not kept.
+
+| Probe | Result | Short finding |
+|---|---|---|
+| P70 bundle | pass | Editor contributions, Monarch languages and the JSON mode: 9.29 MB as electron-vite builds the renderer today (not minified), 5.08 MB minified (1.35 MB gzip), workers 0.74 MB of it. All of `monaco-editor`: 14.32 MB minified, 6.77 MB of it the TypeScript worker. No `new Function`, no `eval` call. |
+| P71 startup and memory | pass | Module evaluation 120 to 144 ms against 30 to 39 ms for an empty page; `editor.create` 45 to 48 ms; tokenized render of 200 lines 78 to 99 ms. Heap 14.5 MB with Monaco loaded, 20.8 MB with one 2,000-line model, 42.5 MB with ten, 37.4 MB with a 20,000-line model shown; renderer working set 168 to 182 MB with one editor against 82 MB for an empty page. |
+| P72 diff editor | pass | Diffs of 2,000 lines in 89 to 91 ms and of 20,000 lines in 97 to 119 ms, in the editor worker. A view zone hosting a `textarea` sits at its line, follows scroll, survives resize and inline mode, and gets a matching spacer on the other side; a click focuses the `textarea` (not with `suppressMouseDown`) and keys typed in a zone reach the editor's keybindings unless the zone stops their propagation (review rerun, notes/probes-m8-editor.md). `goToDiff` walks the hunks; unchanged regions collapse to 15 % of the height. |
+| P73 themes | pass | `defineTheme` takes resolved hex values and refuses `var(--…)` ("Illegal value for token color"). A VS Code theme's `tokenColors` mapped onto Monarch token names rendered 4 of its 8 colours; through shiki the theme's own colours render. |
+| P74 Markdown | pass | Monarch Markdown tokens for headings, emphasis, strong, links and code; word wrap; `links: false`; an agent proposal as an inline diff in about 50 ms; `registerLinkOpener` exists. Clipboard reads are denied by the app's permission handler. |
+| P75 Monarch and shiki | pass | Tokenizing about 2,000 lines: Monarch 5 to 14 ms per language, shiki's JavaScript engine 15 to 224 ms (TypeScript slowest). shiki's Oniguruma engine fails under the CSP (`wasm-eval`). |
+| P76 leaks | pass | Twenty create and dispose cycles of editors, ten models, a diff editor and a view zone: the heap settles at about 30 MB, the DOM does not grow, no model or editor is left. |
+| P77 sandbox and CSP | pass | No CSP change needed: module workers from `file:` load under `script-src 'self'`, theme styles under `style-src 'unsafe-inline'`. No request left `file:`, `data:` or `blob:`; no Node globals in the page. |
+
+Not run: the dev server mode, real pointer and keyboard input, IME, screen readers, Monaco 0.58.0, language servers.
+
+New scripts: `p70_monaco_build.mjs` with `p70_monaco_src/` (`samples.js`, `scenarios.js`), `p71_monaco_run.mjs`, `p71_monaco_main.cjs` (run with the app's Electron).
