@@ -108,8 +108,24 @@ describe('SrtProvider command', () => {
     writeFileSync(join(workspace, 'bin', 'srt'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     const environment = await provider('claude', { appPath: `bin::.:${join(workspace, 'bin')}` }).prepare(spec);
     const failure = await environment.processCommand?.({ sessionId: 's1', cwd: workspace, args: [] }).catch((error: unknown) => error);
-    expect((failure as IsolationError).message, 'no trusted entry holds srt, and the workspace that holds it was recorded at the launch').toBe('the sandbox runtime (srt) lies in a directory that an earlier agent launch made writable (such as the home directory), so it was not started');
-    expect((failure as IsolationError).detail, 'the detail names the file, the recorded directory and that a database of the registry is needed to forget it').toBe(`${join(workspace, 'bin', 'srt')}; recorded as writable by an agent: ${workspace}; the app forgets it when it starts with a new profile database`);
+    expect((failure as IsolationError).message, 'no trusted entry holds srt, and the workspace holds the only one: the launch is refused before it is recorded').toBe('the directory of this session holds the srt that the app starts outside any sandbox, where its agent could replace it, so the session was not started');
+    expect((failure as IsolationError).detail, 'the detail names the file').toBe(join(workspace, 'bin', 'srt'));
+  });
+
+  it('excludes the workspace of an earlier launch with its default tools, and names that launch as the cause when it holds the only srt', async () => {
+    const earlier = join(dir, 'earlier');
+    mkdirSync(join(earlier, 'bin'), { recursive: true });
+    writeFileSync(join(earlier, 'bin', 'srt'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    writeFileSync(join(dir, 'bin', 'node'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const own = provider('/bin/sh', { appPath: `${join(earlier, 'bin')}:${join(dir, 'bin')}` });
+    const first = await own.prepare({ ...spec, key: { profileId: 'default', sessionId: 'earlier' }, workspace: { mode: 'bind', hostPath: earlier } });
+    await first.processCommand?.({ sessionId: 'earlier', cwd: earlier, args: [] });
+    const second = await own.prepare({ ...spec, key: { profileId: 'default', sessionId: 'later' } });
+    const command = await second.processCommand?.({ sessionId: 'later', cwd: join(dir, 'work'), args: [] });
+    expect(command?.file, 'the srt of the trusted directory, not the one of the earlier workspace').toBe(join(dir, 'bin', 'srt'));
+    rmSync(join(dir, 'bin', 'srt'));
+    const failure = await second.processCommand?.({ sessionId: 'later', cwd: join(dir, 'work'), args: [] }).catch((error: unknown) => error as IsolationError);
+    expect([(failure as IsolationError).message, (failure as IsolationError).detail], 'the cause names the earlier launch and the detail the directory').toEqual(['the sandbox runtime (srt) lies in a directory that an earlier agent launch made writable (such as the home directory), so it was not started', `${join(earlier, 'bin', 'srt')}; recorded as writable by an agent: ${earlier}; the app forgets it when it starts with a new profile database`]);
   });
 
   it('removes the settings file on release', async () => {
@@ -148,7 +164,8 @@ describe('SrtProvider host-side lookups against what the agent can write', () =>
   };
   /** The node that the shim of srt finds in a trusted directory: a file of the test, since only its presence matters. */
   beforeEach(() => {
-    writeFileSync(join(dir, 'bin', 'node'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    // Trusted copies of the other programs that the app starts on the host, so no directory of a launch holds the only one.
+    for (const name of ['node', 'git', 'docker']) writeFileSync(join(dir, 'bin', name), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     mkdirSync(join(dir, 'work'), { recursive: true });
   });
   const run = (command: { file: string; args: readonly string[]; cwd: string; env: Readonly<Record<string, string>> }) => spawnSync(command.file, [...command.args], { cwd: command.cwd, env: { ...command.env }, encoding: 'utf8' });
@@ -177,7 +194,9 @@ describe('SrtProvider host-side lookups against what the agent can write', () =>
     const environment = await provider('/bin/sh', confined(join(directory(), 'bin'), options())).prepare(spec);
     const failure = await environment.processCommand?.({ sessionId: 's1', cwd: join(dir, 'work'), args: [] }).catch((error: unknown) => error);
     expect(failure, 'an isolation error').toBeInstanceOf(IsolationError);
-    expect((failure as IsolationError).message, 'the fixed reason').toBe('the sandbox runtime (srt) exists only in a directory that an agent may write, or runs code that lies in one, so it was not started');
+    // The workspace of this session is not recorded yet: the launch that would make it writable is refused instead.
+    const reason = directory().startsWith(join(dir, 'work')) ? 'the directory of this session holds the srt that the app starts outside any sandbox, where its agent could replace it, so the session was not started' : 'the sandbox runtime (srt) exists only in a directory that an agent may write, or runs code that lies in one, so it was not started';
+    expect((failure as IsolationError).message, 'the fixed reason').toBe(reason);
     expect((failure as IsolationError).detail, 'the detail names the stand-in').toBe(join(directory(), 'bin', 'srt'));
     expect(ran(), 'no stand-in ran').toEqual([]);
   });
@@ -201,8 +220,10 @@ describe('SrtProvider host-side lookups against what the agent can write', () =>
 
   it('excludes the workspace of another environment that the provider prepared, which another agent of the profile can write', async () => {
     plant(join(dir, 'other-work', 'bin'));
-    const owner = provider('/bin/sh', confined(join(dir, 'other-work', 'bin')));
-    await owner.prepare({ ...spec, key: { profileId: 'default', sessionId: 'other' }, workspace: { mode: 'bind', hostPath: join(dir, 'other-work') } });
+    const owner = provider('/bin/sh', confined([join(dir, 'other-work', 'bin'), join(dir, 'bin')].join(':')));
+    const other = await owner.prepare({ ...spec, key: { profileId: 'default', sessionId: 'other' }, workspace: { mode: 'bind', hostPath: join(dir, 'other-work') } });
+    await other.processCommand?.({ sessionId: 'other', cwd: join(dir, 'other-work'), args: [] });
+    rmSync(join(dir, 'bin', 'srt'));
     const mine = await owner.prepare({ ...spec, key: { profileId: 'default', sessionId: 'mine' }, workspace: { mode: 'bind', hostPath: join(dir, 'work') } });
     await expect(mine.processCommand?.({ sessionId: 'mine', cwd: join(dir, 'work'), args: [] }), 'the only srt is in the workspace of the other environment').rejects.toThrow('exists only in a directory that an agent may write');
     expect(ran(), 'no stand-in ran').toEqual([]);
@@ -214,7 +235,7 @@ describe('SrtProvider host-side lookups against what the agent can write', () =>
     for (const [place, appPath] of [['the working directory', join(dir, 'cwd-elsewhere', 'bin')], ['the hook inbox', join(dir, 'inbox', 'bin')]] as const) {
       const environment = await provider('/bin/sh', confined(appPath)).prepare(spec);
       environment.hookDelivery('s1', { inboxHostDir: join(dir, 'inbox'), httpPath: '/h', token: 't' });
-      await expect(environment.processCommand?.({ sessionId: 's1', cwd: join(dir, 'cwd-elsewhere'), args: [] }), `the only srt is in ${place}`).rejects.toThrow('exists only in a directory that an agent may write');
+      await expect(environment.processCommand?.({ sessionId: 's1', cwd: join(dir, 'cwd-elsewhere'), args: [] }), `the only srt is in ${place}`).rejects.toThrow('the directory of this session holds the srt that the app starts outside any sandbox, where its agent could replace it, so the session was not started');
     }
     expect(ran(), 'no stand-in ran').toEqual([]);
   });
@@ -261,7 +282,7 @@ describe('SrtProvider host-side lookups against what the agent can write', () =>
   it.skipIf(!caseInsensitiveVolume())('excludes a PATH entry that spells the workspace in another case, which the volume treats as the same directory', async () => {
     plant(join(dir, 'Work2', 'bin'));
     const environment = await provider('/bin/sh', confined(join(dir, 'work2', 'bin'))).prepare({ ...spec, workspace: { mode: 'bind', hostPath: join(dir, 'Work2') } });
-    await expect(environment.processCommand?.({ sessionId: 's1', cwd: join(dir, 'Work2'), args: [] }), 'the only srt is in the workspace under another spelling').rejects.toThrow('exists only in a directory that an agent may write');
+    await expect(environment.processCommand?.({ sessionId: 's1', cwd: join(dir, 'Work2'), args: [] }), 'the only srt is in the workspace under another spelling').rejects.toThrow('the directory of this session holds the srt that the app starts outside any sandbox, where its agent could replace it, so the session was not started');
     expect(ran(), 'no stand-in ran').toEqual([]);
   });
 
@@ -387,29 +408,38 @@ sandboxed(`SrtProvider under the real sandbox runtime${srtTestsUnavailable() ===
     }
   }, 60_000);
 
-  it('denies a session the read of the profile database and its journal files, while the hook inbox in the same data directory stays writable', async () => {
+  it('denies a session the read of the profile database, its journal files and the database of another profile, while the hook inbox in the same data directory stays writable', async () => {
     const workspace = join(dir, 'work');
-    const data = join(dir, 'data');
+    const profiles = join(dir, 'profiles');
+    const data = join(profiles, 'p1', 'data');
     const inbox = join(data, 'session-events', 's1');
     mkdirSync(workspace, { recursive: true });
     mkdirSync(inbox, { recursive: true });
+    mkdirSync(join(profiles, 'p2', 'data'), { recursive: true });
     const database = join(data, 'app.db');
-    for (const suffix of ['', '-wal', '-shm']) writeFileSync(`${database}${suffix}`, 'rows');
+    const other = join(profiles, 'p2', 'data', 'app.db');
+    for (const suffix of ['', '-wal', '-shm', '-journal']) {
+      writeFileSync(`${database}${suffix}`, 'rows');
+      writeFileSync(`${other}${suffix}`, 'rows');
+    }
     writeFileSync(join(data, 'other.txt'), 'other-content');
     const script = join(dir, 'read-claude.sh');
-    writeFileSync(script, ['#!/bin/sh', 'cat "$1" >/dev/null 2>&1; echo "db=$?"', 'cat "$1-wal" >/dev/null 2>&1; echo "wal=$?"', 'cat "$1-shm" >/dev/null 2>&1; echo "shm=$?"', 'echo x > "$2/hook" 2>/dev/null; echo "inbox=$?"', 'cat "$3"; echo', 'echo end'].join('\n'), { mode: 0o755 });
-    const outcome = async (profileDatabase: string | undefined): Promise<string> => {
-      const environment = await real(script, profileDatabase === undefined ? {} : { profileDatabase }).prepare({ ...spec, key: { profileId: 'default', sessionId: String(profileDatabase) }, workspace: { mode: 'bind', hostPath: workspace } });
+    const reads = [['db', '$1'], ['wal', '$1-wal'], ['shm', '$1-shm'], ['journal', '$1-journal'], ['other', '$4'], ['otherjournal', '$4-journal']].map(([name, path]) => `cat "${path}" >/dev/null 2>&1; echo "${name}=$?"`);
+    writeFileSync(script, ['#!/bin/sh', ...reads, 'echo x > "$2/hook" 2>/dev/null; echo "inbox=$?"', 'cat "$3"; echo', 'echo end'].join('\n'), { mode: 0o755 });
+    const outcome = async (denied: boolean): Promise<string> => {
+      const environment = await real(script, denied ? { profileDatabase: database, profilesDirectory: profiles } : {}).prepare({ ...spec, key: { profileId: 'default', sessionId: String(denied) }, workspace: { mode: 'bind', hostPath: workspace } });
       environment.hookDelivery('s1', { inboxHostDir: inbox, httpPath: '/h', token: 't' });
-      const command = await environment.processCommand?.({ sessionId: 's1', cwd: workspace, args: [database, inbox, join(data, 'other.txt')] });
+      const command = await environment.processCommand?.({ sessionId: 's1', cwd: workspace, args: [database, inbox, join(data, 'other.txt'), other] });
       return spawnSync(command!.file, [...command!.args], { cwd: command!.cwd, env: { ...command!.env }, encoding: 'utf8', timeout: 30_000 }).stdout;
     };
-    const denied = await outcome(database);
+    const denied = await outcome(true);
     expect(denied, `the session ran: ${denied}`).toContain('end');
-    expect(['db', 'wal', 'shm'].map((name) => new RegExp(`${name}=[1-9]`).test(denied)), 'the database and its journal files are not readable').toEqual([true, true, true]);
+    const names = ['db', 'wal', 'shm', 'journal', 'other', 'otherjournal'];
+    expect(names.map((name) => new RegExp(`${name}=[1-9]`).test(denied)), 'the database, its journal files and the database of another profile are not readable').toEqual(names.map(() => true));
     expect(denied, 'the hook inbox below the data directory is writable').toContain('inbox=0');
     expect(denied, 'another file of the data directory stays readable').toContain('other-content');
-    expect(await outcome(undefined), 'without the setting the database is readable').toContain('db=0');
+    const open = await outcome(false);
+    expect(['db=0', 'other=0', 'otherjournal=0'].map((text) => open.includes(text)), 'without the settings the files are readable').toEqual([true, true, true]);
   }, 60_000);
 
   it('starts an agent session under a hostile profile PATH with programs planted in the workspace and in an agent-writable directory on the app PATH, and runs none of them outside the sandbox', async () => {

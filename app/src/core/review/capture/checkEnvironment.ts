@@ -1,4 +1,4 @@
-import { hostTools, launcherArgv, srtToolEnvironment, type HostTools } from '../../isolation/index';
+import { hostTools, INCOMPLETE_CAUSE, launcherArgv, srtToolEnvironment, type HostTools } from '../../isolation/index';
 import type { PtyCommand } from '../../isolation/types';
 import type { CheckEnvironment } from './ProcessCheckExecutor';
 
@@ -28,7 +28,7 @@ export function resolveCheckEnvironment(input: CheckEnvironmentInput): CheckEnvi
   if (provider === 'container') return { kind: 'unavailable', why: 'checks under the container provider are not connected in this build' };
   if (provider === 'srt' || bashSandbox) {
     const tools = srt.hostTools ?? hostTools();
-    if (tools.find(srt.binary) === undefined) return { kind: 'unavailable', why: tools.shadowed(srt.binary) === undefined ? 'the sandbox runtime is not installed' : 'the sandbox runtime exists only in a directory that an agent may write' };
+    if (tools.find(srt.binary) === undefined) return { kind: 'unavailable', why: unavailable(tools, srt.binary) };
     return {
       kind: 'ready',
       environment: srtToolEnvironment({ srtBinary: srt.binary, settingsDir: srt.settingsDir, hostTools: tools, ...(srt.extraDenyRead === undefined ? {} : { extraDenyRead: srt.extraDenyRead }) }),
@@ -37,6 +37,11 @@ export function resolveCheckEnvironment(input: CheckEnvironmentInput): CheckEnvi
     };
   }
   return { kind: 'ready', environment: { toolCommand: async (tool) => plainCommand(tool.argv, tool.cwd, tool.env) }, profileEnv, enforcesNetwork: false };
+}
+
+function unavailable(tools: HostTools, binary: string): string {
+  if (tools.shadowed(binary) !== undefined) return 'the sandbox runtime exists only in a directory that an agent may write';
+  return tools.incomplete() ? `the sandbox runtime was not found: ${INCOMPLETE_CAUSE}` : 'the sandbox runtime is not installed';
 }
 
 /** The program under the launcher shell too: Node reads a death by a signal it has no name for as exit 0 (see `launcherArgv`). */

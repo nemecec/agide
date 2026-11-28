@@ -11,8 +11,11 @@ import { describe, expect, it } from 'vitest';
  * the list names for it, takes a spawner as a value (an alias, `.call`, `.apply`, `.bind`, an optional call, a
  * destructuring or the namespace itself), loads `child_process` or `node-pty` by `require`, `import()`, `module.require`
  * or a re-export, evaluates code (`eval`, `Function`), changes the command object that a spawn reads, or builds or
- * passes on a `HostTools` outside the files that wire it. A scan of the text cannot be complete: it stops the
- * spellings that code written by accident has, and the review of each change does the rest.
+ * passes on a `HostTools` outside the files that wire it. Outside those files `HostTools` may be imported as a type
+ * only, so TypeScript refuses it in any position of a value; the scan flags the routes around that (an import of the
+ * value, a member of a namespace, a destructuring, `typeof`, the constructor of an instance, `Object.create`). A scan of
+ * the text cannot be complete: it stops the spellings that code written by accident has, and the review of each change
+ * does the rest.
  */
 
 const SOURCE_ROOT = join(import.meta.dirname, '..', '..');
@@ -60,9 +63,22 @@ const SPAWNERS = ['execFile', 'execFileSync', 'spawn', 'spawnSync', 'exec', 'exe
 /** Uses of `HostTools` as a value that build or pass on the class: `new (HostTools)`, an alias, an argument, `Reflect.construct`, a subclass. */
 const HOST_TOOLS_VALUE = /new\s*\(\s*HostTools\b|(?<![=!<>])=\s*HostTools\b|Reflect\s*\.\s*construct\s*\(\s*HostTools\b|[(,[]\s*HostTools\s*[,)\]]|extends\s+HostTools\b|\breturn\s+HostTools\b/;
 const MODULES = /^(?:node:)?(?:child_process|node-pty)$/;
+/** Routes to the class `HostTools` that a type-only import does not close: a member of a namespace or module, a destructuring, `typeof`. */
+const HOST_TOOLS_ROUTE = /\.\s*HostTools\b|\[\s*['"`]HostTools['"`]\s*\]|\{[^{}]*\bHostTools\b[^{}]*\}\s*=[^=>]|\btypeof\s+HostTools\b/;
+/** An assignment, also a compound one (`??=`, `||=`, `+=`). */
+const ASSIGNS = '\\s*(?:\\?\\?|\\|\\||&&|\\*\\*|<<|>>>?|[-+*/%&|^])?=(?![=>])';
 
 function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
+}
+
+/** True when the file imports the class `HostTools` as a value: a named specifier without `type`, in a statement that is not `import type`. */
+function importsHostToolsValue(source: string): boolean {
+  for (const match of source.matchAll(/import\s+(?!type\b)([^;]*?)\s+from\s+['"][^'"]+['"]/g)) {
+    const specifiers = /\{([^}]*)\}/.exec(match[1] ?? '')?.[1]?.split(',') ?? [];
+    if (specifiers.some((specifier) => /^HostTools\b/.test(specifier.trim()))) return true;
+  }
+  return false;
 }
 
 /** The names a file binds to `child_process` and `node-pty`: the functions it imports by name, and the namespaces (or default imports) it takes them from. */
@@ -126,7 +142,10 @@ function declarations(source: string, name: string): string[] {
   for (const match of source.matchAll(/(\b[\w$]+\s*)?\(([^()]*)\)\s*(?::[^=;{]+)?(?:=>|\{)/g)) {
     if (/^(?:if|while|for|switch|with|catch)\s*$/.test(match[1] ?? '')) continue;
     for (const parameter of (match[2] ?? '').split(',')) if (new RegExp(`^(?:\\.\\.\\.)?${name}\\s*(?:=|$)`).test(parameter.trim())) found.push(`${parameter.trim()} (a parameter without a type)`);
+    // A destructuring pattern that binds the name: `({ command }) =>`, `(a, { x: command }) =>`, `([command]) =>`.
+    if (new RegExp(`[{\\[][^{}\\[\\]]*(?<![\\w.$])${name}(?![\\w$])(?!\\s*[.:(\\[])[^{}\\[\\]]*[}\\]]`).test(match[2] ?? '')) found.push(`${(match[2] ?? '').trim()} (a destructuring pattern in a parameter)`);
   }
+  for (const match of source.matchAll(new RegExp(`\\bcatch\\s*\\(([^()]*\\b${name}\\b[^()]*)\\)`, 'g'))) found.push(`catch (${(match[1] ?? '').trim()}) (a catch binding)`);
   return found;
 }
 
@@ -148,10 +167,11 @@ export function violations(file: string, original: string, allowed: readonly All
   if (/getBuiltinModule|createRequire/.test(source)) found.push(`${file}: getBuiltinModule or createRequire can load child_process by a computed name`);
   if (/\bmodule\s*\.\s*require\b|\bmainModule\b/.test(source)) found.push(`${file}: module.require or process.mainModule can load child_process`);
   if (/\._load\b/.test(source)) found.push(`${file}: Module._load (through module.constructor) can load child_process`);
-  if (/\.\s*(?:binding|_linkedBinding|execve)\s*\(|\bprocess\s*\[\s*['"`](?:binding|_linkedBinding|execve)\b/.test(source)) found.push(`${file}: process.binding, process._linkedBinding or process.execve starts or replaces a program without child_process`);
-  if (/worker_threads/.test(source) && /\beval\s*:\s*(?!false\b)/.test(source)) found.push(`${file}: a Worker started with eval runs code that the scan cannot read`);
+  if (/\.\s*(?:binding|_linkedBinding|execve|dlopen)\s*\(|\bprocess\s*\[\s*['"`](?:binding|_linkedBinding|execve|dlopen)\b/.test(source)) found.push(`${file}: process.binding, process._linkedBinding, process.execve or process.dlopen starts or replaces a program, or loads native code, without child_process`);
+  if (/\bprocess\s*\[|\.\s*dlopen\b|\bReflect\s*\.\s*\w+\s*\(\s*process\b|(?:\{[^{}]*\}|\[[^\]]*\])\s*=\s*process\s*(?:[;,)\n]|$)/.test(source)) found.push(`${file}: a computed member, a destructuring or a Reflect call on process reaches its members by a name the scan cannot read`);
+  if (/worker_threads/.test(source) && (/\beval\s*:\s*(?!false\b)/.test(source) || /['"`]data:/.test(source))) found.push(`${file}: a Worker started with eval or from a data URL runs code that the scan cannot read`);
   if (/(?:\bfrom\s+|\b(?:require|import)\s*\(\s*)['"`](?:node:)?vm['"`]/.test(source)) found.push(`${file}: node:vm runs code that the scan cannot read`);
-  if (/new\s*\(\s*[\w$.()]*\.\s*constructor\s*\)/.test(source)) found.push(`${file}: new on the constructor of another object builds a class that the scan cannot name`);
+  if (/new\s*\(\s*[\w$.()]*\.\s*constructor\s*\)|\.\s*constructor\b|\[\s*['"`]constructor['"`]\s*\]|\bObject\s*\.\s*create\s*\(|\b(?:Object|Reflect)\s*\.\s*setPrototypeOf\s*\(/.test(source)) found.push(`${file}: the constructor of an object, Object.create or setPrototypeOf builds or changes a class that the scan cannot name`);
   if (/\.\s*(?:require|import)\s*\(\s*(['"`])(?:node:)?(?:child_process|node-pty)\1/.test(source)) found.push(`${file}: a require method loads a module that starts programs`);
   if (/export\s+(?!type\b)[^;]*?\bfrom\s+['"](?:node:)?(?:child_process|node-pty)['"]/.test(source)) found.push(`${file}: re-exports child_process or node-pty, so its importers start programs without naming the module`);
   const code = source.replace(/import\s+(?!type\b)[^;]*?\s+from\s+['"][^'"]+['"];?/g, (statement) => statement.replace(/[^\n]/g, ' '));
@@ -159,6 +179,8 @@ export function violations(file: string, original: string, allowed: readonly All
   const bare = code.replace(/'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`/g, (text) => `${text[0]}${text.slice(1, -1).replace(/[^\n]/g, ' ')}${text[0]}`);
   const exportsFrom = /export\s+[^;]*?from\s+['"][^'"]*['"];?/g;
   if ((/new\s+HostTools\s*\(/.test(bare) || HOST_TOOLS_VALUE.test(bare.replace(exportsFrom, ''))) && !HOST_TOOLS_BUILDERS.includes(file)) found.push(`${file}: builds or passes on the HostTools class, which only the wiring of the profile and the providers do`);
+  if (importsHostToolsValue(source) && !HOST_TOOLS_BUILDERS.includes(file)) found.push(`${file}: imports the HostTools class as a value; outside the wiring import it as a type, so TypeScript refuses it as a value`);
+  if (HOST_TOOLS_ROUTE.test(code.replace(exportsFrom, '').replace(/import\s+[^;]*?from\s+['"][^'"]+['"]/g, '')) && !HOST_TOOLS_BUILDERS.includes(file)) found.push(`${file}: reaches the HostTools class through a member, a destructuring or typeof, which a type-only import does not close`);
   if (/^(?:core|main)\//.test(file) && /(?<![\w.$])eval\s*\(|(?<![\w.$])(?:new\s+)?Function\s*\(/.test(bare)) found.push(`${file}: eval or Function runs code that the scan cannot read`);
   const { names, namespaces } = bindings(source);
   for (const namespace of namespaces) {
@@ -180,9 +202,11 @@ export function violations(file: string, original: string, allowed: readonly All
   }
   for (const [identifier, pattern] of Object.entries(entry?.declared ?? {})) {
     const changes = [
-      ...bare.matchAll(new RegExp(`(?<![\\w.$])${identifier}\\s*(?:\\.\\s*\\w+|\\[[^\\]]*\\])\\s*=(?![=>])`, 'g')),
+      ...bare.matchAll(new RegExp(`(?<![\\w.$])${identifier}\\s*!?\\s*(?:\\.\\s*\\w+|\\[[^\\]]*\\])${ASSIGNS}`, 'g')),
+      // The identifier in parentheses, with a cast: `(command as X).file = …`.
+      ...bare.matchAll(new RegExp(`\\(\\s*${identifier}\\b[^()]*\\)\\s*!?\\s*(?:\\.\\s*\\w+|\\[[^\\]]*\\])${ASSIGNS}`, 'g')),
       // On the text with its strings, since `Object['assign']` names the method in one.
-      ...code.matchAll(new RegExp(`(?:Object|Reflect)\\s*(?:\\.\\s*|\\[\\s*['"\`])(?:assign|defineProperty|defineProperties|set)['"\`]?\\s*\\]?\\s*\\(\\s*${identifier}\\b`, 'g')),
+      ...code.matchAll(new RegExp(`(?:Object|Reflect)\\s*(?:\\.\\s*|\\[\\s*['"\`])(?:assign|defineProperty|defineProperties|set|setPrototypeOf)['"\`]?\\s*\\]?\\s*\\(\\s*${identifier}\\b`, 'g')),
     ];
     for (const match of changes) found.push(`${file}:${lineOf(code, match.index)}: a member of ${identifier} is changed, so the program of the spawn need not be the one it was declared with`);
     for (const match of bare.matchAll(new RegExp(`(?<![=!<>])=\\s*${identifier}\\s*(?=[;,)}\\n]|$)`, 'g'))) found.push(`${file}:${lineOf(code, match.index)}: ${identifier} is taken under another name, whose members the scan does not follow`);
@@ -291,17 +315,43 @@ describe('host-side process starts', () => {
       ['an alias of the command whose member is changed', "const c = command;\nc.file = 'git';\nspawn(command.file, []);", 'command is taken under another name'],
       ['Object.assign named with brackets', "Object['assign'](command, { file: 'git' });\nspawn(command.file, []);", 'a member of command is changed'],
       ['module.constructor._load', "module.constructor._load('node:child_process');", 'Module._load'],
-      ['process.binding', "process.binding('spawn_sync').spawn({ file: 'git' });", 'process.binding, process._linkedBinding or process.execve'],
-      ['process._linkedBinding', "process._linkedBinding('x');", 'process.binding, process._linkedBinding or process.execve'],
-      ['process.execve', "process.execve('/bin/sh', ['sh']);", 'process.binding, process._linkedBinding or process.execve'],
+      ['process.binding', "process.binding('spawn_sync').spawn({ file: 'git' });", 'process.binding, process._linkedBinding, process.execve or process.dlopen'],
+      ['process._linkedBinding', "process._linkedBinding('x');", 'process.binding, process._linkedBinding, process.execve or process.dlopen'],
+      ['process.execve', "process.execve('/bin/sh', ['sh']);", 'process.binding, process._linkedBinding, process.execve or process.dlopen'],
+      ['process.dlopen', "process.dlopen(module, '/tmp/x.node');", 'process.binding, process._linkedBinding, process.execve or process.dlopen'],
+      ['Reflect.get on process', "Reflect.get(process, 'binding')('spawn_sync');", 'a computed member, a destructuring or a Reflect call on process'],
+      ['a computed member of process', "process['bind' + 'ing']('spawn_sync');", 'a computed member, a destructuring or a Reflect call on process'],
+      ['a destructuring of process', "const { binding } = process;\nbinding('spawn_sync');", 'a computed member, a destructuring or a Reflect call on process'],
+      ['a Worker started from a data URL', "import { Worker } from 'node:worker_threads';\nnew Worker(new URL('data:text/javascript,1'));", 'a Worker started with eval or from a data URL'],
+      ['HostTools as the value of an object literal', "import { HostTools } from './hostTools';\nexport const kinds = { T: HostTools };", 'imports the HostTools class as a value'],
+      ['HostTools returned by an arrow', "import { hostTools, HostTools } from './hostTools';\nexport const kind = () => HostTools;", 'imports the HostTools class as a value'],
+      ['HostTools in a conditional', "import { HostTools as Tools } from './hostTools';\nexport const kind = flag ? Tools : Other;", 'imports the HostTools class as a value'],
+      ['typeof HostTools in a constructing parameter', "import type { HostTools } from './hostTools';\nexport const make = (C: typeof HostTools) => new C({ excluded: () => [] });", 'reaches the HostTools class through'],
+      ['HostTools as a member of a namespace', "import * as tools from './hostTools';\nexport const made = new tools.HostTools({ excluded: () => [] });", 'reaches the HostTools class through'],
+      ['HostTools destructured from a module', "const { HostTools: Tools } = await import('./hostTools');", 'reaches the HostTools class through'],
+      ['HostTools with brackets', "import * as tools from './hostTools';\nexport const kind = tools['HostTools'];", 'reaches the HostTools class through'],
       ['a Worker started with eval', "import { Worker } from 'node:worker_threads';\nnew Worker(code, { eval: true });", 'a Worker started with eval'],
       ['node:vm', "import { runInThisContext } from 'node:vm';\nrunInThisContext(code);", 'node:vm runs code'],
-      ['new on the constructor of the shared tools', 'new (hostTools().constructor)({ excluded: () => [] });', 'new on the constructor of another object'],
+      ['new on the constructor of the shared tools', 'new (hostTools().constructor)({ excluded: () => [] });', 'the constructor of an object, Object.create or setPrototypeOf'],
+      ['the constructor of an instance taken as a value', 'const Tools = hostTools().constructor;\nnew Tools({ excluded: () => [] });', 'the constructor of an object, Object.create or setPrototypeOf'],
+      ['new on the constructor of a variable', 'new tools.constructor({ excluded: () => [] });', 'the constructor of an object, Object.create or setPrototypeOf'],
+      ['new on the constructor of an instance in parentheses', 'new (hostTools()).constructor({ excluded: () => [] });', 'the constructor of an object, Object.create or setPrototypeOf'],
+      ['the constructor with brackets', "const Tools = hostTools()['constructor'];", 'the constructor of an object, Object.create or setPrototypeOf'],
+      ['Object.create from an instance', 'Object.create(hostTools(), {});', 'the constructor of an object, Object.create or setPrototypeOf'],
+      ['a compound assignment ??= to the command', "command.file ??= 'git';\nspawn(command.file, []);", 'a member of command is changed'],
+      ['a compound assignment ||= to the command', "command.file ||= 'git';\nspawn(command.file, []);", 'a member of command is changed'],
+      ['a compound assignment &&= to the command', "command.file &&= 'git';\nspawn(command.file, []);", 'a member of command is changed'],
+      ['an assignment to a member of the command in a cast', "(command as Mutable).file = 'git';\nspawn(command.file, []);", 'a member of command is changed'],
+      ['an assignment to a member of the command after !', "command!.file = 'git';\nspawn(command.file, []);", 'a member of command is changed'],
+      ['Object.setPrototypeOf on the command', "Object.setPrototypeOf(command, { file: 'git' });\nspawn(command.file, []);", 'a member of command is changed'],
+      ['a destructured parameter that binds the command', "list.forEach(({ command }) => spawn(command.file, []));\nconst command = await prepared.ptyCommand({});", 'a destructuring pattern in a parameter'],
+      ['a destructured parameter that renames into the command', "list.forEach((a, { x: command }) => spawn(command.file, []));\nconst command = await prepared.ptyCommand({});", 'a destructuring pattern in a parameter'],
+      ['a catch binding of the command', "try { run(); } catch (command) { spawn(command.file, []); }\nconst command = await prepared.ptyCommand({});", 'a catch binding'],
     ];
     it.each(targeted)('flags %s with its own rule, in a file that is not listed and in one that is', (_name, body, rule) => {
       const entry: Allowed = { ...listed, declared: { command: body.includes('prepared.ptyCommand') ? /^const command = await prepared\.ptyCommand\(/ : /^command: ProcessCommand$/ } };
       // A changed member, an alias or another declaration of the command matters only where a spawn of `command.file` is allowed: elsewhere any mention of child_process is flagged.
-      const lists: Allowed[][] = /^a member of|^command is taken|parameter without a type|not the form/.test(rule) ? [[entry]] : [[], [entry]];
+      const lists: Allowed[][] = /^a member of|^command is taken|parameter without a type|not the form|destructuring pattern in a parameter|a catch binding/.test(rule) ? [[entry]] : [[], [entry]];
       for (const allowed of lists) expect(violations('core/other.ts', imports + body, allowed).some((line) => line.includes(rule)), `${allowed.length === 0 ? 'outside' : 'inside'} the allow-list: ${rule}`).toBe(true);
     });
 
@@ -329,8 +379,11 @@ describe('host-side process starts', () => {
   });
 
   it('accepts HostTools as a type, a word in a string and a .require method of another object', () => {
-    const typed = "import type { HostTools } from './hostTools';\nexport interface O { readonly hostTools?: HostTools; tools: () => HostTools, other: HostTools | undefined }\nconst text = 'new HostTools(x)';\nthis.require(id);\nexport { HostTools } from './hostTools';";
-    expect(violations('core/other.ts', typed, []), 'types, strings, a method named require and a re-export of the class are no use').toEqual([]);
+    const typed = "import type { HostTools } from './hostTools';\nimport { type HostTools as Tools, hostTools } from './hostTools';\nexport interface O { readonly hostTools?: HostTools; tools: () => HostTools, other: HostTools | undefined, kinds: { T: Tools } }\nconst text = 'new HostTools(x)';\nthis.require(id);\nexport { HostTools } from './hostTools';";
+    expect(violations('core/other.ts', typed, []), 'types, a type specifier, strings, a method named require and a re-export of the class are no use').toEqual([]);
+    const listed: Allowed = { file: 'core/other.ts', calls: [COMMAND_FILE], declared: { command: /^command: ProcessCommand$/ }, reason: 'a reason of more than twenty characters' };
+    const call = "import { spawn } from 'node:child_process';\nexport function run(command: ProcessCommand) {\n  spawn(command.file, [], { cwd: command.cwd, env: { ...command.env } });\n  try { stop(); } catch (error) { report({ command: error }); }\n}";
+    expect(violations('core/other.ts', call, [listed]), 'an object literal that reads members of the command, and a catch binding of another name, are no declaration').toEqual([]);
   });
 
   it('flags eval below src/core and src/main only, and reads a template without an interpolation as a literal name', () => {

@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSyn
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { resolveCheckEnvironment } from '../review/capture/checkEnvironment';
 import { execGit } from '../review/capture/guardedGit';
 import { GitMerger } from '../review/manager/GitMerger';
 import { GhPullRequestReader } from '../tasks/GhPullRequestReader';
@@ -74,6 +75,12 @@ afterEach(() => {
 
 const srtProvider = (tools: HostTools = toolsOver()) => new SrtProvider({ sessionFilesDir: join(dir, 'sessions'), srtBinary: 'srt', settingsDir: join(dir, 'srt'), claudeBinary: '/bin/sh', hostTools: tools, writable: registry });
 
+/** A session of the srt provider launched in the workspace outside the task base: the launch records the workspace. */
+const launchSrt = async (tools: HostTools = toolsOver()): Promise<void> => {
+  const environment = await srtProvider(tools).prepare(spec);
+  await environment.processCommand?.({ sessionId: 's1', cwd: outside, args: [] });
+};
+
 const checkLaunch = (): ToolLaunch => ({ key: 'check-1', cwd: join(dir, 'agents', 'checkout'), argv: ['sh', '-c', 'echo tests failed; exit 1'], env: { PATH: '/usr/bin:/bin' }, network: 'none', writeDirs: [] });
 
 /** Runs the command of a check the way the executor does and returns its status and output. */
@@ -87,14 +94,14 @@ describe('a session outside the task base', () => {
     expect(toolsOver().find('git'), 'nothing has registered the directory yet').toBe(join(outside, 'bin', 'git'));
   });
 
-  it('puts the workspace out of the lookup of every host-side program once the provider prepared the environment', async () => {
-    await srtProvider().prepare(spec);
+  it('puts the workspace out of the lookup of every host-side program once the provider launched a session there', async () => {
+    await launchSrt();
     const tools = toolsOver();
     expect(PROGRAMS.map((name) => tools.find(name)), 'each program comes from the trusted directory').toEqual(PROGRAMS.map((name) => join(dir, 'trusted', name)));
   });
 
   it('runs the git of a trusted directory for the capture and for a merge, and no stand-in', async () => {
-    await srtProvider().prepare(spec);
+    await launchSrt();
     const { stdout } = await execGit(['--version'], { env: {}, timeoutMs: 20_000 });
     expect(stdout.toString('utf8'), 'the real git answered the capture call').toContain('git version');
     const repo = join(dir, 'repo');
@@ -110,14 +117,14 @@ describe('a session outside the task base', () => {
   });
 
   it('runs the gh of a trusted directory for the pull request reader', async () => {
-    await srtProvider().prepare(spec);
+    await launchSrt();
     const pr = await new GhPullRequestReader({ env: () => ({}) }).read({ kind: 'pull-request', host: 'github.com', owner: 'acme', repo: 'app', number: 1 });
     expect([pr.title, markers()], 'the trusted gh answered and no stand-in ran').toEqual([samplePullRequest().title, []]);
   });
 
   it('starts the docker client of a trusted directory for the check of the container provider', async () => {
     const provider = new ContainerProvider({ sessionFilesDir: join(dir, 'sessions'), dockerBinary: 'docker', image: 'agide-fake-image:0', claudeConfigDir: join(dir, 'claude'), user: '1000:1000', hostTools: toolsOver(), writable: registry });
-    await provider.prepare(spec);
+    await (await provider.prepare(spec)).processCommand?.({ sessionId: 's1', cwd: outside, args: [] });
     expect(await provider.check(), 'the engine answers and the image is local').toEqual({ ok: true });
     await provider.removeOrphans();
     expect(markers(), 'no stand-in ran').toEqual([]);
@@ -129,7 +136,7 @@ describe('a session outside the task base', () => {
   ])('starts the srt of a trusted directory for a check with %s and the failing check reads as failed', async (_name, warm) => {
     const tools = toolsOver();
     if (warm) for (const name of ['srt', 'node']) expect(tools.find(name), `the warm instance kept the ${name} of the workspace`).toBe(join(outside, 'bin', name));
-    await srtProvider(tools).prepare(spec);
+    await launchSrt(tools);
     const command = await srtToolEnvironment({ srtBinary: 'srt', settingsDir: join(dir, 'srt-checks'), hostTools: tools }).toolCommand(checkLaunch());
     expect(command.file, 'the trusted srt').toBe(join(dir, 'trusted', 'srt'));
     const finished = runCheck(command);
@@ -138,9 +145,9 @@ describe('a session outside the task base', () => {
   });
 
   it('refuses to start the check when the only srt and node are the stand-ins of the workspace', async () => {
+    await launchSrt();
     rmSync(join(dir, 'trusted', 'srt'));
     rmSync(join(dir, 'trusted', 'node'));
-    await srtProvider().prepare(spec);
     await expect(srtToolEnvironment({ srtBinary: 'srt', settingsDir: join(dir, 'srt-checks'), hostTools: toolsOver() }).toolCommand(checkLaunch()), 'no trusted srt').rejects.toThrow('exists only in a directory that an agent may write');
     expect(markers(), 'no stand-in ran').toEqual([]);
   });
@@ -148,10 +155,10 @@ describe('a session outside the task base', () => {
   const sandboxed = srtTestsUnavailable() === undefined ? it : it.skip;
   sandboxed('starts the real srt for a failing check and runs none of the stand-ins of the workspace, with a fresh and with a warm instance', async () => {
     const realSrt = findTestSrt()!;
-    appPath = [join(outside, 'bin'), dirname(realSrt), dirname(process.execPath), '/usr/bin', '/bin'].join(':');
+    appPath = [join(outside, 'bin'), dirname(realSrt), dirname(process.execPath), '/usr/bin', '/bin', join(dir, 'trusted')].join(':');
     rmSync(join(outside, 'bin', 'srt'));
     for (const tools of [toolsOver(), (() => { const warmed = toolsOver(); warmed.find('node'); return warmed; })()]) {
-      await srtProvider(tools).prepare(spec);
+      await launchSrt(tools);
       const command = await srtToolEnvironment({ srtBinary: 'srt', settingsDir: join(dir, 'srt-checks'), hostTools: tools }).toolCommand(checkLaunch());
       expect(command.file, 'the real srt').toBe(realSrt);
       const finished = runCheck(command);
@@ -196,7 +203,7 @@ describe('a session outside the task base, after it was closed and the app start
   const sandboxed = srtTestsUnavailable() === undefined ? it : it.skip;
   sandboxed('starts the real srt for a failing check and runs none of the stand-ins', async () => {
     const realSrt = findTestSrt()!;
-    appPath = [join(outside, 'bin'), dirname(realSrt), dirname(process.execPath), '/usr/bin', '/bin'].join(':');
+    appPath = [join(outside, 'bin'), dirname(realSrt), dirname(process.execPath), '/usr/bin', '/bin', join(dir, 'trusted')].join(':');
     rmSync(join(outside, 'bin', 'srt'));
     await launchAndClose();
     const second = restart();
@@ -210,6 +217,52 @@ describe('a session outside the task base, after it was closed and the app start
       second.close();
     }
   }, 60_000);
+});
+
+describe('a local session outside the task base', () => {
+  const work = (): string => join(dir, 'work');
+  /** Plants srt, node and git in the workspace after the launch, as its agent can, on the only entry of the app PATH. */
+  const plantAfterLaunch = (): void => {
+    for (const name of ['srt', 'node', 'git']) executable(join(work(), 'bin', name), `#!/bin/sh\ntouch '${join(dir, 'markers', name)}'\nexit 0\n`);
+  };
+  /** Launches a local session in the workspace, then plants; returns tools over the registry, set as the shared instance, and the function that puts the previous one back. */
+  const launchThenPlant = async (bashSandbox: boolean) => {
+    mkdirSync(join(work(), 'bin'), { recursive: true });
+    appPath = join(work(), 'bin');
+    const tools = toolsOver();
+    const back = setHostTools(tools);
+    const provider = new LocalProvider({ sessionFilesDir: join(dir, 'sessions'), claudeBinary: '/bin/sh', hostTools: tools, writable: registry, bashSandbox: () => bashSandbox });
+    const environment = await provider.prepare({ ...spec, workspace: { mode: 'bind', hostPath: work() } });
+    await environment.processCommand?.({ sessionId: 's1', cwd: work(), args: [] });
+    plantAfterLaunch();
+    return { tools, back };
+  };
+
+  it('with the Bash sandbox on: a check and a capture start none of the srt, node and git that the agent planted in its workspace', async () => {
+    const { tools, back } = await launchThenPlant(true);
+    try {
+      const environment = resolveCheckEnvironment({ provider: 'local', bashSandbox: true, profileEnv: {}, srt: { binary: 'srt', settingsDir: join(dir, 'srt-checks'), hostTools: tools } });
+      expect(environment, 'the check ends not_run: no srt outside the workspace').toEqual({ kind: 'unavailable', why: 'the sandbox runtime exists only in a directory that an agent may write' });
+      await expect(srtToolEnvironment({ srtBinary: 'srt', settingsDir: join(dir, 'srt-checks'), hostTools: tools }).toolCommand(checkLaunch()), 'a check start').rejects.toThrow('exists only in a directory that an agent may write');
+      await expect(execGit(['--version'], { env: {}, timeoutMs: 20_000 }), 'the git of the capture').rejects.toThrow('exists only in a directory that an agent may write');
+      expect(markers(), 'no stand-in ran').toEqual([]);
+    } finally {
+      back();
+    }
+  });
+
+  it('with the Bash sandbox off: nothing is recorded, and the check of the profile runs unconfined, as the agent did', async () => {
+    const before = registry.directories();
+    const { tools, back } = await launchThenPlant(false);
+    try {
+      expect(registry.directories(), 'the set is what it was').toEqual(before);
+      expect(tools.find('srt'), 'the workspace is not excluded').toBe(join(work(), 'bin', 'srt'));
+      const environment = resolveCheckEnvironment({ provider: 'local', bashSandbox: false, profileEnv: {}, srt: { binary: 'srt', settingsDir: join(dir, 'srt-checks'), hostTools: tools } });
+      expect(environment.kind === 'ready' && environment.enforcesNetwork, 'a plain check: no srt is looked up and no confinement is claimed').toBe(false);
+    } finally {
+      back();
+    }
+  });
 });
 
 describe('an entry of extraWritePaths that is removed while the app runs', () => {
@@ -226,12 +279,12 @@ describe('an entry of extraWritePaths that is removed while the app runs', () =>
 describe('what each provider adds to the registry', () => {
   const sub = (name: string): string => join(dir, name);
 
-  it('the srt provider adds the workspace, the Claude directory, the working directory and the inbox of the launch, and the directories of a check', async () => {
+  it('the srt provider adds the Claude directory at prepare, the workspace, the working directory and the inbox at the launch, and the directories of a check', async () => {
     const environment = await srtProvider().prepare({ ...spec, workspace: { mode: 'bind', hostPath: sub('work') } });
-    expect(registry.directories(), 'the workspace and the Claude directory after prepare').toEqual(expect.arrayContaining([sub('work'), sub('claude')]));
+    expect([registry.directories().includes(sub('claude')), registry.directories().includes(sub('work'))], 'after prepare: the Claude directory, not yet the workspace').toEqual([true, false]);
     environment.hookDelivery('s1', { inboxHostDir: sub('inbox'), httpPath: '/h', token: 't' });
     await environment.processCommand?.({ sessionId: 's1', cwd: sub('elsewhere'), args: [] });
-    expect(registry.directories(), 'the inbox and the working directory after the launch').toEqual(expect.arrayContaining([sub('inbox'), sub('elsewhere')]));
+    expect(registry.directories(), 'the workspace, the inbox and the working directory after the launch').toEqual(expect.arrayContaining([sub('work'), sub('inbox'), sub('elsewhere')]));
     await environment.toolCommand({ ...checkLaunch(), cwd: sub('checkout'), writeDirs: [sub('clones')] });
     expect(registry.directories(), 'the checkout and the clones after a check start').toEqual(expect.arrayContaining([sub('checkout'), sub('clones')]));
   });
@@ -241,21 +294,33 @@ describe('what each provider adds to the registry', () => {
     expect(registry.directories(), 'the entry of the options the provider was built from').toContain(sub('cargo'));
   });
 
-  it('the container provider adds its Claude directory when it is built, the workspace at prepare and every writable mount of a launch', async () => {
+  it('the container provider adds its Claude directory when it is built and every writable mount of a launch, the workspace among them', async () => {
     const provider = new ContainerProvider({ sessionFilesDir: sub('sessions'), dockerBinary: 'docker', image: 'agide-fake-image:0', claudeConfigDir: sub('container-claude'), user: '1000:1000', hostTools: toolsOver(), writable: registry });
     expect(registry.directories(), 'the Claude directory that the containers mount writable').toContain(sub('container-claude'));
     const environment = await provider.prepare({ ...spec, workspace: { mode: 'bind', hostPath: sub('work') } });
-    expect(registry.directories(), 'the workspace').toContain(sub('work'));
+    expect(registry.directories(), 'not the workspace before a launch').not.toContain(sub('work'));
     environment.hookDelivery('s1', { inboxHostDir: sub('inbox'), httpPath: '/h', token: 't' });
     await environment.processCommand?.({ sessionId: 's1', cwd: sub('work'), args: [] });
-    expect(registry.directories(), 'the inbox mount').toContain(sub('inbox'));
+    expect(registry.directories(), 'the workspace and the inbox mount').toEqual(expect.arrayContaining([sub('work'), sub('inbox')]));
     await environment.toolCommand({ ...checkLaunch(), cwd: sub('checkout'), writeDirs: [sub('clones')] });
     expect(registry.directories(), 'the mounts of a check').toEqual(expect.arrayContaining([sub('checkout'), sub('clones')]));
   });
 
-  it('the local provider adds nothing, also for a session in the home directory: its agent writes with the rights of the user', async () => {
+  it('the local provider adds the workspace, the working directory and the inbox of a launch while the Bash sandbox of the profile is on', async () => {
+    let sandbox = false;
+    const provider = new LocalProvider({ sessionFilesDir: sub('sessions'), claudeBinary: '/bin/sh', hostTools: toolsOver(), writable: registry, bashSandbox: () => sandbox });
+    const environment = await provider.prepare({ ...spec, workspace: { mode: 'bind', hostPath: sub('work') } });
+    environment.hookDelivery('s1', { inboxHostDir: sub('inbox'), httpPath: '/h', token: 't' });
+    await environment.processCommand?.({ sessionId: 's1', cwd: sub('elsewhere'), args: [] });
+    expect(registry.directories(), 'nothing while the Bash sandbox is off').not.toEqual(expect.arrayContaining([sub('work')]));
+    sandbox = true;
+    await environment.processCommand?.({ sessionId: 's1', cwd: sub('elsewhere'), args: [] });
+    expect(registry.directories(), 'the workspace, the working directory and the inbox once it is on').toEqual(expect.arrayContaining([sub('work'), sub('elsewhere'), sub('inbox')]));
+  });
+
+  it('the local provider adds nothing without the Bash sandbox, also for a session in the home directory: its agent writes with the rights of the user', async () => {
     const before = registry.directories();
-    const provider = new LocalProvider({ sessionFilesDir: sub('sessions'), claudeBinary: '/bin/sh', hostTools: toolsOver() });
+    const provider = new LocalProvider({ sessionFilesDir: sub('sessions'), claudeBinary: '/bin/sh', hostTools: toolsOver(), writable: registry, bashSandbox: () => false });
     for (const place of [homedir(), dir]) {
       const environment = await provider.prepare({ ...spec, key: { profileId: 'default', sessionId: place }, workspace: { mode: 'bind', hostPath: place } });
       environment.hookDelivery('s1', { inboxHostDir: sub('inbox'), httpPath: '/h', token: 't' });
@@ -277,20 +342,48 @@ describe('a session whose working directory holds the tool directories, such as 
     return { db, tools, srt: srtProvider(tools) };
   };
 
-  it('is recorded by the srt provider, and the provider status, a session and a check name the cause, the directory and the command that forgets it', async () => {
-    executable(join(dir, 'trusted', 'claude'), '#!/bin/sh\nexit 0\n');
+  it('refuses an srt session there before it records anything, so the status and a check keep the srt and node of that directory', async () => {
     appPath = join(dir, 'trusted');
     const first = start();
     try {
-      // An earlier session in the directory of the tools, then one in its parent: in memory the parent stands for both, the table holds both rows.
-      await first.srt.prepare({ ...spec, key: { profileId: 'default', sessionId: 'tools' }, workspace: { mode: 'bind', hostPath: join(dir, 'trusted') } });
       const environment = await first.srt.prepare({ ...spec, workspace: { mode: 'bind', hostPath: dir } });
-      await environment.processCommand?.({ sessionId: 's1', cwd: dir, args: [] }).catch(() => undefined);
-      expect(new AgentWritableStore(first.db).load(), 'the session directory is a row').toContain(dir);
+      const refused = await environment.processCommand?.({ sessionId: 's1', cwd: dir, args: [] }).then(() => undefined, (error: unknown) => error as IsolationError);
+      expect([refused?.message, refused?.detail], 'the fixed reason names the program, the detail its file').toEqual(['the directory of this session holds the srt that the app starts outside any sandbox, where its agent could replace it, so the session was not started', join(dir, 'trusted', 'srt')]);
+      expect(new AgentWritableStore(first.db).load(), 'no row for the refused launch').not.toContain(dir);
+      expect(await first.srt.check(), 'the provider can still be used').toEqual({ ok: true });
+      const command = await srtToolEnvironment({ srtBinary: 'srt', settingsDir: join(dir, 'srt-checks'), hostTools: first.tools }).toolCommand(checkLaunch());
+      expect(command.file, 'a check starts the srt of that directory').toBe(join(dir, 'trusted', 'srt'));
+    } finally {
+      first.db.close();
+    }
+  });
+
+  it('refuses a local session there while the Bash sandbox is on, and records nothing', async () => {
+    appPath = join(dir, 'trusted');
+    const first = start();
+    try {
+      const local = new LocalProvider({ sessionFilesDir: sub('local-sessions'), claudeBinary: '/bin/sh', hostTools: first.tools, writable: registry, bashSandbox: () => true });
+      const environment = await local.prepare({ ...spec, workspace: { mode: 'bind', hostPath: dir } });
+      await expect(environment.processCommand?.({ sessionId: 's1', cwd: dir, args: [] }), 'the launch is refused: the directory holds git, srt and the other host programs').rejects.toThrow(/^the directory of this session holds the (git|gh|docker|node|srt) that the app starts outside any sandbox/);
+      expect(new AgentWritableStore(first.db).load(), 'no row for the refused launch').not.toContain(dir);
+    } finally {
+      first.db.close();
+    }
+  });
+
+  it('names the cause, the directories and the command that forgets them for rows that an earlier build or a stored session left, in the provider status, a session and a check', async () => {
+    executable(join(dir, 'trusted', 'claude'), '#!/bin/sh\nexit 0\n');
+    appPath = join(dir, 'trusted');
+    // Rows of a directory of the tools and of its parent: in memory the parent stands for both, the table holds both.
+    const seed = openStore(join(dir, 'app.db'));
+    new AgentWritableStore(seed).record([join(dir, 'trusted'), dir]);
+    seed.close();
+    const first = start();
+    try {
       const status = await first.srt.check();
       expect(status, 'the status names the cause').toMatchObject({ ok: false, reason: 'The sandbox runtime (srt) lies in a directory that an earlier agent launch made writable (such as the home directory)' });
       const fix = status.ok ? '' : (status.fix ?? '');
-      expect(fix, 'the way out names both recorded directories, also the one that memory leaves out, and the command').toContain(`recorded as writable by an agent: ${dir}, ${join(dir, 'trusted')}; after checking that it holds nothing an agent wrote, quit the app and run: sqlite3 '${join(dir, 'app.db')}' "DELETE FROM agent_writable_directories WHERE path IN ('${dir}', '${join(dir, 'trusted')}')"`);
+      expect(fix, 'the way out names both recorded directories, also the one that memory leaves out, and the command, each part one shell word').toContain(`recorded as writable by an agent: ${dir}, ${join(dir, 'trusted')}; after checking that it holds nothing an agent wrote, quit the app and run: sqlite3 '${join(dir, 'app.db')}' 'DELETE FROM agent_writable_directories WHERE path IN ('\\''${dir}'\\'', '\\''${join(dir, 'trusted')}'\\'')'`);
       const local = await new LocalProvider({ sessionFilesDir: sub('local-sessions'), claudeBinary: join(dir, 'trusted', 'claude'), hostTools: first.tools }).check();
       expect(local, 'the local provider names the cause for the Claude CLI').toMatchObject({ ok: false, reason: 'The Claude CLI lies in a directory that an earlier agent launch made writable (such as the home directory)', fix });
       const refused = await srtToolEnvironment({ srtBinary: 'srt', settingsDir: join(dir, 'srt-checks'), hostTools: first.tools }).toolCommand(checkLaunch()).then(() => undefined, (error: unknown) => error as IsolationError);
@@ -303,18 +396,20 @@ describe('a session whose working directory holds the tool directories, such as 
     expect(spawnSync('/bin/sh', ['-c', command], { encoding: 'utf8' }).status, `the command runs: ${command}`).toBe(0);
     const second = start();
     try {
-      expect(await second.srt.check(), 'after the row is forgotten the trusted srt is used again').toEqual({ ok: true });
+      expect(await second.srt.check(), 'after the rows are forgotten the trusted srt is used again').toEqual({ ok: true });
     } finally {
       second.db.close();
     }
   });
 
-  it('names node the same way when srt lies outside the directory and the only node inside it', async () => {
+  it('names node the same way when srt lies outside the recorded directory and the only node inside it', async () => {
     rmSync(join(dir, 'trusted', 'node'));
     appPath = [join(outside, 'bin'), join(dir, 'trusted')].join(':');
+    const seed = openStore(join(dir, 'app.db'));
+    new AgentWritableStore(seed).record([outside]);
+    seed.close();
     const first = start();
     try {
-      await first.srt.prepare({ ...spec, workspace: { mode: 'bind', hostPath: outside } });
       const status = await first.srt.check();
       expect(status, 'the cause for node').toMatchObject({ ok: false, reason: 'The program that runs the sandbox runtime (node) lies in a directory that an earlier agent launch made writable (such as the home directory), so it was not started' });
       expect(status.ok ? '' : status.fix, 'the way out names the directory').toContain(`recorded as writable by an agent: ${outside};`);

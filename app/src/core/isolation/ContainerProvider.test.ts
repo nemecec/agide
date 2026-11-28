@@ -321,10 +321,12 @@ describe('ContainerProvider host-side lookups against what the agent can write',
     expect(planted(), 'the committed client did not run').toBe(false);
   });
 
-  it('says that Docker is not installed when the only client is one the agent can write, and runs none of the committed clients for the check or the cleanup', async () => {
+  it('says that Docker is not installed when the only client lies in a workspace that a launch recorded, and runs none of the committed clients for the check or the cleanup', async () => {
     plant(join(dir, 'work'));
-    const writable = provider({ dockerBinary: 'docker', ...confined(join(dir, 'work')), ownerId: 'o1' });
-    await writable.prepare(spec);
+    fakeDockerClient(join(dir, 'client'));
+    const writable = provider({ dockerBinary: 'docker', ...confined(`${join(dir, 'work')}:${join(dir, 'client')}`), ownerId: 'o1' });
+    await (await writable.prepare(spec)).processCommand?.({ sessionId: 's1', cwd: join(dir, 'work'), args: [] });
+    rmSync(join(dir, 'client'), { recursive: true, force: true });
     expect(await writable.check(), 'check result').toMatchObject({ ok: false, reason: 'Docker is not installed' });
     await writable.removeOrphans();
     expect(planted(), 'the committed client did not run for the check or the cleanup').toBe(false);
@@ -336,38 +338,45 @@ describe('ContainerProvider host-side lookups against what the agent can write',
     const docker = fakeDocker({ containers: ['c1'] });
     mkdirSync(join(dir, 'trusted'));
     writeFileSync(join(dir, 'trusted', 'docker'), readFileSync(docker.binary), { mode: 0o755 });
-    return { docker, scoped: provider({ dockerBinary: 'docker', ...confined(`${join(dir, 'work', 'bin')}:${join(dir, 'trusted')}`), ownerId: 'o1', image: 'agide-fake-image:0', ...options }) };
+    const scoped = provider({ dockerBinary: 'docker', ...confined(`${join(dir, 'work', 'bin')}:${join(dir, 'trusted')}`), ownerId: 'o1', image: 'agide-fake-image:0', ...options });
+    /** The environment of a session that was launched in the workspace, which the launch recorded. */
+    const launched = async () => {
+      const environment = await scoped.prepare(spec);
+      await environment.processCommand?.({ sessionId: 's1', cwd: join(dir, 'work'), args: [] });
+      return environment;
+    };
+    return { docker, scoped, launched };
   };
 
   it('asks the client of the trusted entry, not the committed one, in the check of the provider', async () => {
-    const { docker, scoped } = withPlanted();
-    await scoped.prepare(spec);
+    const { docker, scoped, launched } = withPlanted();
+    await launched();
     expect(await scoped.check(), 'the engine answers and the image is local').toEqual({ ok: true });
     expect(docker.calls().map((call) => call.split(' ')[0]), 'version and the image were asked of the trusted client').toEqual(['version', 'image']);
     expect(planted(), 'the committed client did not run').toBe(false);
   });
 
   it('removes the orphans through the client of the trusted entry, not the committed one', async () => {
-    const { docker, scoped } = withPlanted();
-    await scoped.prepare(spec);
+    const { docker, scoped, launched } = withPlanted();
+    await launched();
     await scoped.removeOrphans();
     expect(docker.calls().map((call) => call.split(' ')[0]), 'the list and the removal went to the trusted client').toEqual(['ps', 'rm']);
     expect(planted(), 'the committed client did not run').toBe(false);
   });
 
   it('kills the container through the client of the trusted entry, not the committed one', async () => {
-    const { docker, scoped } = withPlanted();
-    const environment = await scoped.prepare(spec);
+    const { docker, launched } = withPlanted();
+    const environment = await launched();
     await environment.terminate('s1', 'SIGKILL');
     expect(docker.calls().map((call) => call.split(' ')[0]), 'the kill went to the trusted client').toEqual(['kill']);
     expect(planted(), 'the committed client did not run').toBe(false);
   });
 
-  it('names a configured absolute docker client by its role and base name only when the workspace holds it, with the path in the detail', async () => {
+  it('names a configured absolute docker client by its base name only when the workspace holds it, with the path in the detail', async () => {
     const client = plant(join(dir, 'work', 'bin'));
     const environment = await provider({ dockerBinary: client, ...confined(join(dir, 'work', 'bin')) }).prepare(spec);
     const failure = await environment.processCommand?.({ sessionId: 's1', cwd: join(dir, 'work'), args: [] }).catch((error: unknown) => error);
-    expect([(failure as IsolationError).message, (failure as IsolationError).message.includes('/'), (failure as IsolationError).detail], 'role and base name, no slash, the path in the detail').toEqual(['the docker client (docker) exists only in a directory that an agent may write, or runs code that lies in one, so it was not started', false, client]);
+    expect([(failure as IsolationError).message, (failure as IsolationError).message.includes('/'), (failure as IsolationError).detail], 'the base name, no slash, the path in the detail').toEqual(['the directory of this session holds the docker that the app starts outside any sandbox, where its agent could replace it, so the session was not started', false, client]);
     expect(planted(), 'the committed client did not run').toBe(false);
   });
 

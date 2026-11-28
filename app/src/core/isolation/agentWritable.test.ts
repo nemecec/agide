@@ -1,9 +1,16 @@
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import * as pty from 'node-pty';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentWritableRegistry, agentWritableDirectories, defaultClaudePaths, claudeTempDir, MEMORY_RETRY_MS, sessionWriteAllowances, srtDefaultWritePaths, type AgentWritableMemory } from './agentWritable';
-import { HostTools } from './hostTools';
+import { ContainerProvider } from './ContainerProvider';
+import { HostTools, INCOMPLETE_FIX } from './hostTools';
+import { LocalProvider } from './LocalProvider';
+import { createProfileHostTools } from './profileHostTools';
+import { SrtProvider } from './SrtProvider';
+import { resolveCheckEnvironment } from '../review/capture/checkEnvironment';
 import { isWithinAny } from './hostLaunch';
 import { AGENT_WRITABLE_MODULE, AgentWritableStore } from './agentWritableStore';
 import { buildSrtSettings } from './srtSettings';
@@ -306,7 +313,7 @@ describe('AgentWritableRegistry when its memory fails', () => {
     }
   });
 
-  it('works from memory when the database cannot be read, and takes in its rows when a later read succeeds', () => {
+  it('is incomplete while the database cannot be read, and takes in its rows when a later read succeeds', () => {
     const { state, memory } = flaky();
     state.rows.push('/stored/before');
     state.failing.load = true;
@@ -315,12 +322,61 @@ describe('AgentWritableRegistry when its memory fails', () => {
       let now = 1_000;
       const registry = new AgentWritableRegistry(source, memory, () => now);
       registry.add(['/w/new']);
-      expect(registry.directories(), 'the new directory is excluded').toContain('/w/new');
-      expect(registry.directories(), 'the stored one is not known yet').not.toContain('/stored/before');
+      expect([registry.directories().includes('/w/new'), registry.directories().includes('/stored/before'), registry.complete()], 'the new directory is excluded, the stored one is not known yet, the set is incomplete').toEqual([true, false, false]);
+      expect(String(warn.mock.calls[0]?.[0]), 'the report says that only the fixed directories are searched').toContain('the app looks for programs in the system and install directories only');
       state.failing.load = false;
       now += MEMORY_RETRY_MS;
-      expect(registry.directories(), 'after the wait the stored rows join the set').toEqual(expect.arrayContaining(['/stored/before', '/w/new']));
+      expect(registry.complete(), 'complete after the wait').toBe(true);
+      expect(registry.directories(), 'the stored rows join the set').toEqual(expect.arrayContaining(['/stored/before', '/w/new']));
       expect(state.rows, 'and what was learned meanwhile is written').toContain('/w/new');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('keeps the lookup to the fixed directories while the database cannot be read: a program in a directory that the table holds is not used, by name, by path or through the PATH of a host process', () => {
+    const { state, memory } = flaky();
+    const planted = join(dir, 'planted');
+    for (const place of [join(planted, 'bin'), join(dir, 'fixed')]) {
+      mkdirSync(place, { recursive: true });
+      writeFileSync(join(place, 'git'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    }
+    state.rows.push(planted);
+    state.failing.load = true;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      let now = 1_000;
+      const registry = new AgentWritableRegistry(source, memory, () => now);
+      const tools = new HostTools({ appPath: join(planted, 'bin'), fixedDirectories: [join(dir, 'fixed')], excluded: () => registry.directories(), complete: () => registry.complete() });
+      expect([tools.find('git'), tools.find(join(planted, 'bin', 'git')), tools.path().split(':').includes(join(planted, 'bin')), tools.directories().includes(join(planted, 'bin'))], 'the git of the fixed directory; the planted one neither by name nor by path; the PATH of a host process and the lookup list leave the entry out').toEqual([join(dir, 'fixed', 'git'), undefined, false, false]);
+      rmSync(join(dir, 'fixed', 'git'));
+      expect(() => tools.require('git'), 'the reason says why nothing was found').toThrow('the host program (git) was not started: the directories that agents may write could not be read from the profile database');
+      state.failing.load = false;
+      now += MEMORY_RETRY_MS;
+      expect([tools.find('git'), tools.incomplete()], 'after a read: the table excludes the planted directory').toEqual([undefined, false]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('names the unread table in the status of each provider and in the reason of a check, through the tools of the profile', async () => {
+    const { state, memory } = flaky();
+    state.failing.load = true;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const { tools, writable } = createProfileHostTools({ options: () => ({}), claudeConfigDir: () => undefined, agentRoots: [], memory });
+      expect(tools.incomplete(), 'the tools of the profile read the state of the registry').toBe(true);
+      const host = { hostTools: tools, writable };
+      const srt = await new SrtProvider({ sessionFilesDir: join(dir, 'sessions'), srtBinary: 'agide-no-such-srt', settingsDir: join(dir, 'srt'), claudeBinary: '/bin/sh', ...host }).check();
+      const local = await new LocalProvider({ sessionFilesDir: join(dir, 'local'), claudeBinary: 'agide-no-such-claude', hostTools: tools }).check();
+      const container = await new ContainerProvider({ sessionFilesDir: join(dir, 'container'), dockerBinary: 'agide-no-such-docker', image: 'i', claudeConfigDir: join(dir, 'claude'), user: '1:1', ...host }).check();
+      const cause = 'the directories that agents may write could not be read from the profile database, so only the system and install directories are searched';
+      expect([srt, local, container], 'each status names the cause').toEqual([
+        { ok: false, reason: `The sandbox runtime (srt) was not found: ${cause}`, fix: INCOMPLETE_FIX },
+        { ok: false, reason: `The Claude CLI was not found: ${cause}`, fix: INCOMPLETE_FIX },
+        { ok: false, reason: `Docker was not found: ${cause}`, fix: INCOMPLETE_FIX },
+      ]);
+      expect(resolveCheckEnvironment({ provider: 'srt', bashSandbox: false, profileEnv: {}, srt: { binary: 'agide-no-such-srt', settingsDir: join(dir, 'checks'), hostTools: tools } }), 'a check ends not_run with the cause').toEqual({ kind: 'unavailable', why: `the sandbox runtime was not found: ${cause}` });
     } finally {
       warn.mockRestore();
     }
@@ -387,16 +443,60 @@ describe('AgentWritableStore of a damaged database', () => {
     }
   });
 
-  it('names the database file and quotes every directory in the command that forgets them, and has none for a database in memory', () => {
+  it('names the database file and quotes the whole statement as one shell word in the command that forgets them, and has none for a database in memory', () => {
     const db = openStore(join(dir, 'app.db'));
     const memory = openStore(':memory:');
     try {
-      const command = new AgentWritableStore(db).forgetCommand([join(dir, "it's"), join(dir, 'a"b$c')]) ?? '';
-      expect(command, 'the command').toBe(`sqlite3 '${join(dir, 'app.db')}' "DELETE FROM agent_writable_directories WHERE path IN ('${join(dir, "it''s")}', '${join(dir, 'a\\"b\\$c')}')"`);
+      expect(new AgentWritableStore(db).forgetCommand(['/x/a!b', "/x/it's"]), 'single quotes for the shell around the database and the statement; a quote inside is closed, escaped and opened again').toBe(
+        `sqlite3 '${join(dir, 'app.db')}' 'DELETE FROM agent_writable_directories WHERE path IN ('\\''/x/a!b'\\'', '\\''/x/it'\\'''\\''s'\\'')'`,
+      );
       expect(new AgentWritableStore(memory).forgetCommand(['/x']), 'no file').toBeUndefined();
     } finally {
       db.close();
       memory.close();
     }
   });
+
+  const sqlite = existsSync('/usr/bin/sqlite3') ? it : it.skip;
+  /** Directory names with a quote, a space, `!`, `$` and a backtick, which a shell must not change. */
+  const awkward = (): string[] => [join(dir, "it's here"), join(dir, 'a!b'), join(dir, '$HOME `id`'), join(dir, 'q"r')];
+
+  sqlite.each([
+    ['a plain /bin/sh', undefined],
+    ['an interactive zsh', '/bin/zsh'],
+    ['an interactive bash', '/bin/bash'],
+  ])('forgets exactly the rows it names when the command runs in %s, where `!` would expand inside double quotes', async (_name, interactive) => {
+    const setup = openStore(join(dir, 'app.db'));
+    const store = new AgentWritableStore(setup);
+    store.record([...awkward(), join(dir, 'kept')]);
+    const command = store.forgetCommand(awkward()) ?? '';
+    setup.close();
+    const env = { PATH: '/usr/bin:/bin', HOME: dir, TERM: 'xterm' };
+    if (interactive === undefined) {
+      expect(spawnSync('/bin/sh', ['-c', command], { env, encoding: 'utf8', timeout: 20_000 }).status, 'the command exits 0').toBe(0);
+    } else {
+      // The shell reads the line from a terminal, as it does when the user pastes it; a line it rejects leaves it waiting, which the timer ends.
+      const shell = pty.spawn(interactive, interactive.endsWith('bash') ? ['--norc', '--noprofile', '-i'] : ['-f', '-i'], { cwd: dir, env, cols: 200, rows: 24 });
+      let output = '';
+      const ended = new Promise<void>((resolve) => shell.onExit(() => resolve()));
+      let sent = false;
+      shell.onData((data) => {
+        output += data;
+        if (!sent) {
+          sent = true;
+          shell.write(`${command}; exit\r`);
+        }
+      });
+      const timer = setTimeout(() => shell.kill('SIGKILL'), 15_000);
+      await ended;
+      clearTimeout(timer);
+      expect(output, 'the shell did not reject the line').not.toMatch(/event not found|no such event/);
+    }
+    const check = openStore(join(dir, 'app.db'));
+    try {
+      expect(new AgentWritableStore(check).load(), 'only the row that was not named is left').toEqual([join(dir, 'kept')]);
+    } finally {
+      check.close();
+    }
+  }, 30_000);
 });

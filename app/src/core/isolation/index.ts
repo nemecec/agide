@@ -4,7 +4,7 @@ export { FakeProvider, type FakeCall, type FakeProviderOptions, type FakeStep } 
 export { trustedPath } from './hostLaunch';
 export { AgentWritableRegistry, agentWritableDirectories, sessionWriteAllowances, srtDefaultWritePaths, type AgentWritableMemory } from './agentWritable';
 export { AgentWritableStore } from './agentWritableStore';
-export { HostTools, hostDirectory, hostTools, setHostTools, systemExecFile, systemExecFileSync, systemTool, type HostExecOptions, type SystemToolName } from './hostTools';
+export { HostTools, hostDirectory, hostTools, INCOMPLETE_CAUSE, setHostTools, systemExecFile, systemExecFileSync, systemTool, type HostExecOptions, type SystemToolName } from './hostTools';
 export { createProfileHostTools, type ProfileHostTools } from './profileHostTools';
 export { SrtProvider, findExecutable, srtToolEnvironment, type SrtProviderOptions } from './SrtProvider';
 export { buildSrtSettings, type SrtSettings } from './srtSettings';

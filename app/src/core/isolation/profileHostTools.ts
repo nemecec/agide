@@ -25,9 +25,10 @@ export interface ProfileHostTools {
 /**
  * The host tools of a profile process and the registry they read: no program is looked up in a directory that one of
  * the profile's agents may write, or could write at any time since the memory was made (`AgentWritableRegistry`,
- * built on the list that `buildSrtSettings` takes its allowances from).
+ * built on the list that `buildSrtSettings` takes its allowances from). While the memory cannot be read, programs are
+ * looked up in the fixed directories only.
  */
 export function createProfileHostTools(input: ProfileHostToolsInput): ProfileHostTools {
   const writable = new AgentWritableRegistry(() => ({ claudeConfigDir: input.claudeConfigDir(), extraWritePaths: input.options().extraWritePaths, agentRoots: input.agentRoots }), input.memory);
-  return { tools: new HostTools({ ...(input.appPath === undefined ? {} : { appPath: input.appPath }), excluded: () => writable.directories(), recorded: (paths) => writable.recordedHolding(paths) }), writable };
+  return { tools: new HostTools({ ...(input.appPath === undefined ? {} : { appPath: input.appPath }), excluded: () => writable.directories(), recorded: (paths) => writable.recordedHolding(paths), complete: () => writable.complete() }), writable };
 }

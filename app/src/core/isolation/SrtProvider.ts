@@ -3,7 +3,7 @@ import type { SessionId } from '../session/types';
 import { AgentWritableRegistry } from './agentWritable';
 import { HostEnvironment, signalProcess } from './HostEnvironment';
 import { findExecutable, insideRoute, splitHostVariables } from './hostLaunch';
-import { HostTools, hostDirectory, hostTools, RECORDED_CAUSE } from './hostTools';
+import { HOST_PROGRAMS, HostTools, hostDirectory, hostTools, INCOMPLETE_CAUSE, INCOMPLETE_FIX, RECORDED_CAUSE } from './hostTools';
 import { launchEnv } from './launchEnv';
 import { SessionFiles } from './SessionFiles';
 import { insideArgv, launcherArgv } from './statusLauncher';
@@ -30,7 +30,7 @@ export interface SrtProviderOptions {
   readonly appPath?: string;
   /** Finds `srt` and `node` and gives the host-side PATH. It must read `writable`. Defaults to one over `appPath` that excludes the directories of `writable`. */
   readonly hostTools?: HostTools;
-  /** The directories the agents of the profile may write; this provider adds every workspace, working directory and inbox it launches in. Defaults to a registry of its own. */
+  /** The directories the agents of the profile may write; this provider adds the workspace, the working directory and the inbox of every launch that goes ahead. Defaults to a registry of its own. */
   readonly writable?: AgentWritableRegistry;
   /** Defaults to `resolveClaudeBinary(process.env)`. */
   readonly claudeBinary?: string;
@@ -42,6 +42,10 @@ export interface SrtProviderOptions {
   readonly extraDenyRead?: readonly string[];
   /** The profile database (`<data>/app.db`): a session may not read it or its journal files. */
   readonly profileDatabase?: string;
+  /** The `profiles` directory of the app root: a session may not read the database of any profile below it either. */
+  readonly profilesDirectory?: string;
+  /** Programs the profile configures for the host beyond this provider's own, such as the docker client. */
+  readonly hostPrograms?: () => readonly string[];
 }
 
 export const SRT_INSTALL_FIX = 'Install it with `pnpm add -g @anthropic-ai/sandbox-runtime` and enter its path in the field of this provider.';
@@ -79,7 +83,7 @@ export class SrtProvider implements IsolationProvider {
     this.writable = options.writable ?? new AgentWritableRegistry(() => ({ claudeConfigDir: undefined, extraWritePaths: options.extraWritePaths }));
     // The provider keeps the entries it was built with for every session it starts, also after the profile no longer names them.
     this.writable.add(options.extraWritePaths ?? []);
-    this.tools = options.hostTools ?? new HostTools({ ...(options.appPath === undefined ? {} : { appPath: options.appPath }), excluded: () => this.writable.directories(), recorded: (paths) => this.writable.recordedHolding(paths) });
+    this.tools = options.hostTools ?? new HostTools({ ...(options.appPath === undefined ? {} : { appPath: options.appPath }), excluded: () => this.writable.directories(), recorded: (paths) => this.writable.recordedHolding(paths), complete: () => this.writable.complete() });
     new SessionFiles(options.settingsDir).removeAll();
   }
 
@@ -90,6 +94,7 @@ export class SrtProvider implements IsolationProvider {
       const hidden = this.tools.shadowed(this.options.srtBinary);
       const recorded = hidden === undefined ? undefined : this.tools.recordedFor(hidden);
       if (recorded !== undefined) return Promise.resolve({ ok: false, reason: `The sandbox runtime (srt) ${RECORDED_CAUSE}`, fix: recorded });
+      if (hidden === undefined && this.tools.incomplete()) return Promise.resolve({ ok: false, reason: `The sandbox runtime (srt) was not found: ${INCOMPLETE_CAUSE}`, fix: INCOMPLETE_FIX });
       return Promise.resolve({ ok: false, reason: hidden === undefined ? named : 'The sandbox runtime (srt), or the code it runs, lies in a directory that an agent may write', fix: SRT_INSTALL_FIX });
     }
     try {
@@ -106,7 +111,8 @@ export class SrtProvider implements IsolationProvider {
 
   prepare(spec: EnvironmentSpec): Promise<AgentEnvironment> {
     const id = ['srt', spec.key.profileId, spec.key.sessionId].filter(Boolean).join(':');
-    this.writable.add([spec.workspace.mode === 'bind' ? spec.workspace.hostPath : undefined, spec.profile.claudeConfigDir]);
+    // The Claude directory of the profile is writable for every session; the directories of a launch are recorded when it goes ahead (`processCommand`).
+    this.writable.add([spec.profile.claudeConfigDir]);
     let environment = this.environments.get(id);
     if (environment) environment.spec = spec;
     else {
@@ -194,9 +200,11 @@ class SrtEnvironment extends HostEnvironment {
     if (workspace.mode !== 'bind') throw new IsolationError('unsupported', 'srt runs in a host directory only');
     const inbox = this.inboxes.get(launch.sessionId);
     const writeDirs = [workspace.hostPath, launch.cwd, ...(inbox === undefined ? [] : [inbox])];
-    this.writable.add([...writeDirs, profile.claudeConfigDir]);
+    // The programs are looked up as if the launch were recorded, and the launch is recorded only when it goes ahead: a session in a directory that holds srt, node or the CLI is refused and leaves no row.
+    this.tools.refuseHolding(writeDirs, [this.options.srtBinary, this.claudeBinary, ...HOST_PROGRAMS, ...(this.options.hostPrograms?.() ?? [])]);
     const env = launchEnv(profile, this.paths.toEnv, launch.env);
-    const host = hostStart(this.tools, this.options.srtBinary, [], env);
+    const host = hostStart(this.tools, this.options.srtBinary, writeDirs, env);
+    this.writable.add([...writeDirs, profile.claudeConfigDir]);
     const settings = buildSrtSettings({
       writeDirs,
       claudeConfigDir: profile.claudeConfigDir,
@@ -204,6 +212,7 @@ class SrtEnvironment extends HostEnvironment {
       ...(this.options.extraWritePaths === undefined ? {} : { extraWritePaths: this.options.extraWritePaths }),
       ...(this.options.extraDenyRead === undefined ? {} : { extraDenyRead: this.options.extraDenyRead }),
       ...(this.options.profileDatabase === undefined ? {} : { profileDatabase: this.options.profileDatabase }),
+      ...(this.options.profilesDirectory === undefined ? {} : { profilesDirectory: this.options.profilesDirectory }),
     });
     const settingsPath = this.settings.writePrivate(launch.sessionId, SETTINGS_FILE, JSON.stringify(settings));
     this.sessions.add(launch.sessionId);

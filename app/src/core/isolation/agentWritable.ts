@@ -92,9 +92,10 @@ function outermost(paths: readonly string[]): string[] {
 
 /**
  * The one set of directories that the sandboxed agents of a profile process may write. The host tools
- * (`hostTools.ts`) read it at each lookup. The srt and container providers add what a launch makes writable (the
- * workspace, the working directory and the hook inbox, the Claude directory a container mounts) before they start the
- * program, and the session module adds the directory of the hook inboxes. Each lookup also takes in what the profile
+ * (`hostTools.ts`) read it at each lookup. The srt and container providers, and the local provider while the profile's
+ * Bash sandbox is on, add what a launch makes writable (the workspace, the working directory and the hook inbox, the
+ * Claude directory a container mounts) when the launch goes ahead, and the session module adds the directory of the
+ * hook inboxes. Each lookup also takes in what the profile
  * says at that moment (`extraWritePaths`, the Claude directory, the task base), read once per turn of the event loop. A
  * directory is never removed: what an agent planted there stays after its session ends, after the option that allowed
  * it is removed and after a restart. With `memory` every directory is kept in the profile database and loaded again at
@@ -135,6 +136,12 @@ export class AgentWritableRegistry {
     this.readSource();
     this.sync();
     return [...this.rows];
+  }
+
+  /** False while the memory has not been read: the set then lacks the directories of earlier runs (`HostTools` searches the fixed directories only). */
+  complete(): boolean {
+    this.sync();
+    return this.memory === undefined || this.loaded;
   }
 
   /**
@@ -212,6 +219,7 @@ export class AgentWritableRegistry {
   private report(what: string, error: unknown): void {
     if (this.reported.has(what)) return;
     this.reported.add(what);
-    console.warn(`The directories that agents may write could not be ${what} the profile database; the app keeps them in memory and tries again later: ${error instanceof Error ? error.message : String(error)}`);
+    const meanwhile = this.loaded ? 'the app keeps them in memory' : 'until a read succeeds the app looks for programs in the system and install directories only';
+    console.warn(`The directories that agents may write could not be ${what} the profile database; ${meanwhile} and tries again later: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

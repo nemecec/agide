@@ -43,12 +43,13 @@ export async function init(
   const { port } = await mcp.start();
   const appRoot = ctx.profile?.root ?? ctx.dataDir;
   const paths = profilePaths(appRoot, deps.profile.id);
-  // Every host-side program of this process (git, docker, srt, node, the system tools) is found through these tools, outside the directories the profile's agents may write: those of `writable`, which the providers extend with every launch. The registry keeps every directory it learns in the profile database, so a closed session, a removed option, a moved task base and a restart forget none.
+  // Every host-side program of this process (git, docker, srt, node, the system tools) is found through these tools, outside the directories the profile's agents may write: those of `writable`, which the providers extend with every launch that goes ahead. The registry keeps every directory it learns in the profile database, so a closed session, a removed option, a moved task base and a restart forget none.
+  const memory = new AgentWritableStore(ctx.db);
   const host = createProfileHostTools({
     options: () => readIsolationOptions(deps.profile.settings().isolation.options),
     claudeConfigDir: () => profileLaunchSpec(deps.profile.settings(), paths, process.env).claudeConfigDir,
     agentRoots: [taskBaseDir()],
-    memory: new AgentWritableStore(ctx.db),
+    memory,
   });
   const { writable } = host;
   const restoreTools = setHostTools(host.tools);
@@ -59,6 +60,8 @@ export async function init(
     dataDir: ctx.dataDir,
     options: () => deps.profile.settings().isolation.options,
     ...(database === undefined ? {} : { profileDatabase: database }),
+    profilesDirectory: join(appRoot, 'profiles'),
+    bashSandbox: () => permissions.settings().network.bashSandbox,
     host,
   });
   const providerOf = () => providers.get(deps.profile.settings().isolation.provider);
@@ -81,8 +84,8 @@ export async function init(
 
   // The hook inbox of every session lies in this directory: one row for all of them.
   writable.add([eventsDir]);
-  // A session of the store that ran under a confining provider may have been launched by a build that recorded nothing, and what its agent wrote is still there. Under `local` an agent writes with the rights of the user, so a record protects nothing there and a session in the home directory would exclude every program below it.
-  if (deps.profile.settings().isolation.provider !== 'local') writable.add(sessions.list().map((session) => session.cwd));
+  // Every launch that a provider records writes its row when it goes ahead. The sessions stored by a build without the table were never recorded: their directories are added once, at the start that makes the table, when the profile then uses `srt` or `container`. A later start adds none, so a row that the user forgets stays forgotten.
+  if (memory.created && deps.profile.settings().isolation.provider !== 'local') writable.add(sessions.list().map((session) => session.cwd));
 
   // The leaf each session owns. Only that leaf drives the session: any other leaf with the same surface id is
   // ignored, so a copied or forged leaf cannot move, rescope or close a session.

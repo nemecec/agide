@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FAKE_CLAUDE_SCRIPT, streamHarness, type StreamHarness, type StreamHarnessOptions } from '../fixtures/streamHarness';
 import type { NdjsonItem } from './ndjson';
 import { contractSpec } from './agentRuntimeContract';
@@ -679,6 +679,42 @@ describe('a process that ends', () => {
       firstMessage: 'x',
     };
     await expect(runtime.launch(spec), 'a spawn failure that names the reason').rejects.toMatchObject({ code: 'spawn', message: expect.stringContaining('cannot run a process without a terminal') });
+  });
+
+  it('writes the names of the variables that do not reach the program to the log of the app, without their values, as a PTY session does', async () => {
+    const runtime = new StreamAgentRuntime({
+      sessions: {
+        create: async (input) => {
+          await runtime.spawn({
+            session: { id: input.id!, cwd: '/work' } as never,
+            resume: false,
+            args: [],
+            env: { NOT_CARRIED: 'value-that-stays-out' },
+            environment: {
+              provider: 'srt',
+              // A relative file stops the launch before anything starts; the log line comes first.
+              processCommand: () => Promise.resolve({ file: 'not-started', args: [], cwd: '/work', env: {}, dropped: ['NOT_CARRIED', 'BASH_FUNC_x%%'] }),
+            } as never,
+          });
+          throw new Error('unreachable');
+        },
+        resume: async () => {
+          throw new Error('unused');
+        },
+        get: () => undefined,
+        close: async () => undefined,
+        setPermissionMode: () => undefined,
+      },
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      await runtime.launch({ sessionId: 'agent-1', folderId: 'f', title: 't', cwd: '/work', model: 'haiku', effort: 'low', permissionMode: 'default', maxBudgetUsd: 0.1, maxTurnsPerMessage: 1, connectors: false, denyRules: [], addDirs: [], firstMessage: 'x' }).catch(() => undefined);
+      const lines = warn.mock.calls.map((call) => String(call[0]));
+      expect(lines, 'one line with the session and the names').toContain('session agent-1: variables of the launch that do not reach the program: NOT_CARRIED, BASH_FUNC_x%%');
+      expect(lines.some((line) => line.includes('value-that-stays-out')), 'no value').toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

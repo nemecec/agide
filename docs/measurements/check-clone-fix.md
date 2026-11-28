@@ -870,3 +870,61 @@ Docker (no engine here). The independent review of the tenth pass is open.
 ### Leftovers
 
 `/tmp/agide-check-clone-fix-10/` (the patch of the ninth pass, logs, the scratch measurement, a dry-check script, the snapshot of mutated files, the directory `nobin`) could not be removed by this pass: the permission system refused the removal, and it is left for the coordinator. The test suite leaves small `agents-tail-*` and `agide-cap-*` directories in the system temporary directory; the tests of this pass do not create them.
+
+## Eleventh pass: check-clone-fix-11
+
+Start: 2026-11-28 09:38 UTC (`date -u`). End: 2026-11-28 10:36 UTC.
+
+The last pass of the hardening. It closes the two majors and the six minors of the independent review of the tenth pass (`docs/measurements/review-check-clone-fix-10.md`) inside the structure of the earlier passes. The eighth to tenth passes were committed before it started (HEAD `bff24b9`).
+
+### What was built
+
+- **The `local` provider and the Bash sandbox.** `LocalProvider` records the workspace, the working directory and the inbox of each launch while the profile's Bash sandbox is on (`LocalProviderOptions.writable`, `bashSandbox`, `hostPrograms`; `ProviderSetup.bashSandbox`, which the session module reads from the permission settings). A check of such a profile runs under `srt`, and its agent writes its workspace through the Bash sandbox and through Edit and Write, so a `srt`, `node` or `git` that it plants there no longer runs outside the sandbox at the next check or capture. Without the Bash sandbox nothing is recorded and the check runs unconfined, as before.
+- **Refusal before recording.** Every recording provider looks the programs of a launch up as if the launch were recorded and records it only when it goes ahead. `HostTools.refuseHolding(directories, programs)` refuses a launch whose directories hold the only usable copy of the CLI, the configured `srt` or `docker`, `git`, `gh` or `node`, with a fixed reason and the path in the detail, and the launch leaves no row. `SrtProvider.prepare` records only the Claude directory of the profile; the container provider records its mounts after the refusal. A session in the home directory is refused under `srt`, `container` and `local` with the Bash sandbox, so a quick session there no longer locks the profile out of its tools. A program that the directories hold while another copy exists elsewhere is no reason; the app uses the other copy.
+- **Stored sessions.** The session module adds the working directories of the stored sessions only once, at the start that makes the table (`AgentWritableStore.created`), and only when the profile then uses `srt` or `container`. Every later row comes from a launch, so the printed `sqlite3` command forgets a row for good.
+- **The unread table fails closed.** While the first read of the table fails, `HostTools` searches the fixed directories only (by name and by configured path), the host-side PATH holds the system directories only, and a refusal, the status of each provider and the reason of a check name the cause (`INCOMPLETE_CAUSE`, `INCOMPLETE_FIX`, `AgentWritableRegistry.complete`, `HostToolsOptions.complete`).
+- **The databases of every profile.** `buildSrtSettings` denies an `srt` session the database and journal files of every profile as glob entries below `<app root>/profiles` (`profilesDirectory`), in both spellings of that directory.
+- **The forget command.** The database path and the statement are each one word in single quotes for the shell. Measured on this host through a terminal: the old form fails in an interactive zsh with `event not found` for a directory with `!`; the new form deletes exactly the named rows in `/bin/sh`, an interactive zsh and an interactive bash, with `!`, a single quote, a space, `$` and a backtick in the names.
+- **Dropped names.** `logDropped` in `hostTools.ts` writes the dropped names of a launch for PTY sessions and stream-json agents alike.
+- **The guard.** Outside the wiring files `HostTools` may be imported as a type only, so TypeScript refuses it as a value in an object literal, an arrow or a conditional; the guard flags a value import, a member of a namespace or module, a destructuring, `typeof HostTools`, any `.constructor`, `Object.create` and `setPrototypeOf`, a compound assignment, a member assignment after `!` or through a cast, `Object.setPrototypeOf`, a destructured parameter and a `catch` binding of `command` in the files that spawn it, and `process.dlopen`, a computed member, a destructuring and a `Reflect` call on `process` and a `Worker` from a `data:` URL. Each new spelling was also applied to a real source by a mutation entry and flagged.
+
+### Surface checked
+
+- **Cost of a lookup as launches accumulate.** A launch adds at most two `find` calls for each program of its list (the CLI, `srt`, `docker`, `git`, `gh`, `node`); each reuses the file found before and the spellings of the set computed once per turn. A launch below the task base still adds no row. A `local` session with the Bash sandbox in the default directory (`~/Agide/<folder id>`) adds one sibling row per folder, the case measured in the tenth pass (15 ms for one `find` and one `path` at 1000 rows). `complete()` returns at once once the table was read.
+- **Ways to lose a directory or serve a stale answer.** A refused launch has no row and no agent ran. The one-time add of the stored sessions is decided by the table being made at that start: when its write fails and the app ends before a later write succeeds, those directories are lost (stated in 0040 item 9 among what is not covered: the sessions of a build without the table). A table whose existence cannot be read counts as existing, so nothing is added. The Bash sandbox is read at each launch; a session that ran while it was off is not covered. While the table is unread, rows of earlier runs are unknown, so the lookup is limited to the fixed directories.
+- **Channels from a profile value to an argument.** No command or argument was changed. The configured programs are only looked up; the forget command is text in the provider status; the dropped names are names; the profiles directory goes into the settings file of `srt`.
+
+### Changed files and functions
+
+Source: `core/isolation/agentWritable.ts` (`AgentWritableRegistry.complete`, `report`, class comment), `agentWritableStore.ts` (`tableExists`, `shellWord`, `sqlText`, `AgentWritableStore.created`, constructor, `forgetCommand`), `hostTools.ts` (`logDropped`, `HostToolsOptions.complete`, `INCOMPLETE_CAUSE`, `INCOMPLETE_FIX`, `HOST_PROGRAMS`, `HostTools.appPath`, `incomplete`, `usable`, `refusal`, `refuseHolding`), `profileHostTools.ts` (`createProfileHostTools`), `SrtProvider.ts` (`SrtProviderOptions.profilesDirectory`, `hostPrograms`, constructor, `check`, `prepare`, `SrtEnvironment.processCommand`), `ContainerProvider.ts` (`ContainerProviderOptions.hostPrograms`, constructor, `check`, `prepare`, `dockerCommand`), `LocalProvider.ts` (`LocalProviderOptions.writable`, `bashSandbox`, `hostPrograms`, `check`, `prepare`, `LocalEnvironment`), `defaultProviders.ts` (`ProviderSetup.profilesDirectory`, `bashSandbox`, `configuredPrograms`, `buildIsolatingProvider`, `ConfiguredProviders`), `srtSettings.ts` (`SrtSettingsInput.profilesDirectory`, `DATABASE_SUFFIXES`, `profileDatabaseFiles`, `buildSrtSettings`), `index.ts` (export of `INCOMPLETE_CAUSE`), `core/review/capture/checkEnvironment.ts` (`resolveCheckEnvironment`, `unavailable`), `core/session/PtySessionService.ts` (launch), `core/swarm/runtime/StreamAgentRuntime.ts` (`spawn`), `main/modules/session.ts` (`init`).
+
+Tests: `agentWritable.test.ts`, `agentWritableLaunch.test.ts`, `SrtProvider.test.ts`, `ContainerProvider.test.ts`, `srtSettings.test.ts`, `hostToolsGuard.test.ts`, `swarm/runtime/StreamAgentRuntime.test.ts`, `main/modules/sessionWritable.test.ts`.
+
+Other: `scripts/mutation-checks.mjs` (entries whose text changed rewritten, entries for each decision added), 0040 section 6 ("Isolation", item 6 with the table, "Persistence", "The `local` provider and the Bash sandbox", "Refusal before recording", "Stored sessions", "Recovery", "Who can read the table", item 7, item 9), 0041, 0042 (the tenth review row, the row of the eleventh pass, the open row), `app/README.md`.
+
+### Checks run
+
+| Check | Result |
+|---|---|
+| `pnpm typecheck` | passes |
+| `vitest run --coverage` with the real `srt` (`AGIDE_SRT_BIN`), `python3`, the Gradle test `resolves a dependency offline` left out with `-t` (it fails on the JDK of this host on the unchanged tree) | 284 files pass, 4047 tests pass, 2 expected failures, 17 skipped; `src/core` lines 97.37 (threshold 97), `src/core/review` 98.58 |
+| CI-like run (`/tmp/agide-check-clone-fix-11/nobin` with only a link `node`, PATH limited to it and the system directories, no `srt`, no Docker) | 283 files pass and 1 is skipped, 3895 tests pass, 169 skipped, 2 expected failures; `src/core` lines 97.37 (threshold 97), `src/core/review` 98.61 |
+| `pnpm build` | passes |
+| `AGIDE_HIDDEN=1 pnpm e2e` | 86 pass |
+| `pnpm parity` | ok, `docs/parity.md` unchanged |
+| `pnpm check:colours` | no literal outside the allowlist |
+| Real-tool tests under a job-control terminal (`script -q /dev/null bash -i -c '…'`, real `srt` 0.0.83): `statusLauncher.test.ts`, `toolCommand.test.ts`, `SrtProvider.test.ts`, `agentWritableLaunch.test.ts`, `agentWritable.test.ts`, `ProcessCheckExecutor.srt.test.ts`, `sessionWritable.test.ts` | 386 pass, 1 skipped |
+| Mutation entries of the changed areas (filter `local: `, `stored: `, `refuse: `, `unread: `, `db read: `, `forget: `, `dyld: `, `spawn guard: `, `registry: `, `check env: a hidden`, `durable: the session module`) | 138 entries: 133 killed, 5 survived (the default tools of the srt provider, which the refusal of a launch made untested, and three `unread:` entries whose test had not been written); after a test for each, the 11 entries rerun are all killed |
+| Entries not rerun | every entry of other areas; the full `pnpm mutation` was not run. A dry check finds the text of all 772 entries exactly once; after the runs every changed file has the checksum it had before the mutation run (`shasum -c`), and a file mutated by hand was restored and compared with `cmp` |
+
+### What took long
+
+The mutation subset (about 11 minutes), during which no other test could run, and the full coverage runs. Many tests of the earlier passes used `prepare` as the moment a workspace is recorded and had to launch instead.
+
+### What was not verified
+
+Docker (no engine here). The independent review of the eleventh pass is open.
+
+### Leftovers
+
+`/tmp/agide-check-clone-fix-11/` (the directory `nobin`, the logs of the coverage, e2e, mutation and terminal runs, a dry-check script of the mutation list, a checksum list, the pty probe of the shells) could not be removed: the permission system refused the removal, and it is left for the coordinator.

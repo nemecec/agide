@@ -93,6 +93,15 @@ export function requireAbsoluteFile(command: { readonly file: string }): void {
   if (!isAbsolute(command.file)) throw new IsolationError('invalid', 'a command that starts on the host names its program by an absolute path');
 }
 
+/**
+ * Writes one line to the log of the app for a launch of a session whose command leaves variables of the profile out
+ * (`PtyCommand.dropped`: names that are not shell identifiers, the shell's own names, `DYLD_` names): names only, never
+ * a value. A session has no log file of its own; the PTY sessions and the stream-json agents both call it.
+ */
+export function logDropped(sessionId: string, command: { readonly dropped?: readonly string[] | undefined }): void {
+  if (command.dropped !== undefined && command.dropped.length > 0) console.warn(`session ${sessionId}: variables of the launch that do not reach the program: ${command.dropped.join(', ')}`);
+}
+
 export interface HostToolsOptions {
   /** The PATH the programs are looked up on: the app's own, never the profile's or a checkout's. Default `process.env.PATH`, read at each lookup. */
   readonly appPath?: string | undefined;
@@ -105,10 +114,28 @@ export interface HostToolsOptions {
   readonly fixedDirectories?: readonly string[];
   /** For a refused program: the directories recorded at a launch that hold it and how to forget them (`AgentWritableRegistry.recordedHolding`). */
   readonly recorded?: (paths: readonly string[]) => string | undefined;
+  /**
+   * False while `excluded` lacks the directories of earlier runs (`AgentWritableRegistry.complete`: the profile database
+   * could not be read). Until then a program is used only from the fixed directories and a host-side PATH holds the
+   * system directories only. Default: always complete.
+   */
+  readonly complete?: () => boolean;
 }
 
 /** The cause in the reason of a program that a directory recorded at a launch holds. */
 export const RECORDED_CAUSE = 'lies in a directory that an earlier agent launch made writable (such as the home directory)';
+
+/** The cause in the reason of a program that is not found while the directories of earlier runs are unknown. */
+export const INCOMPLETE_CAUSE = 'the directories that agents may write could not be read from the profile database, so only the system and install directories are searched';
+
+/** The way out of `INCOMPLETE_CAUSE` for the status of a provider. */
+export const INCOMPLETE_FIX = 'The app reads the profile database again after a short wait; the log of the app names the error of the database.';
+
+/**
+ * The programs that the app always looks up by name on the host. With the configured ones (the Claude CLI, `srt`,
+ * `docker`), a launch may not make the only usable copy of one writable (`HostTools.refuseHolding`).
+ */
+export const HOST_PROGRAMS: readonly string[] = ['git', 'gh', 'node'];
 
 /** A shim larger than this is not read for the script it names. */
 const SHIM_MAX_BYTES = 16 * 1024;
@@ -159,8 +186,15 @@ export class HostTools {
 
   constructor(private readonly options: HostToolsOptions) {}
 
+  /** The app's PATH; empty while the set is incomplete, so only the fixed directories are searched. */
   private appPath(): string | undefined {
+    if (this.incomplete()) return '';
     return this.options.appPath ?? process.env['PATH'];
+  }
+
+  /** True while the excluded set lacks the directories of earlier runs (`HostToolsOptions.complete`). */
+  incomplete(): boolean {
+    return this.options.complete?.() === false;
   }
 
   private fixed(): readonly string[] {
@@ -186,7 +220,7 @@ export class HostTools {
   }
 
   private usable(file: string, excluded: readonly string[]): boolean {
-    return executable(file) && !runsExcludedCode(file, excluded);
+    return executable(file) && !runsExcludedCode(file, excluded) && (!this.incomplete() || isWithinAny(file, this.fixed()));
   }
 
   /** The absolute file of `binary`, or undefined when no trusted directory holds a usable one. A path with a directory part is made absolute and checked the same way. */
@@ -232,6 +266,7 @@ export class HostTools {
     const named = `${purpose} (${basename(binary)})`;
     const hidden = this.shadowed(binary, extra);
     if (hidden !== undefined) return this.hidden(named, hidden);
+    if (this.incomplete()) return new IsolationError('failed', `${named} was not started: ${INCOMPLETE_CAUSE}`, binary.includes('/') ? resolve(binary) : undefined);
     if (binary.includes('/')) return new IsolationError('failed', `${named} is not an executable file at the configured path`, resolve(binary));
     return new IsolationError('failed', `${named} was not found as an executable on the trusted PATH of the app (the absolute entries outside the directories that an agent may write)`);
   }
@@ -269,6 +304,22 @@ export class HostTools {
     for (const directory of shimDirectories(file)) {
       const beside = join(directory, binary);
       if (executable(beside) && runsExcludedCode(beside, excluded)) throw this.hidden(`${purpose} (${basename(binary)})`, beside);
+    }
+  }
+
+  /**
+   * Throws for a launch whose `directories` hold the only usable copy of one of `binaries`: once they are recorded no
+   * lookup would find the program again (a session in the home directory holds the pnpm `srt`, an nvm `node` and
+   * `~/.local/bin/claude`), and the agent of the launch could replace it. A program that is also found elsewhere, or
+   * not at all, is no reason: the lookup uses the other copy once the directories are recorded. The reason names the
+   * base name; the path goes to the detail.
+   */
+  refuseHolding(directories: readonly string[], binaries: readonly string[]): void {
+    for (const binary of new Set(binaries)) {
+      const file = this.find(binary);
+      if (file !== undefined && this.find(binary, directories) === undefined) {
+        throw new IsolationError('failed', `the directory of this session holds the ${basename(binary)} that the app starts outside any sandbox, where its agent could replace it, so the session was not started`, file);
+      }
     }
   }
 

@@ -54,6 +54,19 @@ describe('buildSrtSettings', () => {
     }
   });
 
+  it('denies reading the database files of every profile below the profiles directory, as globs in both spellings of the directory', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'srt-profiles-'));
+    mkdirSync(join(dir, 'profiles'));
+    try {
+      const { denyRead } = buildSrtSettings({ ...base, profileDatabase: join(dir, 'profiles', 'p1', 'data', 'app.db'), profilesDirectory: join(dir, 'profiles') }).filesystem;
+      const patterns = (root: string): string[] => ['app.db', 'app.db-wal', 'app.db-shm', 'app.db-journal'].map((name) => join(root, 'profiles', '*', 'data', name));
+      expect(denyRead, 'a pattern for each file of a database of any profile, under the spelling given and under the real directory').toEqual(expect.arrayContaining([...patterns(dir), ...patterns(realpathSync(dir))]));
+      expect(buildSrtSettings({ ...base, profilesDirectory: join(dir, 'profiles') }).filesystem.denyRead, 'no pattern without the name of the database').toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('allows the resolved form of a workspace that is a link, because Seatbelt matches resolved paths', () => {
     const { allowWrite } = buildSrtSettings({ ...base, writeDirs: ['/tmp'] }).filesystem;
     expect(allowWrite, 'tmp and its target').toEqual(expect.arrayContaining(['/tmp', '/private/tmp']));

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { AgentWritableRegistry } from './agentWritable';
 import { buildDockerRunArgs, containerEnvNames, containerName, CONTAINER_RUN_FLAGS, type Mount } from './dockerArgs';
 import { HostEnvironment, signalProcess } from './HostEnvironment';
-import { hostDirectory, HostTools } from './hostTools';
+import { HOST_PROGRAMS, hostDirectory, HostTools, INCOMPLETE_CAUSE, INCOMPLETE_FIX } from './hostTools';
 import { launchEnv } from './launchEnv';
 import { SessionFiles } from './SessionFiles';
 import type { SessionId } from '../session/types';
@@ -43,8 +43,10 @@ export interface ContainerProviderOptions {
   readonly appPath?: string;
   /** Finds the docker client. It must read `writable`. Defaults to one over `appPath` that excludes the directories of `writable`. */
   readonly hostTools?: HostTools;
-  /** The directories the agents of the profile may write; this provider adds its Claude directory and every directory it mounts writable. Defaults to a registry of its own. */
+  /** The directories the agents of the profile may write; this provider adds its Claude directory and every directory it mounts writable for a launch that goes ahead. Defaults to a registry of its own. */
   readonly writable?: AgentWritableRegistry;
+  /** Programs the profile configures for the host beyond the docker client, such as `srt` and the Claude CLI. */
+  readonly hostPrograms?: () => readonly string[];
 }
 
 export const DEFAULT_HOST_ALIAS = 'host.docker.internal';
@@ -81,12 +83,13 @@ export class ContainerProvider implements IsolationProvider {
   constructor(readonly options: ContainerProviderOptions) {
     this.writable = options.writable ?? new AgentWritableRegistry(() => ({ claudeConfigDir: options.claudeConfigDir }));
     this.writable.add([options.claudeConfigDir]);
-    this.tools = options.hostTools ?? new HostTools({ ...(options.appPath === undefined ? {} : { appPath: options.appPath }), excluded: () => this.writable.directories() });
+    this.tools = options.hostTools ?? new HostTools({ ...(options.appPath === undefined ? {} : { appPath: options.appPath }), excluded: () => this.writable.directories(), complete: () => this.writable.complete() });
   }
 
   async check(): Promise<ProviderCheck> {
     const { dockerBinary, image } = this.options;
     if (this.tools.find(dockerBinary) === undefined) {
+      if (this.tools.incomplete()) return { ok: false, reason: `Docker was not found: ${INCOMPLETE_CAUSE}`, fix: INCOMPLETE_FIX };
       return { ok: false, reason: 'Docker is not installed', fix: 'Install Docker Desktop, or enter the docker path in the field of this provider.' };
     }
     try {
@@ -118,7 +121,6 @@ export class ContainerProvider implements IsolationProvider {
 
   prepare(spec: EnvironmentSpec): Promise<AgentEnvironment> {
     const id = ['container', spec.key.profileId, spec.key.sessionId].filter(Boolean).join(':');
-    if (spec.workspace.mode === 'bind') this.writable.add([spec.workspace.hostPath]);
     let environment = this.environments.get(id);
     if (environment) environment.spec = spec;
     else {
@@ -175,8 +177,11 @@ class ContainerEnvironment extends HostEnvironment {
       ...(profile.ghConfigDir === undefined ? [] : [{ hostPath: profile.ghConfigDir, readOnly: true }]),
       ...profile.toolFiles.map((file) => ({ hostPath: file.hostPath, readOnly: true })),
     ];
+    const writableMounts = mounts.filter((mount) => !mount.readOnly).map((mount) => mount.hostPath);
+    // Recorded only when the launch goes ahead: a workspace that holds the only docker, git or node of the app is refused and leaves no row.
+    this.tools.refuseHolding(writableMounts, [this.options.dockerBinary, ...HOST_PROGRAMS, ...(this.options.hostPrograms?.() ?? [])]);
     for (const mount of mounts) if (!mount.readOnly || mount.hostPath === this.files.dirOf(launch.sessionId)) mkdirSync(mount.hostPath, { recursive: true, mode: 0o700 });
-    this.writable.add(mounts.filter((mount) => !mount.readOnly).map((mount) => mount.hostPath));
+    this.writable.add(writableMounts);
     this.sessions.add(launch.sessionId);
 
     const env = launchEnv({ ...profile, claudeConfigDir: claudeDir }, this.paths.toEnv, launch.env);

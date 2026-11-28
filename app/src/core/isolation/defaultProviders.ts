@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { CommandError, type CommandRegistry } from '../commands/index';
 import type { ProfileService } from '../profile/types';
 import { describeProvider } from './capabilityStatement';
+import { resolveClaudeBinary } from '../session/env';
 import { ContainerProvider, ownerIdOf } from './ContainerProvider';
 import type { ProfileHostTools } from './profileHostTools';
 import { readIsolationOptions, type IsolationOptions } from './providerOptions';
@@ -20,6 +21,10 @@ export interface ProviderSetup {
   readonly options: () => unknown;
   /** The profile database, which an srt session may not read. */
   readonly profileDatabase?: string;
+  /** The `profiles` directory of the app root: an srt session may not read the database of any profile. */
+  readonly profilesDirectory?: string;
+  /** The profile's Bash sandbox: while it is on, the local provider records its launches in `host.writable`. */
+  readonly bashSandbox?: () => boolean;
   /**
    * The host tools of the profile process and the registry they read (`createProfileHostTools`), as one value: every
    * provider gets both or neither, so no provider adds its launches to a registry that the tools do not read. Without
@@ -29,6 +34,12 @@ export interface ProviderSetup {
 }
 
 const hostToolOptions = (setup: ProviderSetup) => (setup.host === undefined ? {} : { hostTools: setup.host.tools, writable: setup.host.writable });
+
+/** The programs that the profile configures for the host: the `srt` of its sessions and checks, the docker client and the Claude CLI. A launch may not hold the only copy of one (`HostTools.refuseHolding`). */
+function configuredPrograms(setup: ProviderSetup): string[] {
+  const options = readIsolationOptions(setup.options());
+  return [options.srtBinary ?? process.env['AGIDE_SRT_BIN'] ?? 'srt', options.dockerBinary ?? 'docker', resolveClaudeBinary(process.env)];
+}
 
 /** The providers a profile can choose. `fake`, `openshell` and `ssh` are not offered. */
 export const CHOOSABLE_PROVIDERS: readonly ProviderId[] = ['local', 'srt', 'container'];
@@ -41,9 +52,11 @@ export function buildIsolatingProvider(id: ProviderId, setup: ProviderSetup, opt
       srtBinary: options.srtBinary ?? process.env['AGIDE_SRT_BIN'] ?? 'srt',
       settingsDir: join(setup.dataDir, 'isolation', 'srt'),
       ...hostToolOptions(setup),
+      hostPrograms: () => configuredPrograms(setup),
       ...(options.extraWritePaths === undefined ? {} : { extraWritePaths: options.extraWritePaths }),
       ...(options.extraDenyRead === undefined ? {} : { extraDenyRead: options.extraDenyRead }),
       ...(setup.profileDatabase === undefined ? {} : { profileDatabase: setup.profileDatabase }),
+      ...(setup.profilesDirectory === undefined ? {} : { profilesDirectory: setup.profilesDirectory }),
     });
   }
   if (id !== 'container') throw new IsolationError('unsupported', `the isolation provider ${id} is not built from options`);
@@ -55,13 +68,19 @@ export function buildIsolatingProvider(id: ProviderId, setup: ProviderSetup, opt
     user: `${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`,
     ownerId: ownerIdOf(setup.dataDir),
     ...hostToolOptions(setup),
+    hostPrograms: () => configuredPrograms(setup),
   });
 }
 
 /** The providers of a profile process, with the setup they are built from, so the commands can try options that are not saved yet. */
 class ConfiguredProviders extends IsolationProviders {
   constructor(readonly setup: ProviderSetup) {
-    super({ sessionFilesDir: setup.sessionFilesDir });
+    super({
+      sessionFilesDir: setup.sessionFilesDir,
+      ...hostToolOptions(setup),
+      ...(setup.bashSandbox === undefined ? {} : { bashSandbox: setup.bashSandbox }),
+      hostPrograms: () => configuredPrograms(setup),
+    });
   }
 }
 
