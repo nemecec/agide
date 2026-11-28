@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { z } from 'zod';
 import { CommandError, requireInScope, type Caller } from '../../core/commands/index';
+import { registerHookCommands, type HookEndpoint } from '../../core/hooks/index';
 import { AgentWritableStore, createIsolationProviders, createProfileHostTools, registerIsolationCommands, setHostTools, type McpEndpoint } from '../../core/isolation/index';
 import { readIsolationOptions } from '../../core/isolation/providerOptions';
 import type { AppMcpServer } from '../../core/mcp/index';
@@ -36,7 +37,7 @@ const permissionMode = z.enum(['default', 'acceptEdits', 'plan', 'auto', 'bypass
  */
 export async function init(
   ctx: ModuleContext,
-  deps: { tree: TreeService; mcp: AppMcpServer; profile: ProfileService; permissions: PermissionService; launch: LaunchContributors; streams?: StreamSpawner },
+  deps: { tree: TreeService; mcp: AppMcpServer; hooks: HookEndpoint; profile: ProfileService; permissions: PermissionService; launch: LaunchContributors; streams?: StreamSpawner },
 ): Promise<ModuleHandle<SessionService>> {
   const { tree, mcp, permissions } = deps;
   const launchArgs = claudeArgsFromEnv();
@@ -314,6 +315,8 @@ export async function init(
   ];
 
   unregister.push(...registerIsolationCommands(ctx.commands, { providers, profile: deps.profile }));
+  // `session_set_mode` and `hook_approval_answer` answer `not_built` until w-approvals fills their handlers here (0043 section 5).
+  unregister.push(registerHookCommands(ctx.commands));
 
   return {
     service: sessions,

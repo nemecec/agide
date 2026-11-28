@@ -3,7 +3,7 @@ import { migrate, type Database } from '../store/index';
 import type { NodeId, TreeService } from '../tree/types';
 import { TASKS_MODULE, taskMigrations } from './inboxMigrations';
 import { occurrences, parseRRule, type RuleSpec } from './rrule';
-import { TaskError, type NewReminder, type NewTask, type TaskPatch, type TaskService } from './taskService';
+import { TaskError, type NewReminder, type NewTask, type ReminderPatch, type TaskPatch, type TaskService } from './taskService';
 import { cleanLine, cleanText } from './text';
 import type { Schedule, Task, TaskState } from './types';
 import { formatWall, isValidZone, parseWall, utcToWall } from './zoned';
@@ -244,6 +244,18 @@ export class SqliteTaskStore implements TaskService {
             )
             .all(...(query.folderId === null ? [] : [query.folderId]));
     return (rows as unknown as ScheduleRow[]).map(toSchedule);
+  }
+
+  deleteTask(_id: string): void {
+    throw new TaskError('not_built', 'deleteTask is not built yet');
+  }
+
+  moveTask(_id: string, _to: { folderId?: NodeId | null; beforeTaskId?: string }): Task {
+    throw new TaskError('not_built', 'moveTask is not built yet');
+  }
+
+  updateReminder(_id: string, _patch: ReminderPatch): Schedule {
+    throw new TaskError('not_built', 'updateReminder is not built yet');
   }
 
   setScheduleEnabled(id: string, enabled: boolean): Schedule {

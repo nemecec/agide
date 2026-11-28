@@ -25,7 +25,8 @@ const RESOLUTIONS = ['answered', 'approved', 'denied', 'dismissed', 'viewed', 's
 /** What an agent can resolve an item with. */
 const AGENT_RESOLUTIONS = ['superseded', 'dismissed'] as const;
 
-const link = z
+/** The link of `inbox_post` and `inbox_ask`: a node of the agent's own folder and an http or https URL shown as text. */
+export const postLink = z
   .object({
     nodeId: z.string().max(64).optional().describe('A node in your own folder that the item points at'),
     url: httpUrl.optional().describe('Shown to the user as text with an explicit Open action'),
@@ -38,7 +39,7 @@ const postInput = z
     details: z.string().max(8000).optional().describe('The longer description; plain text, shown on demand'),
     kind: z.enum(['status', 'failure', 'review']).default('status'),
     urgency: z.enum(URGENCIES).default('normal').describe('high is lowered to normal'),
-    link: link.optional(),
+    link: postLink.optional(),
     dedupeKey: z.string().regex(/^[a-z0-9_.-]{1,64}$/).optional().describe('A repeat with the same key updates the open item'),
   })
   .strict();
@@ -142,7 +143,7 @@ export function registerInboxCommands(registry: CommandRegistry, deps: InboxComm
           limit: z.number().int().min(1).max(200).default(50),
         })
         .strict(),
-      ui: false,
+      ui: {},
       mcp: true,
       run: (input, { caller }) => ({
         items: inbox
@@ -164,7 +165,7 @@ export function registerInboxCommands(registry: CommandRegistry, deps: InboxComm
       input: z
         .object({ itemId: z.string().min(1), resolution: z.enum(RESOLUTIONS).default('dismissed') })
         .strict(),
-      ui: false,
+      ui: {},
       mcp: true,
       run: ({ itemId, resolution }, { caller }) => {
         const item = requireVisible(caller, itemId);
@@ -184,8 +185,9 @@ export function registerInboxCommands(registry: CommandRegistry, deps: InboxComm
       title: 'Mark inbox item seen',
       description: 'Marks an item as read.',
       input: itemRef,
-      ui: false,
+      ui: {},
       mcp: false,
+      mcpExempt: 'It records what the user looked at.',
       run: ({ itemId }) => guarded(() => row(inbox.markSeen(itemId))),
     }),
     registry.register({
@@ -193,8 +195,9 @@ export function registerInboxCommands(registry: CommandRegistry, deps: InboxComm
       title: 'Mark inbox item unread',
       description: 'Marks an item as unread.',
       input: itemRef,
-      ui: false,
+      ui: {},
       mcp: false,
+      mcpExempt: 'It records what the user looked at.',
       run: ({ itemId }) => guarded(() => row(inbox.markUnread(itemId))),
     }),
     registry.register({
@@ -202,8 +205,9 @@ export function registerInboxCommands(registry: CommandRegistry, deps: InboxComm
       title: 'Snooze inbox item',
       description: 'Hides an item until the time, then returns it as new.',
       input: z.object({ itemId: z.string().min(1), until: z.string().min(1) }).strict(),
-      ui: false,
+      ui: {},
       mcp: false,
+      mcpExempt: 'The user puts an item off.',
       run: ({ itemId, until }) => guarded(() => row(inbox.snooze(itemId, until))),
     }),
     registry.register({
@@ -211,17 +215,19 @@ export function registerInboxCommands(registry: CommandRegistry, deps: InboxComm
       title: 'Reopen inbox item',
       description: 'Returns a done item to seen.',
       input: itemRef,
-      ui: false,
+      ui: {},
       mcp: false,
+      mcpExempt: 'The user puts an item back.',
       run: ({ itemId }) => guarded(() => row(inbox.reopen(itemId))),
     }),
     registry.register({
       id: 'inbox_context',
       title: 'Inbox item context',
-      description: 'The project and session layers of an item: names, summaries and the summary generation time.',
+      description: 'The project layer of an item (name and summary) and the session layer (name and status).',
       input: itemRef,
-      ui: false,
+      ui: {},
       mcp: false,
+      mcpExempt: 'It is the header of the card for the user.',
       run: ({ itemId }) => {
         const item = inbox.get(itemId);
         if (!item) throw new CommandError('not_found', `no inbox item ${itemId}`);
@@ -233,8 +239,9 @@ export function registerInboxCommands(registry: CommandRegistry, deps: InboxComm
       title: 'Report the session in view',
       description: 'Tells the inbox which session the user looks at, or none. A session in view for two seconds resolves its status items.',
       input: z.object({ sessionId: z.string().min(1).optional() }).strict(),
-      ui: false,
+      ui: {},
       mcp: false,
+      mcpExempt: 'It records which session the user looks at.',
       run: ({ sessionId }) => {
         views.set(sessionId);
         return { viewing: sessionId ?? null };
@@ -245,8 +252,9 @@ export function registerInboxCommands(registry: CommandRegistry, deps: InboxComm
       title: 'Set project summary',
       description: 'Sets or clears the summary of a project folder. A folder with a summary counts as a project.',
       input: z.object({ folderId: z.string().min(1), summary: z.string().max(2000).nullable() }).strict(),
-      ui: false,
+      ui: {},
       mcp: false,
+      mcpExempt: 'An agent proposes a draft, the user decides.',
       run: ({ folderId, summary }) => {
         try {
           context.setProjectSummary(folderId, summary === null ? null : messageFrom(summary, 2000));

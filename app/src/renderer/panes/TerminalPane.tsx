@@ -5,6 +5,7 @@ import type { SessionInfo, SessionStatus } from '../../core/session/types';
 import { api } from '../api';
 import { currentTerminalOptions, followTheme } from '../theme/terminalOptions';
 import './TerminalPane.css';
+import { AccessGrantsChip } from './session/AccessGrantsChip';
 import { SessionHeader } from './session/SessionHeader';
 import { TrustBanner } from './session/TrustBanner';
 import { sessionStatusKind } from './sessionStatus';
@@ -125,6 +126,7 @@ function SessionTerminal({ sessionId }: { sessionId: string }) {
           data-testid="terminal-status"
           data-status={view.kind === 'ready' ? view.status : view.kind}
         />
+        <AccessGrantsChip sessionId={sessionId} />
         {view.kind === 'ready' && view.status === 'exited' && (
           <ToolbarItem asChild>
             <Button variant="quiet" size="sm" onClick={resume}>

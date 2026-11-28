@@ -1,8 +1,14 @@
 import { useEffect, useState } from 'react';
 import type { ItemContextInfo, ItemRow } from '../../../core/inbox/viewTypes';
 import { SWARM_APPROVAL_ORIGIN } from '../../../core/swarm/types';
+import { AccessRequestActions } from './AccessRequestActions';
+import { AskCardActions } from './AskCardActions';
+import { HookApprovalActions } from './HookApprovalActions';
+import { ItemCardExtras } from './ItemCardExtras';
+import { ProjectSummaryEditor } from './ProjectSummaryEditor';
 import { ReviewCardActions } from './ReviewCardActions';
 import { SwarmApprovalActions } from './SwarmApprovalActions';
+import { TerminalDialogReminder } from './TerminalDialogReminder';
 import { api } from '../../api';
 import { Button } from '../../ui/Button';
 import { Disclosure } from '../../ui/Disclosure';
@@ -82,19 +88,11 @@ export function ItemCard({ item, canPeek, peeking, onPeek }: { item: ItemRow; ca
         <dd>
           <strong data-testid="inbox-project-name">{context.project?.name ?? 'No project'}</strong>
           {context.project?.summary !== undefined && <p data-testid="inbox-project-summary">{context.project.summary}</p>}
+          {context.project !== undefined && <ProjectSummaryEditor project={context.project} />}
         </dd>
         <dt>Session</dt>
         <dd>
           <strong data-testid="inbox-session-name">{context.session?.name ?? 'No session'}</strong>
-          {context.session?.summary !== undefined && (
-            <p data-testid="inbox-session-summary">
-              {context.session.summary}{' '}
-              <span className="inbox-muted" data-testid="inbox-session-summary-time">
-                (summary generated {ageOf(context.session.summaryGeneratedAt ?? item.createdAt)}
-                {context.session.summaryModel ? ` by ${context.session.summaryModel}` : ''})
-              </span>
-            </p>
-          )}
         </dd>
       </dl>
 
@@ -149,6 +147,10 @@ export function ItemCard({ item, canPeek, peeking, onPeek }: { item: ItemRow; ca
             )}
             <SwarmApprovalActions key={item.id} item={item} />
             <ReviewCardActions item={item} />
+            <AskCardActions item={item} />
+            <HookApprovalActions item={item} />
+            <TerminalDialogReminder item={item} />
+            <AccessRequestActions item={item} />
             {needsAnswer(item) && item.linkNodeId !== undefined && typeof browserApprovalId !== 'string' && item.origin !== SWARM_APPROVAL_ORIGIN && (
               <Button variant="primary" onClick={openSession} data-testid="inbox-answer-in-session">
                 Open session to answer
@@ -178,6 +180,7 @@ export function ItemCard({ item, canPeek, peeking, onPeek }: { item: ItemRow; ca
             ) : null}
           </>
         )}
+        <ItemCardExtras item={item} />
         {canPeek && !swarmApproval && (
           <Button variant="quiet" onClick={onPeek} aria-pressed={peeking} data-testid="inbox-peek-open">
             Peek at session

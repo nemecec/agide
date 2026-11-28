@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { CommandRegistry } from '../commands/CommandRegistry';
 import { requireInScope } from '../commands/scope';
+import { notBuilt } from '../commands/notBuilt';
 import { CommandError, type Caller } from '../commands/types';
 import type { NodeId, TreeService } from '../tree/types';
 import { httpUrl } from './urlSchema';
@@ -53,7 +54,7 @@ export function registerTaskCommands(registry: CommandRegistry, { tasks, tree, o
           dueAt: z.string().min(1).optional(),
         })
         .strict(),
-      ui: false,
+      ui: {},
       mcp: true,
       run: (input, { caller }) => {
         const where = folderFor(caller, input.folderId);
@@ -79,7 +80,7 @@ export function registerTaskCommands(registry: CommandRegistry, { tasks, tree, o
       title: 'List tasks',
       description: 'Lists tasks in a folder and below, in order. Default: open, in progress and blocked.',
       input: z.object({ folderId, states: z.array(state).optional() }).strict(),
-      ui: false,
+      ui: {},
       mcp: true,
       run: (input, { caller }) => {
         const where = input.folderId === undefined && caller.kind === 'ui' ? undefined : folderFor(caller, input.folderId);
@@ -101,7 +102,7 @@ export function registerTaskCommands(registry: CommandRegistry, { tasks, tree, o
           externalUrl: httpUrl.nullable().optional(),
         })
         .strict(),
-      ui: false,
+      ui: {},
       mcp: true,
       run: ({ taskId, ...patch }, { caller }) => {
         taskInScope(caller, taskId);
@@ -128,7 +129,7 @@ export function registerTaskCommands(registry: CommandRegistry, { tasks, tree, o
           catchUp: z.enum(['latest', 'each', 'none']).optional(),
         })
         .strict(),
-      ui: false,
+      ui: {},
       mcp: true,
       run: (input, { caller }) => {
         const where = folderFor(caller, input.folderId);
@@ -158,7 +159,7 @@ export function registerTaskCommands(registry: CommandRegistry, { tasks, tree, o
       title: 'List reminders',
       description: 'Lists reminders in a folder and below, with their next due time.',
       input: z.object({ folderId }).strict(),
-      ui: false,
+      ui: {},
       mcp: true,
       run: (input, { caller }) => {
         const where = input.folderId === undefined && caller.kind === 'ui' ? undefined : folderFor(caller, input.folderId);
@@ -171,7 +172,7 @@ export function registerTaskCommands(registry: CommandRegistry, { tasks, tree, o
       title: 'Delete a reminder',
       description: 'Deletes a reminder and its schedule.',
       input: z.object({ reminderId: z.string().min(1) }).strict(),
-      ui: false,
+      ui: {},
       mcp: true,
       run: ({ reminderId }, { caller }) => {
         const schedule = tasks.getSchedule(reminderId);
@@ -181,6 +182,52 @@ export function registerTaskCommands(registry: CommandRegistry, { tasks, tree, o
         onScheduleChanged?.();
         return { deleted: true };
       },
+    }),
+    registry.register({
+      id: 'task_delete',
+      title: 'Delete a task',
+      description: 'Deletes a task and its due reminder. An agent deletes only tasks it created itself.',
+      input: z.object({ taskId: z.string().min(1) }).strict(),
+      ui: {},
+      mcp: true,
+      run: () => notBuilt('task_delete'),
+    }),
+    registry.register({
+      id: 'task_move',
+      title: 'Move a task',
+      description: 'Places a task before another task of the list, or at the end, optionally in another folder. Positions are renumbered.',
+      input: z.object({ taskId: z.string().min(1), folderId, beforeTaskId: z.string().min(1).optional() }).strict(),
+      ui: {},
+      mcp: true,
+      run: () => notBuilt('task_move'),
+    }),
+    registry.register({
+      id: 'reminder_update',
+      title: 'Update a reminder',
+      description: 'Changes the title, details, start, zone, repeat rule or catch-up of a reminder; its next due time is computed again.',
+      input: z
+        .object({
+          reminderId: z.string().min(1),
+          title: z.string().min(1).max(140).optional(),
+          details: z.string().max(8000).nullable().optional(),
+          dtstart: z.string().min(1).optional(),
+          tzid: z.string().min(1).max(64).optional(),
+          rrule: z.string().min(1).max(200).nullable().optional(),
+          catchUp: z.enum(['latest', 'each', 'none']).optional(),
+        })
+        .strict(),
+      ui: {},
+      mcp: true,
+      run: () => notBuilt('reminder_update'),
+    }),
+    registry.register({
+      id: 'reminder_set_enabled',
+      title: 'Enable or disable a reminder',
+      description: 'A disabled reminder keeps its schedule and does not fire.',
+      input: z.object({ reminderId: z.string().min(1), enabled: z.boolean() }).strict(),
+      ui: {},
+      mcp: true,
+      run: () => notBuilt('reminder_set_enabled'),
     }),
   ];
   return () => off.forEach((unregister) => unregister());

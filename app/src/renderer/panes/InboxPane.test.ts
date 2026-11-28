@@ -74,10 +74,11 @@ describe('InboxPane', () => {
 
   it('shows the project and session layers of the selected item', async () => {
     await mount([item('a')]);
-    fake.respond('inbox_context', { project: { id: 'p', name: 'Proj', summary: 'About it' }, session: { id: 's', name: 'Sess', status: 'idle', summary: 'Doing it', summaryModel: 'haiku' } });
+    fake.respond('inbox_context', { project: { id: 'p', name: 'Proj', summary: 'About it' }, session: { id: 's', name: 'Sess', status: 'idle' } });
     await select(0);
     expect(root().querySelector('[data-testid="inbox-project-name"]')?.textContent, 'project').toBe('Proj');
-    expect(root().querySelector('[data-testid="inbox-session-summary"]')?.textContent, 'session summary with its model').toContain('by haiku');
+    expect(root().querySelector('[data-testid="inbox-session-name"]')?.textContent, 'session name').toBe('Sess');
+    expect(root().querySelector('[data-testid="inbox-session-summary"]'), 'a session summary shows on the tree row, not in the card').toBeNull();
   });
 
   it('moves the selection with the arrow keys and stays inside the list', async () => {

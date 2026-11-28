@@ -2,7 +2,13 @@ import type { AgentsEvent } from '../agents/types';
 import type { BlocksEvent } from '../blocks/types';
 import type { BrowserEvent } from '../browser/types';
 import type { UiEvent } from '../commands/uiEvents';
+import type { AccessEvent } from '../access/types';
+import type { AskEvent } from '../inbox/askTypes';
 import type { InboxEvent } from '../inbox/types';
+import type { TaskListEvent } from '../inbox/taskService';
+import type { InboxViewEvent } from '../inbox/viewTypes';
+import type { HooksEvent } from '../hooks/types';
+import type { SummaryEvent } from '../summary/types';
 import type { PermissionsEvent } from '../permissions/types';
 import type { ProfileEvent } from '../profile/types';
 import type { ReviewEvent } from '../review/types';
@@ -27,7 +33,13 @@ export type AppEvent =
   | AgentsEvent
   | TasksEvent
   | SwarmEvent
-  | ReviewEvent;
+  | ReviewEvent
+  | AskEvent
+  | InboxViewEvent
+  | TaskListEvent
+  | HooksEvent
+  | AccessEvent
+  | SummaryEvent;
 
 export type AppEventBus = EventBus<AppEvent>;
 

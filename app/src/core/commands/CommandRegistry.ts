@@ -29,9 +29,9 @@ export class CommandRegistry {
 
   /**
    * Validates the input and runs the command. An MCP caller can invoke only commands with `mcp: true`.
-   * Never throws: errors come back as `{ ok: false }`.
+   * `signal` and `toolUseId` reach the command in its `CommandContext`. Never throws: errors come back as `{ ok: false }`.
    */
-  async invoke(id: string, rawInput: unknown, caller: Caller): Promise<CommandResult> {
+  async invoke(id: string, rawInput: unknown, caller: Caller, signal?: AbortSignal, toolUseId?: string): Promise<CommandResult> {
     const command = this.commands.get(id);
     if (!command || (caller.kind === 'mcp' && !command.mcp)) {
       return failure(new CommandError('not_found', `no command ${id}`));
@@ -41,7 +41,7 @@ export class CommandRegistry {
       return failure(new CommandError('invalid_input', validationMessage(command, parsed.error.issues), parsed.error.issues));
     }
     try {
-      return { ok: true, value: await command.run(parsed.data, { caller }) };
+      return { ok: true, value: await command.run(parsed.data, { caller, ...(signal === undefined ? {} : { signal }), ...(toolUseId === undefined ? {} : { toolUseId }) }) };
     } catch (error) {
       return failure(error instanceof CommandError ? error : new CommandError('failed', messageOf(error)));
     }

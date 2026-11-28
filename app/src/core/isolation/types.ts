@@ -132,8 +132,13 @@ export interface HookTarget {
 export type HookDelivery =
   /** Command hook that writes one file per payload; `dir` is the inbox as seen inside the environment. */
   | { readonly kind: 'inbox-dir'; readonly dir: string }
-  /** Hook that posts the payload to the app; the token goes into the 0600 settings file, never into args. */
-  | { readonly kind: 'http'; readonly url: string; readonly token: string };
+  /**
+   * Hook that posts the payload to the app; the token goes into the 0600 settings file, never into args. `dir` is the
+   * hook directory of the `SessionStart` and `SessionEnd` command hooks, which stay on files (P45). `loopbackInSandbox`
+   * says whether the launch adds the loopback entry, in the port form or the host form, to the CLI's Bash sandbox
+   * allowed hosts (0043 section 4.1).
+   */
+  | { readonly kind: 'http'; readonly url: string; readonly token: string; readonly dir: string; readonly loopbackInSandbox: boolean };
 
 export interface McpEndpoint {
   readonly url: string;

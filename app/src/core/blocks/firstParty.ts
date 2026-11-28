@@ -13,6 +13,7 @@ export const PANE_TYPES = {
   observationLog: 'agide/observation-log',
   swarm: 'agide/swarm',
   review: 'agide/review',
+  tasks: 'agide/tasks',
 } as const;
 
 export type FirstPartyPaneType = (typeof PANE_TYPES)[keyof typeof PANE_TYPES];
@@ -94,6 +95,15 @@ export const FIRST_PARTY_MANIFEST = {
       configVersion: 1,
       configSchema: { type: 'object', properties: { swarmId: { type: 'string' }, changesetId: { type: 'string' } } },
       size: { minWidth: 400, preferredWidth: 720 },
+    },
+    {
+      type: PANE_TYPES.tasks,
+      title: 'Tasks',
+      tier: 'builtin',
+      configVersion: 1,
+      configSchema: { type: 'object', properties: { folderId: { type: 'string' } } },
+      inputs: { node: { contextKey: 'node.current', required: false } },
+      size: { minWidth: 280, preferredWidth: 400 },
     },
   ],
 } as const;

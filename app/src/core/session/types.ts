@@ -1,4 +1,5 @@
 import type { Unsubscribe } from '../events/EventBus';
+import { MODE_ORDER } from '../permissions/modes';
 import type { NodeId } from '../tree/types';
 
 /** The Claude session id. The app chooses it and passes it with `--session-id`, so it is known before launch. */
@@ -18,6 +19,17 @@ export type LaunchPath = 'pty' | 'stream-json';
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'auto' | 'bypassPermissions';
 
+/** The mode the session itself reported in an authenticated hook request (0043 section 4.3). */
+export interface ReportedMode {
+  readonly mode: PermissionMode;
+  readonly at: string;
+  /** `http`: an authenticated hook request; payload files of `inbox-dir` are never a source. */
+  readonly transport: 'http';
+}
+
+/** The index of a mode in `MODE_ORDER`: strictest first, bypass last. */
+export const MODE_RANK: Readonly<Record<PermissionMode, number>> = Object.fromEntries(MODE_ORDER.map((mode, rank) => [mode, rank])) as Record<PermissionMode, number>;
+
 export interface SessionInfo {
   readonly id: SessionId;
   /** The folder the session belongs to. The app MCP server scopes this session's tool calls to it. */
@@ -30,6 +42,8 @@ export interface SessionInfo {
   readonly status: SessionStatus;
   readonly createdAt: string;
   readonly exitCode?: number | null;
+  /** The latest mode the session reported over `http`. A reported mode at or below the launch mode's rank is stored for the next launch; a looser one is shown and never stored (0043 section 4.3). */
+  readonly reportedMode?: ReportedMode;
 }
 
 export interface SessionCreateInput {
@@ -71,6 +85,8 @@ export type SessionEvent =
    * 0009 turns these into agent records later.
    */
   | { readonly type: 'session.hook'; readonly sessionId: SessionId; readonly hookEvent: string; readonly payload: unknown }
+  /** A mode the session reported in an `http` hook request, with the mode of the launch it was reported in. */
+  | { readonly type: 'session.mode_reported'; readonly sessionId: SessionId; readonly reported: ReportedMode; readonly launchMode: PermissionMode }
   | { readonly type: 'session.exited'; readonly session: SessionInfo; readonly exitCode: number | null; readonly signal: string | null }
   | { readonly type: 'session.closed'; readonly sessionId: SessionId };
 

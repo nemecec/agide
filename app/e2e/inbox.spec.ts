@@ -87,8 +87,7 @@ test('shows an item that an agent posts over MCP and updates the unread count', 
   await expect(page.getByTestId('inbox-project-name'), 'project name from the folder node').toHaveText('Billing');
   await expect(page.getByTestId('inbox-project-summary'), 'project summary from the folder node').toHaveText('Rewrite of the invoice job');
   await expect(page.getByTestId('inbox-session-name'), 'session name').toHaveText('Claude session');
-  await expect(page.getByTestId('inbox-session-summary'), 'session summary').toContainText('Fixing the retry loop');
-  await expect(page.getByTestId('inbox-session-summary-time'), 'summary generation time and model').toContainText('generated just now by haiku');
+  await expect(page.getByTestId('inbox-session-summary'), 'a stored session summary shows on the session row in the tree, not in the card').toHaveCount(0);
 
   await expect(page.getByTestId('inbox-details'), 'long details start collapsed').toHaveAttribute('data-expanded', 'false');
   await page.getByTestId('inbox-expand').click();

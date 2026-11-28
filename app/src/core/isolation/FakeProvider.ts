@@ -117,7 +117,7 @@ class FakeEnvironment implements AgentEnvironment {
   hookDelivery(sessionId: SessionId, target: HookTarget): HookDelivery {
     return this.fake.capabilities.hookTransports.includes('inbox-dir')
       ? { kind: 'inbox-dir', dir: target.inboxHostDir }
-      : { kind: 'http', url: `http://127.0.0.1:${this.spec.appEndpoint.port}${target.httpPath}`, token: target.token };
+      : { kind: 'http', url: `http://127.0.0.1:${this.spec.appEndpoint.port}${target.httpPath}`, token: target.token, dir: target.inboxHostDir, loopbackInSandbox: false };
   }
 
   mcpEndpoint(sessionId: SessionId): McpEndpoint {

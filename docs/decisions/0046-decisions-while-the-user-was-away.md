@@ -70,6 +70,8 @@ These follow from the decisions and belong in the contract step of each record. 
 9. Section 4.2 (last bullet), section 4.4 (removal paragraph), section 7 (the row about rewriting or deleting a note) and section 13 question 3: replace "their history goes with them" with the recovery copy, the restore action, the card facts and the changed-since check of decision 6; add the table to notes migration 1 and the setting to section 4.12; add contract cases (restore, prune after 30 days, a rename between card and decision answers `refused`).
 10. Section 13: close questions 1 and 2 as accepted and question 3 as decided by decision 6.
 
+Applied by the contracts step c-m6 on 2026-11-28: items 1 to 5 (the changes to 0043). Items 6 to 10 (0044) wait for c-notes.
+
 ## Findings outside the six questions
 
 - The wording of question C7 ("the write race of read-write mounts") is narrower than what sections 4.9, 7 and 9 of 0044 accept, which includes an agent's single allowed write in a read-only mount (decision 4). The user should confirm the wider scope.

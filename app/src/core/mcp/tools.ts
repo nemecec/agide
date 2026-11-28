@@ -44,11 +44,11 @@ export function toolsFrom(registry: CommandRegistry, server: McpServerName = 'ap
   }));
 }
 
-/** Runs a tool of `server` as the MCP caller. A failed command is a tool result with `isError`, not a protocol error. */
-export async function callTool(registry: CommandRegistry, name: string, args: unknown, caller: Caller, server: McpServerName = 'app', toolSet: ToolSet = 'default'): Promise<McpToolResult> {
+/** Runs a tool of `server` as the MCP caller; `signal` ends when the call is cancelled or its request closes; `toolUseId` is the CLI's id of the call. A failed command is a tool result with `isError`, not a protocol error. */
+export async function callTool(registry: CommandRegistry, name: string, args: unknown, caller: Caller, server: McpServerName = 'app', toolSet: ToolSet = 'default', signal?: AbortSignal, toolUseId?: string): Promise<McpToolResult> {
   const command = commandForTool(registry, server, name, toolSet);
   if (!command) return { isError: true, content: [{ type: 'text', text: `not_found: no command ${name}` }] };
-  const result = await registry.invoke(command.id, args, caller);
+  const result = await registry.invoke(command.id, args, caller, signal, toolUseId);
   if (result.ok && isImageResult(result.value)) {
     const { data, mimeType, ...details } = result.value;
     const { untrusted, ...rest } = details as { untrusted?: unknown };

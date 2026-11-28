@@ -2,7 +2,7 @@ import type { SessionId } from '../session/types';
 import type { NodeId } from '../tree/types';
 import type { CatchUp, Schedule, Task, TaskState } from './types';
 
-export type TaskErrorCode = 'not_found' | 'invalid';
+export type TaskErrorCode = 'not_found' | 'invalid' | 'not_built';
 
 export class TaskError extends Error {
   constructor(
@@ -46,15 +46,33 @@ export interface NewReminder {
   readonly catchUp?: CatchUp;
 }
 
+/** What `reminder_update` changes (0043 section 4.5). `next_due_at` is computed again from the new values. */
+export interface ReminderPatch {
+  readonly title?: string;
+  readonly details?: string | null;
+  readonly dtstart?: string;
+  readonly tzid?: string;
+  readonly rrule?: string | null;
+  readonly catchUp?: CatchUp;
+}
+
+/** The tasks of a folder changed: created, edited, moved or removed. The pane reads the list again. */
+export type TaskListEvent = { readonly type: 'tasks.changed'; readonly folderId: NodeId | null };
+
 /** Tasks, reminders and their schedules (0021 section 7). Throws `TaskError`. */
 export interface TaskService {
   createTask(input: NewTask): Task;
   getTask(id: string): Task | undefined;
   listTasks(query?: { folderId?: NodeId | null; states?: readonly TaskState[] }): Task[];
   updateTask(id: string, patch: TaskPatch): Task;
+  /** Removes the task; its due reminder goes with it (`ON DELETE CASCADE`). */
+  deleteTask(id: string): void;
+  /** Places the task before `beforeTaskId` (the end when absent), optionally in another folder. Positions are renumbered. */
+  moveTask(id: string, to: { folderId?: NodeId | null; beforeTaskId?: string }): Task;
   createReminder(input: NewReminder): Schedule;
   getSchedule(id: string): Schedule | undefined;
   listSchedules(query?: { folderId?: NodeId | null }): Schedule[];
+  updateReminder(id: string, patch: ReminderPatch): Schedule;
   setScheduleEnabled(id: string, enabled: boolean): Schedule;
   deleteSchedule(id: string): void;
 }

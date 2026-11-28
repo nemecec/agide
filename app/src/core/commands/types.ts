@@ -19,6 +19,14 @@ export const inToolSet = (command: { readonly toolSets?: readonly ToolSet[] }, s
 
 export interface CommandContext {
   readonly caller: Caller;
+  /**
+   * Aborted when the caller no longer waits for the result: the CLI sent `notifications/cancelled` for the call,
+   * its HTTP request closed, or the session ended (0043 section 4.4). Absent for callers that cannot cancel, such
+   * as the UI; a command that waits for the user passes it on.
+   */
+  readonly signal?: AbortSignal;
+  /** `_meta["claudecode/toolUseId"]` of the MCP call that runs the command. Absent for the UI and for a call without it. */
+  readonly toolUseId?: string;
 }
 
 /** Where a command shows in the UI. `false` means no UI binding: the command is for MCP or internal use. */
@@ -75,8 +83,11 @@ export interface CommandDescriptor {
   readonly mcp: boolean;
 }
 
-/** `limit_reached` and `refused` come with the swarm commands (0037 section 9): a depth or count limit, and a refused mode. */
-export type CommandErrorCode = 'not_found' | 'invalid_input' | 'out_of_scope' | 'limit_reached' | 'refused' | 'failed';
+/**
+ * `limit_reached` and `refused` come with the swarm commands (0037 section 9): a depth or count limit, and a refused mode.
+ * `not_built` is what a command registered by a contracts step answers until its builder fills the handler (0043 section 5).
+ */
+export type CommandErrorCode = 'not_found' | 'invalid_input' | 'out_of_scope' | 'limit_reached' | 'refused' | 'failed' | 'not_built';
 
 export class CommandError extends Error {
   constructor(

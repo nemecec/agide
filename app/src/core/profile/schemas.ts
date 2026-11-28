@@ -1,5 +1,8 @@
 import { z } from 'zod';
+import { accessSettingsSchema } from '../access/settings';
 import { agentSettingsSchema } from '../agents/settings';
+import { hookSettingsSchema } from '../hooks/hookSettings';
+import { inboxSettingsSchema } from '../inbox/inboxSettings';
 import { permissionSettingsSchema } from '../permissions/schemas';
 import { reviewSettingsSchema } from '../review/settings';
 import { swarmSettingsSchema } from '../swarm/settings';
@@ -53,6 +56,9 @@ export const profileSettingsSchema = z
     agents: agentSettingsSchema.optional(),
     swarm: swarmSettingsSchema.optional(),
     review: reviewSettingsSchema.optional(),
+    hooks: hookSettingsSchema.optional(),
+    access: accessSettingsSchema.optional(),
+    inbox: inboxSettingsSchema.optional(),
   })
   .strict();
 

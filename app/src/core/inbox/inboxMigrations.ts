@@ -7,6 +7,7 @@ export const TASKS_MODULE = 'tasks';
  * Tables of 0021 section 2 that the first slice uses. `folder_removed` and its trigger follow 0023: the trigger
  * runs before the foreign key action empties `folder_id`, so the item still knows its folder was removed.
  * Session summaries live in their own table here, so the session module keeps its migrations to itself.
+ * Version 2 (0043 sections 4.4 and 4.6): asks, saved views, and the counters that tell a stale summary.
  */
 export const inboxMigrations: readonly Migration[] = [
   {
@@ -54,6 +55,45 @@ export const inboxMigrations: readonly Migration[] = [
         summary TEXT NOT NULL CHECK (length(summary) <= 400),
         generated_at TEXT NOT NULL,
         model TEXT
+      );
+    `,
+  },
+  {
+    version: 2,
+    sql: `
+      CREATE TABLE inbox_asks (
+        item_id TEXT PRIMARY KEY REFERENCES inbox_items(id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL,
+        options TEXT NOT NULL,
+        allow_free_text INTEGER NOT NULL CHECK (allow_free_text IN (0, 1)),
+        wait INTEGER NOT NULL CHECK (wait IN (0, 1)),
+        timeout_at TEXT NOT NULL,
+        call_state TEXT NOT NULL CHECK (call_state IN ('waiting', 'returned', 'timed_out', 'closed')),
+        answer_choice TEXT,
+        answer_text TEXT CHECK (answer_text IS NULL OR length(answer_text) <= 4000),
+        answered_at TEXT,
+        delivery TEXT NOT NULL DEFAULT 'none'
+          CHECK (delivery IN ('none', 'in_call', 'queued', 'notice', 'stdin', 'context', 'read', 'failed')),
+        delivered_at TEXT,
+        tool_use_id TEXT,
+        CHECK (answered_at IS NULL OR answer_choice IS NOT NULL OR answer_text IS NOT NULL)
+      );
+      CREATE INDEX inbox_asks_by_session ON inbox_asks (session_id, delivery);
+      CREATE TABLE inbox_views (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 60),
+        folder_id TEXT REFERENCES tree_nodes(id) ON DELETE CASCADE,
+        filter TEXT NOT NULL,
+        sort TEXT NOT NULL DEFAULT 'urgency_then_time' CHECK (sort IN ('urgency_then_time', 'time', 'project')),
+        position INTEGER NOT NULL
+      );
+      ALTER TABLE session_summaries ADD COLUMN turns_at INTEGER;
+      ALTER TABLE session_summaries ADD COLUMN transcript_bytes_at INTEGER;
+      CREATE TABLE session_activity (
+        session_id TEXT PRIMARY KEY,
+        turns INTEGER NOT NULL DEFAULT 0 CHECK (turns >= 0),
+        transcript_bytes INTEGER,
+        updated_at TEXT NOT NULL
       );
     `,
   },

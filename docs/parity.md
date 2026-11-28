@@ -5,6 +5,11 @@ A command with a UI binding must be an MCP tool unless it declares `mcpExempt` w
 
 | Command | UI binding | MCP tool | Status |
 |---|---|---|---|
+| `access_decide` | bound | no | exempt: Only the user decides on and revokes access; an agent must not answer, widen or reuse its own request. |
+| `access_grant_revoke` | bound | no | exempt: Only the user decides on and revokes access; an agent must not answer, widen or reuse its own request. |
+| `access_grants_list` | bound | no | exempt: Only the user decides on and revokes access; an agent must not answer, widen or reuse its own request. |
+| `access_request_get` | bound | no | exempt: The card of the user shows it; an agent reads its own request with access_request_result. |
+| `access_request_result` | none | yes | ok |
 | `agents_dismiss` | none | no | ok |
 | `agents_history` | none | no | ok |
 | `agents_hold` | none | no | ok |
@@ -40,17 +45,25 @@ A command with a UI binding must be an MCP tool unless it declares `mcpExempt` w
 | `browser_view_place` | none | no | ok |
 | `browser_views_resume` | none | no | ok |
 | `browser_views_suspend` | none | no | ok |
-| `inbox_context` | none | no | ok |
-| `inbox_list` | none | yes | ok |
-| `inbox_mark_seen` | none | no | ok |
-| `inbox_mark_unread` | none | no | ok |
+| `hook_approval_answer` | bound | no | exempt: Agents never answer permission requests; the user does. |
+| `inbox_answer` | bound | no | exempt: Only the user answers questions; an agent must not answer for the user. |
+| `inbox_ask` | none | yes | ok |
+| `inbox_ask_result` | none | yes | ok |
+| `inbox_context` | bound | no | exempt: It is the header of the card for the user. |
+| `inbox_list` | bound | yes | ok |
+| `inbox_mark_seen` | bound | no | exempt: It records what the user looked at. |
+| `inbox_mark_unread` | bound | no | exempt: It records what the user looked at. |
+| `inbox_open_item` | bound | no | exempt: It changes the user's screen. |
 | `inbox_post` | none | yes | ok |
-| `inbox_reopen` | none | no | ok |
-| `inbox_resolve` | none | yes | ok |
-| `inbox_set_project_summary` | none | no | ok |
+| `inbox_reopen` | bound | no | exempt: The user puts an item back. |
+| `inbox_resolve` | bound | yes | ok |
+| `inbox_set_project_summary` | bound | no | exempt: An agent proposes a draft, the user decides. |
 | `inbox_set_session_summary` | none | no | ok |
-| `inbox_set_viewing` | none | no | ok |
-| `inbox_snooze` | none | no | ok |
+| `inbox_set_viewing` | bound | no | exempt: It records which session the user looks at. |
+| `inbox_snooze` | bound | no | exempt: The user puts an item off. |
+| `inbox_view_delete` | bound | no | exempt: Views arrange the user's own screen. |
+| `inbox_view_save` | bound | no | exempt: Views arrange the user's own screen. |
+| `inbox_views_list` | bound | no | exempt: Views arrange the user's own screen. |
 | `isolation_set_provider` | none | no | ok |
 | `isolation_status` | none | no | ok |
 | `layout_apply` | none | yes | ok |
@@ -65,9 +78,11 @@ A command with a UI binding must be an MCP tool unless it declares `mcpExempt` w
 | `profile_open` | menu app | no | exempt: Agents do not manage profiles: 0017 allows no action across profiles. |
 | `profile_set_git` | none | no | ok |
 | `profile_setup_status` | none | no | ok |
-| `reminder_create` | none | yes | ok |
-| `reminder_delete` | none | yes | ok |
-| `reminder_list` | none | yes | ok |
+| `reminder_create` | bound | yes | ok |
+| `reminder_delete` | bound | yes | ok |
+| `reminder_list` | bound | yes | ok |
+| `reminder_set_enabled` | bound | yes | ok |
+| `reminder_update` | bound | yes | ok |
 | `report_outcome` | none | worker set only | ok |
 | `report_review` | none | reviewer set only | ok |
 | `review_accept` | bound | no | exempt: agents never decide reviews |
@@ -89,6 +104,9 @@ A command with a UI binding must be an MCP tool unless it declares `mcpExempt` w
 | `session_resize` | none | no | ok |
 | `session_resume` | none | no | ok |
 | `session_send_text` | none | yes | ok |
+| `session_set_mode` | bound | no | exempt: Agents never choose their own permission mode. |
+| `session_summarize` | menu tree-node | no | exempt: It starts a model run on the user's subscription; only a click of the user does. |
+| `session_summary_get` | bound | no | exempt: The tree row shows it to the user. |
 | `session_write` | none | no | ok |
 | `surface_highlight` | none | yes | ok |
 | `surfaces_list` | none | yes | ok |
@@ -102,13 +120,15 @@ A command with a UI binding must be an MCP tool unless it declares `mcpExempt` w
 | `swarm_start` | menu tree-node | yes | ok |
 | `swarm_status` | bound | yes | ok |
 | `swarm_stop` | bound | yes | ok |
-| `task_create` | none | yes | ok |
-| `task_list` | none | yes | ok |
+| `task_create` | bound | yes | ok |
+| `task_delete` | bound | yes | ok |
+| `task_list` | bound | yes | ok |
+| `task_move` | bound | yes | ok |
 | `task_preview` | none | no | ok |
 | `task_repositories` | none | no | ok |
 | `task_start` | menu tree-node, key CmdOrCtrl+Shift+N | yes | ok |
 | `task_trust_state` | none | no | ok |
-| `task_update` | none | yes | ok |
+| `task_update` | bound | yes | ok |
 | `theme_apply` | none | yes | ok |
 | `theme_get` | none | yes | ok |
 | `theme_import` | none | yes | ok |

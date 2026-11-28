@@ -8,3 +8,4 @@ export { registerBuiltinCommands } from './builtinCommands';
 export { registerTreeCommands, nodesVisibleTo, type TreeCommandDeps } from './treeCommands';
 export { registerSurfaceCommands } from './surfaceCommands';
 export { checkParity, renderParityMarkdown, type ParityReport, type ParityRow } from './parity';
+export { notBuilt } from './notBuilt';

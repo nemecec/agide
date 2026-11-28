@@ -1,5 +1,10 @@
 import { statSync } from 'node:fs';
+import type { HookEndpoint } from '../../core/hooks/index';
 import {
+  createSummaryHandlers,
+  createViewHandlers,
+  registerSummaryCommands,
+  registerViewCommands,
   HookItemMapper,
   InboxNotifier,
   ItemContext,
@@ -34,7 +39,7 @@ function transcriptSize(path: string): number | undefined {
  */
 export async function init(
   ctx: ModuleContext,
-  deps: { tree: TreeService; sessions: SessionService; profile: ProfileService },
+  deps: { tree: TreeService; sessions: SessionService; hooks: HookEndpoint; profile: ProfileService },
 ): Promise<ModuleHandle<InboxService>> {
   const { tree, sessions, profile } = deps;
   const inbox = new SqliteInboxService(ctx.db, tree);
@@ -96,6 +101,8 @@ export async function init(
   const unregister = [
     registerInboxCommands(ctx.commands, { inbox, tree, context, views }),
     registerTaskCommands(ctx.commands, { tasks, tree, onScheduleChanged: () => scheduler.tick() }),
+    registerViewCommands(ctx.commands, createViewHandlers({ db: ctx.db, events: ctx.events, inbox, tree, sessions, tracker: views })),
+    registerSummaryCommands(ctx.commands, createSummaryHandlers({ db: ctx.db, events: ctx.events, inbox, tree, sessions, profile })),
   ];
 
   ctx.events.emit({ type: 'inbox.unread_changed', count: inbox.unreadCount() });

@@ -19,14 +19,34 @@ interface OpenTransport {
   close(): Promise<void>;
 }
 
+/** The key of a JSON-RPC id; the number 1 and the string "1" are different ids. */
+function callKey(id: unknown): string | undefined {
+  return typeof id === 'number' || typeof id === 'string' ? `${typeof id}:${id}` : undefined;
+}
+
+/** The CLI's id of a tool call from the request's `_meta`; anything that is not a short plain identifier is dropped. */
+function toolUseIdOf(meta: unknown): string | undefined {
+  const id = isRecord(meta) ? meta['claudecode/toolUseId'] : undefined;
+  return typeof id === 'string' && /^[\w-]{1,100}$/.test(id) ? id : undefined;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
 /**
  * Streamable HTTP MCP server for the app. Each request is handled statelessly: the SDK server and transport
  * live for one request, and the caller identity comes from the bearer token and the path, never from a
  * protocol session.
+ *
+ * A tool call carries an `AbortSignal` that ends when the CLI no longer waits (0043 section 4.4, P16). The CLI
+ * does not close the request of an interrupted call: it posts `notifications/cancelled` with the id of the
+ * pending `tools/call` on a new request. Each request has its own SDK server, so the SDK's own cancellation
+ * cannot see it; the pending calls of each session are kept here by JSON-RPC id and a cancel aborts the call
+ * of the same session only. A closed response, `revoke`, `abortCalls` and `stop` abort calls as well.
  */
 export class HttpAppMcpServer implements AppMcpServer {
   private readonly grants = new GrantStore();
   private readonly open = new Map<SessionId, Set<OpenTransport>>();
+  private readonly pending = new Map<SessionId, Map<string, AbortController>>();
   private http: HttpServer | undefined;
   private starting: Promise<{ port: number }> | undefined;
   private port = 0;
@@ -56,6 +76,7 @@ export class HttpAppMcpServer implements AppMcpServer {
     const http = this.http;
     this.http = undefined;
     this.starting = undefined;
+    for (const sessionId of [...this.pending.keys()]) this.abortCalls(sessionId);
     for (const sessionId of [...this.open.keys()]) await this.closeOpen(sessionId);
     if (!http) return;
     http.closeAllConnections();
@@ -78,7 +99,14 @@ export class HttpAppMcpServer implements AppMcpServer {
 
   revoke(sessionId: SessionId): void {
     this.grants.revoke(sessionId);
+    this.abortCalls(sessionId);
     void this.closeOpen(sessionId);
+  }
+
+  abortCalls(sessionId: SessionId): void {
+    const calls = this.pending.get(sessionId);
+    this.pending.delete(sessionId);
+    for (const controller of calls?.values() ?? []) controller.abort();
   }
 
   configFor(sessionId: SessionId): McpConfigJson {
@@ -114,14 +142,56 @@ export class HttpAppMcpServer implements AppMcpServer {
       return reply(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'request body is not valid JSON' } });
     }
     const caller: Caller = { kind: 'mcp', sessionId: guard.sessionId, folderId: auth.folderId };
-    await this.serve(req, res, body, caller, guard.server, auth.toolSet);
+    const messages = Array.isArray(body) ? body : [body];
+    let cancelled = 0;
+    for (const message of messages) {
+      if (isRecord(message) && message['method'] === 'notifications/cancelled' && isRecord(message['params'])) {
+        this.cancelCall(guard.sessionId, message['params']['requestId']);
+        cancelled += 1;
+      }
+    }
+    if (cancelled === messages.length) {
+      res.writeHead(202).end();
+      return;
+    }
+    const signals = this.registerCalls(guard.sessionId, messages);
+    res.on('close', () => {
+      for (const [key, controller] of signals) {
+        if (!res.writableFinished) controller.abort();
+        this.pending.get(guard.sessionId)?.delete(key);
+      }
+    });
+    await this.serve(req, res, body, caller, guard.server, auth.toolSet, signals);
   }
 
-  private async serve(req: IncomingMessage, res: ServerResponse, body: unknown, caller: Caller & { kind: 'mcp' }, which: McpServerName, toolSet: ToolSet): Promise<void> {
+  private registerCalls(sessionId: SessionId, messages: readonly unknown[]): Map<string, AbortController> {
+    const signals = new Map<string, AbortController>();
+    for (const message of messages) {
+      if (!isRecord(message) || message['method'] !== 'tools/call') continue;
+      const key = callKey(message['id']);
+      if (key === undefined) continue;
+      const controller = new AbortController();
+      signals.set(key, controller);
+      const calls = this.pending.get(sessionId) ?? new Map<string, AbortController>();
+      this.pending.set(sessionId, calls);
+      calls.set(key, controller);
+    }
+    return signals;
+  }
+
+  private cancelCall(sessionId: SessionId, requestId: unknown): void {
+    const key = callKey(requestId);
+    if (key === undefined) return;
+    const calls = this.pending.get(sessionId);
+    calls?.get(key)?.abort();
+    calls?.delete(key);
+  }
+
+  private async serve(req: IncomingMessage, res: ServerResponse, body: unknown, caller: Caller & { kind: 'mcp' }, which: McpServerName, toolSet: ToolSet, signals: ReadonlyMap<string, AbortController>): Promise<void> {
     const server = new Server({ name: which === 'app' ? APP_MCP_SERVER_NAME : which, version: '0.1.0' }, { capabilities: { tools: {} } });
     server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: toolsFrom(this.registry, which, toolSet) }));
-    server.setRequestHandler(CallToolRequestSchema, (request) =>
-      callTool(this.registry, request.params.name, request.params.arguments, caller, which, toolSet),
+    server.setRequestHandler(CallToolRequestSchema, (request, extra) =>
+      callTool(this.registry, request.params.name, request.params.arguments, caller, which, toolSet, signals.get(callKey(extra.requestId) ?? '')?.signal, toolUseIdOf(request.params._meta)),
     );
     const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
     const transports = this.open.get(caller.sessionId) ?? new Set<OpenTransport>();

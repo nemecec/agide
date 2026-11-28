@@ -1,5 +1,8 @@
 import type { Unsubscribe } from '../events/EventBus';
+import type { AccessSettingsInput } from '../access/settings';
 import type { AgentSettingsInput } from '../agents/settings';
+import type { HookSettingsInput } from '../hooks/hookSettings';
+import type { InboxSettingsInput } from '../inbox/inboxSettings';
 import type { PermissionSettings } from '../permissions/types';
 import type { ReviewSettingsInput } from '../review/settings';
 import type { SwarmSettingsInput } from '../swarm/settings';
@@ -64,6 +67,12 @@ export interface ProfileSettings {
   readonly swarm?: SwarmSettingsInput;
   /** Daily review budget, check concurrency, seen dwell and the user-level policy overlay (0040). Absent keys read as the defaults. */
   readonly review?: ReviewSettingsInput;
+  /** The hook transport, the approval wait and loopback for hooks under the CLI's Bash sandbox (0043 section 4.1). Absent keys read as the defaults. */
+  readonly hooks?: HookSettingsInput;
+  /** How long an agent's call waits for an access decision and how long a request stays open (0043 section 4.10). Absent keys read as the defaults. */
+  readonly access?: AccessSettingsInput;
+  /** Retention of done items (0043 section 4.6). Absent keys read as the defaults. */
+  readonly inbox?: InboxSettingsInput;
 }
 
 export interface NewProfileInput {

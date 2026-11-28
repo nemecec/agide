@@ -12,8 +12,8 @@ interface DescriptionRow {
 
 /**
  * Reads the layers of 0021 section 5 for an item: the project (the nearest ancestor folder marked as a
- * project, else its top-level folder) with its summary, and the session with its summary and generation time.
- * Summaries are plain text the card shows with its author mark.
+ * project, else its top-level folder) with its summary, and the session with its name and status. A session
+ * summary belongs to the session's row in the tree (0043 section 4.7) and is not part of an item's context.
  */
 export class ItemContext {
   constructor(
@@ -26,25 +26,9 @@ export class ItemContext {
   forItem(item: InboxItem): ItemContextInfo {
     const project = this.projectOf(item.folderId ?? item.linkNodeId ?? null);
     const info = item.sessionId === undefined ? undefined : this.sessions.get(item.sessionId);
-    const summary =
-      item.sessionId === undefined
-        ? undefined
-        : (this.db.prepare('SELECT summary, generated_at, model FROM session_summaries WHERE session_id = ?').get(item.sessionId) as
-            | { summary: string; generated_at: string; model: string | null }
-            | undefined);
     return {
       ...(project ? { project } : {}),
-      ...(info
-        ? {
-            session: {
-              id: info.id,
-              name: info.title,
-              status: info.status,
-              ...(summary ? { summary: summary.summary, summaryGeneratedAt: summary.generated_at } : {}),
-              ...(summary?.model ? { summaryModel: summary.model } : {}),
-            },
-          }
-        : {}),
+      ...(info ? { session: { id: info.id, name: info.title, status: info.status } } : {}),
     };
   }
 

@@ -22,6 +22,8 @@ import type { NodeId } from '../tree/types';
  *   shell access: the bearer token is in a 0600 file under the session directory, not in the process arguments, but a
  *   same-user process can still read that file, and a session can open the app database directly.
  * - Revoking a grant closes the session's open MCP transports; later requests with its token get 401.
+ * - A tool call's `AbortSignal` (`CommandContext.signal`) ends on `notifications/cancelled` for its id from the same
+ *   session, on the close of its HTTP response, on `revoke`, `abortCalls` and `stop`.
  */
 
 /** Access of one Claude session to the app MCP server. */
@@ -76,6 +78,8 @@ export interface AppMcpServer {
   /** Changes the folder of an existing grant, for example after the session leaf moved. */
   rescope(sessionId: SessionId, folderId: NodeId): void;
   revoke(sessionId: SessionId): void;
+  /** Aborts the signal of every tool call of the session that has not returned, for example when its process exited. */
+  abortCalls(sessionId: SessionId): void;
   /** The `--mcp-config` JSON for a granted session. Throws when the session has no grant. */
   configFor(sessionId: SessionId): McpConfigJson;
 }

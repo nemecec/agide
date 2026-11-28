@@ -170,13 +170,13 @@ describe('user-only commands', () => {
     expect(errorOf(await call('inbox_mark_seen', { itemId: item.id }, ui)), 'user caller').toBe('ok');
   });
 
-  it('snoozes, reopens and returns the context with project and session summaries', async () => {
+  it('snoozes, reopens and returns the context with the project summary and the session name', async () => {
     const item = inbox.post({ folderId: folderA, kind: 'status', source: 'hook', origin: 'x', sessionId: 'sa', message: 'o', textAuthor: 'app' }).item;
     ok(await call('inbox_set_project_summary', { folderId: folderA, summary: 'Billing rewrite' }, ui));
     ok(await call('inbox_set_session_summary', { sessionId: 'sa', summary: 'Fixing the invoice job', model: 'haiku' }, ui));
-    const info = ok<{ project: { name: string; summary: string }; session: { name: string; summary: string; summaryGeneratedAt: string } }>(await call('inbox_context', { itemId: item.id }, ui));
-    expect([info.project.name, info.project.summary, info.session.name, info.session.summary], 'context layers').toEqual(['A', 'Billing rewrite', 'Session A', 'Fixing the invoice job']);
-    expect(info.session.summaryGeneratedAt, 'generation time').toBe('2026-11-17T12:00:00.000Z');
+    const info = ok<{ project: { name: string; summary: string }; session: Record<string, unknown> }>(await call('inbox_context', { itemId: item.id }, ui));
+    expect([info.project.name, info.project.summary, info.session['name']], 'context layers').toEqual(['A', 'Billing rewrite', 'Session A']);
+    expect(Object.keys(info.session).sort(), 'the session layer holds no summary: it shows on the session row in the tree').toEqual(['id', 'name', 'status']);
     expect(ok<ItemRow>(await call('inbox_snooze', { itemId: item.id, until: new Date(time + 60_000).toISOString() }, ui)).state, 'snoozed').toBe('snoozed');
     expect(errorOf(await call('inbox_snooze', { itemId: item.id, until: 'soon' }, ui)), 'bad time').toBe('invalid_input');
   });
